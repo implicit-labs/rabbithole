@@ -221,7 +221,7 @@ body.rail-open .blank-start {
   transform: translateX(-50%);
 }
 
-.blank-start-new-wrap[data-disabled]:hover .blank-start-tooltip {
+.blank-start-new-wrap[data-setup-required]:hover .blank-start-tooltip {
   opacity: 1;
   visibility: visible;
 }
@@ -230,11 +230,6 @@ body.rail-open .blank-start {
   color: var(--fg-bold);
   border-color: var(--border-focus);
   background: var(--bar-bg);
-}
-
-.blank-start-new:disabled {
-  opacity: 0.42;
-  cursor: not-allowed;
 }
 
 .blank-start-setup {

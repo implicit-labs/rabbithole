@@ -471,8 +471,6 @@ function openModelSetup({ trigger, status = "", onReady = null } = {}) {
 
 function syncGenerationSetupUi() {
   const setup = getGenerationSetupStatus();
-  const newButtons = [document.getElementById("blank-start-new"), document.getElementById("t-new")].filter(Boolean);
-  newButtons.forEach((button) => { button.disabled = !setup.ready; });
   const blankNew = document.getElementById("blank-start-new");
   const blankNewWrap = document.getElementById("blank-start-new-wrap");
   const setupButton = document.getElementById("blank-start-setup");
@@ -481,7 +479,7 @@ function syncGenerationSetupUi() {
     if (setup.ready) blankNew.removeAttribute("aria-describedby");
     else blankNew.setAttribute("aria-describedby", "blank-start-status");
   }
-  if (blankNewWrap) blankNewWrap.toggleAttribute("data-disabled", !setup.ready);
+  if (blankNewWrap) blankNewWrap.toggleAttribute("data-setup-required", !setup.ready);
   if (setupButton) setupButton.textContent = setup.ready ? "Model settings" : "Set up AI";
   if (status) status.hidden = setup.ready;
 }

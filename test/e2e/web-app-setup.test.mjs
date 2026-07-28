@@ -289,7 +289,7 @@ async function verifyLandingAndComposer() {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("#blank-start:not([hidden])");
   assert.equal(await page.locator("#composer-modal").isVisible(), false, "first load should wait for model setup instead of opening the composer");
-  assert.equal(await page.locator("#blank-start-new").isDisabled(), true, "New Rabbithole should be disabled before setup");
+  assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "New Rabbithole should remain actionable before setup");
   assert.equal(await page.locator("#blank-start-setup").innerText(), "Set up AI");
   assert.equal(await page.locator(".blank-project-link").count(), 0, "the blank canvas should leave project links to the toolbar menu");
   assert.match(await page.getAttribute("#blank-start-new", "aria-describedby"), /blank-start-status/);
@@ -301,8 +301,8 @@ async function verifyLandingAndComposer() {
     visibility: getComputedStyle(tooltip).visibility,
     transitionDuration: getComputedStyle(tooltip).transitionDuration,
     transitionDelay: getComputedStyle(tooltip).transitionDelay,
-  })), { role: "tooltip", opacity: "1", visibility: "visible", transitionDuration: "0s", transitionDelay: "0s" }, "disabled New Rabbithole guidance should appear immediately as a tooltip");
-  await page.keyboard.press("N");
+  })), { role: "tooltip", opacity: "1", visibility: "visible", transitionDuration: "0s", transitionDelay: "0s" }, "New Rabbithole setup guidance should appear immediately as a tooltip");
+  await page.click("#blank-start-new");
   await page.waitForSelector("#web-settings-popover");
   assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Local", "Custom"]);
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true", "setup should select OpenRouter by default");
@@ -312,10 +312,10 @@ async function verifyLandingAndComposer() {
   await page.locator(".settings-info-trigger").focus();
   assert.equal(await page.locator("#transcribe-model-help").evaluate((tooltip) => getComputedStyle(tooltip).visibility), "visible", "PDF transcription help should appear immediately for keyboard focus");
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
-  assert.equal(await page.locator("#composer-modal").isVisible(), false, "N should open setup, not the composer, before readiness");
+  assert.equal(await page.locator("#composer-modal").isVisible(), false, "New Rabbithole should open setup, not the composer, before readiness");
   await page.fill("#api-key", MOCK_KEY);
   await page.waitForSelector("#api-key-status.valid");
-  assert.equal(await page.locator("#blank-start-new").isDisabled(), true, "a validated key should not bypass explicit setup completion");
+  assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "New Rabbithole should stay actionable while setup awaits explicit completion");
   await page.click("#complete-model-setup");
   await page.waitForSelector("#web-settings-popover", { state: "detached" });
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false);
@@ -636,14 +636,16 @@ async function verifySetupReadinessInvalidation() {
 
   await page.click("#blank-start-setup");
   await page.click('[data-provider="local"]');
-  assert.equal(await page.locator("#blank-start-new").isDisabled(), true, "changing provider should invalidate completed setup");
+  assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "changing provider should keep New Rabbithole actionable");
+  assert.equal(await page.locator("#blank-start-setup").innerText(), "Set up AI", "changing provider should invalidate completed setup");
   await page.click('[data-provider="openrouter"]');
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "returning to the completed provider fingerprint should restore readiness");
 
   await page.click("#model-select");
   await page.waitForSelector(".model-option[data-value='openai/gpt-5']");
   await page.click(".model-option[data-value='openai/gpt-5']");
-  assert.equal(await page.locator("#blank-start-new").isDisabled(), true, "changing model should invalidate completed setup");
+  assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "changing model should keep New Rabbithole actionable");
+  assert.equal(await page.locator("#blank-start-setup").innerText(), "Set up AI", "changing model should invalidate completed setup");
   assert.equal(await page.locator("#complete-model-setup").count(), 1, "model invalidation should immediately offer setup completion");
   await page.click("#model-select");
   await page.waitForSelector(`.model-option[data-value='${MOCK_MODEL}']`);
@@ -670,7 +672,8 @@ async function verifySetupReadinessInvalidation() {
   await localPage.locator(".settings-advanced summary").click();
   await localPage.fill("#provider-base", "http://localhost:12345/v1");
   await localPage.press("#provider-base", "Tab");
-  assert.equal(await localPage.locator("#blank-start-new").isDisabled(), true, "changing endpoint should invalidate completed setup");
+  assert.equal(await localPage.locator("#blank-start-new").isDisabled(), false, "changing endpoint should keep New Rabbithole actionable");
+  assert.equal(await localPage.locator("#blank-start-setup").innerText(), "Set up AI", "changing endpoint should invalidate completed setup");
   await local.close();
 
   console.log("ok web app: provider, endpoint, and model changes invalidate completed setup fingerprints");

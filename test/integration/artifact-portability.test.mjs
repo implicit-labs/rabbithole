@@ -162,7 +162,7 @@ try {
 
 async function assertShellPolish(page) {
   await page.waitForSelector("#blank-start:not([hidden])");
-  assert.equal(await page.locator("#blank-start-new").isDisabled(), true, "new Rabbithole should wait for model setup");
+  assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "new Rabbithole should remain actionable before model setup");
   assert.equal(await page.locator("#taskbar #t-rail").count(), 1, "rail toggle should live in the toolbar");
   assert.equal(await page.locator("#taskbar #t-new").count(), 1, "new Rabbithole button should live in the toolbar");
   assert.equal(await page.locator(".composer-path").count(), 4, "new Rabbithole should present four clear starting paths");
