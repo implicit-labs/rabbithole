@@ -118,6 +118,44 @@ async function runMarkdownFixtures() {
       markdown: "<script>alert(1)</script>",
       assert: assertNoRawHtmlLeak,
     },
+    {
+      name: "single tildes remain literal approximation notation",
+      markdown: "Rates price ~zero cuts (~77% probability); the structural bid is ~1,000t/yr.",
+      assert(html) {
+        assert.equal(count(html, "<del>"), 0);
+        assert(html.includes("~zero cuts"));
+        assert(html.includes("~77% probability"));
+        assert(html.includes("~1,000t/yr"));
+      },
+    },
+    {
+      name: "only double tildes create strikethrough",
+      markdown: [
+        "Keep ~one~ and ~77%, delete ~~this **clearly**~~.",
+        "",
+        "Keep \\~escaped and `~code~`.",
+      ].join("\n"),
+      assert(html) {
+        assert.equal(count(html, "<del>"), 1);
+        assert(html.includes("<del>this <strong>clearly</strong></del>"));
+        assert(html.includes("Keep ~one~ and ~77%"));
+        assert(html.includes("Keep ~escaped and <code>~code~</code>"));
+      },
+    },
+    {
+      name: "distant approximation tildes cannot delete intervening prose",
+      markdown: [
+        "Fed funds futures now price ~zero cuts and probable hikes through 2026",
+        "(a market showed ~77% probability). The structural official-sector bid",
+        "(~1,000t/yr) is not carry-priced.",
+      ].join(" "),
+      assert(html) {
+        assert.equal(count(html, "<del>"), 0);
+        assert(html.includes("~zero cuts"));
+        assert(html.includes("~77% probability"));
+        assert(html.includes("(~1,000t/yr)"));
+      },
+    },
   ];
 
   for (const fixture of fixtures) {
