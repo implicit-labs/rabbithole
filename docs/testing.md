@@ -37,6 +37,7 @@ harness.
 These tests should be fast and should avoid host orchestration.
 
 - `markdown-renderer.test.mjs` protects math delimiters, code highlighting,
+  unambiguous double-tilde strikethrough, literal approximation tildes,
   Markdown composition, safe fallback for malformed or incomplete input, raw HTML
   escaping, and the live/export page assembly needed for offline rendering.
 - `content-blocks.test.mjs` protects durable visual-block identity, registered
