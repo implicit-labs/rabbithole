@@ -245,6 +245,7 @@ async function verifyPublishOutput() {
     await fs.access(path.join(publishDir, file));
   }
   const redirects = await fs.readFile(path.join(publishDir, "_redirects"), "utf8");
+  assert.equal(redirects.split("\n")[0], "https://www.rabbithole.ing/* https://rabbithole.ing/:splat 301", "the www origin should redirect to the canonical origin before path rules");
   assert(redirects.includes("/* /index.html 200"), "publish fallback should make Rabbithole pathnames refreshable");
   assert(redirects.includes("/about /about/ 301"), "the historical homepage should have a canonical trailing-slash route");
   assert(redirects.includes("/install https://github.com/shlokkhemani/rabbithole#quick-start 302"), "the stable install route should lead to canonical GitHub instructions");

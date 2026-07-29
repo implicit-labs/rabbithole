@@ -100,6 +100,7 @@ async function injectAboutIcons(htmlPath) {
 
 function redirectsText() {
   return [
+    "https://www.rabbithole.ing/* https://rabbithole.ing/:splat 301",
     "/about /about/ 301",
     "/install https://github.com/shlokkhemani/rabbithole#quick-start 302",
     "/self-host https://github.com/shlokkhemani/rabbithole#run-the-browser-version-locally 302",

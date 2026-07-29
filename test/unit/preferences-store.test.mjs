@@ -7,11 +7,15 @@ globalThis.localStorage = {
   removeItem: (key) => store.delete(key),
 };
 
+const { getApiKey } = await import("../../src/web/settings/credential-store.js");
 const { loadSettings, saveSettings } = await import("../../src/web/settings/preferences-store.js");
 const { settingsForProvider } = await import("../../src/web/brain/provider-registry.js");
 
 const SETTINGS_KEY = "rh-web-settings";
+const LEGACY_KEY = "rh-web-api-key";
+const KEYS_KEY = "rh-web-api-keys";
 const read = () => JSON.parse(store.get(SETTINGS_KEY) || "{}");
+const readKeys = () => JSON.parse(store.get(KEYS_KEY) || "{}");
 
 /* Settings written before the rename must keep working, pointed at Local. */
 store.set(SETTINGS_KEY, JSON.stringify({
@@ -58,6 +62,23 @@ settings = loadSettings();
 assert.equal(settings.base_url, "http://localhost:11434/v1", "Local restores its own endpoint");
 saveSettings(settingsForProvider("custom_endpoint", loadSettings()));
 assert.equal(loadSettings().base_url, "https://api.example.com/v1", "Local must not overwrite the custom slot");
+
+/* Omitted keys preserve remembered credentials; only an explicit clear deletes them. */
+store.clear();
+store.set(KEYS_KEY, JSON.stringify({ openrouter: "remembered-secret" }));
+saveSettings({ ...settingsForProvider("openrouter", loadSettings()), session_only: false });
+assert.equal(readKeys().openrouter, "remembered-secret");
+saveSettings({ ...loadSettings(), api_key: "", session_only: false });
+assert.equal(readKeys().openrouter, undefined);
+
+/* A plausible key in the legacy slot migrates on the first credential read. */
+store.clear();
+const legacyKey = `sk-or-v1-${"a".repeat(24)}`;
+store.set(LEGACY_KEY, legacyKey);
+const legacySettings = { ...settingsForProvider("openrouter", loadSettings()), session_only: false };
+assert.equal(getApiKey(legacySettings), legacyKey);
+assert.equal(readKeys().openrouter, legacyKey);
+assert.equal(store.has(LEGACY_KEY), false);
 
 /* Corrupt storage falls back to defaults instead of throwing. */
 store.set(SETTINGS_KEY, "not json");
