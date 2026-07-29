@@ -25,7 +25,7 @@ function txDone(tx) {
   });
 }
 
-async function bytesToBlob(bytes, label = "asset bytes", name = "asset.png") {
+function bytesToBlob(bytes, label = "asset bytes", name = "asset.png") {
   let blob;
   if (bytes instanceof Blob) blob = bytes;
   else if (bytes instanceof Uint8Array || bytes instanceof ArrayBuffer) blob = new Blob([bytes]);
@@ -80,7 +80,7 @@ export class IdbStore {
 
   async saveHole(hole, options = {}) {
     assertSafeHoleId(hole?.hole_id);
-    await this.requestPersistenceOnce();
+    this.requestPersistenceOnce();
     const persisted = toPersistedHole(hole, { ...options, cloneExtensions: false });
     const db = await this.open();
     const tx = db.transaction([HOLES, HOLE_SUMMARIES], "readwrite");
@@ -92,13 +92,13 @@ export class IdbStore {
 
   async deleteHole(holeId) {
     const safeHoleId = assertSafeHoleId(holeId);
-    await this.requestPersistenceOnce();
+    this.requestPersistenceOnce();
     const db = await this.open();
     const tx = db.transaction([HOLES, HOLE_SUMMARIES, ASSETS], "readwrite");
     const done = txDone(tx);
     tx.objectStore(HOLES).delete(safeHoleId);
     tx.objectStore(HOLE_SUMMARIES).delete(safeHoleId);
-    await deleteByHoleId(tx.objectStore(ASSETS), safeHoleId, this.IDBKeyRange);
+    await deleteByPrefix(tx.objectStore(ASSETS), safeHoleId, this.IDBKeyRange, "hole_id");
     await done;
   }
 
@@ -130,8 +130,8 @@ export class IdbStore {
   async putAsset(holeId, name, bytes) {
     const safeHoleId = assertSafeHoleId(holeId);
     const safeName = validateAssetName(name);
-    const blob = await bytesToBlob(bytes, "asset bytes", safeName);
-    await this.requestPersistenceOnce();
+    const blob = bytesToBlob(bytes, "asset bytes", safeName);
+    this.requestPersistenceOnce();
     const db = await this.open();
     const tx = db.transaction(ASSETS, "readwrite");
     const done = txDone(tx);
@@ -142,7 +142,7 @@ export class IdbStore {
   async deleteAsset(holeId, name) {
     const safeHoleId = assertSafeHoleId(holeId);
     const safeName = validateAssetName(name);
-    await this.requestPersistenceOnce();
+    this.requestPersistenceOnce();
     const db = await this.open();
     const tx = db.transaction(ASSETS, "readwrite");
     const done = txDone(tx);
@@ -151,7 +151,7 @@ export class IdbStore {
   }
 
   async createStaging() {
-    await this.requestPersistenceOnce();
+    this.requestPersistenceOnce();
     const ingest_id = createIngestId();
     const db = await this.open();
     const tx = db.transaction(META, "readwrite");
@@ -164,8 +164,8 @@ export class IdbStore {
   async putStagedAsset(ingestId, name, bytes) {
     const safeIngestId = assertSafeIngestId(ingestId);
     const safeName = validateAssetName(name);
-    const blob = await bytesToBlob(bytes, "staged asset bytes", safeName);
-    await this.requestPersistenceOnce();
+    const blob = bytesToBlob(bytes, "staged asset bytes", safeName);
+    this.requestPersistenceOnce();
     const db = await this.open();
     const tx = db.transaction(STAGING, "readwrite");
     const done = txDone(tx);
@@ -176,7 +176,7 @@ export class IdbStore {
   async adoptStagedAssets(holeId, ingestId) {
     const safeHoleId = assertSafeHoleId(holeId);
     const safeIngestId = assertSafeIngestId(ingestId);
-    await this.requestPersistenceOnce();
+    this.requestPersistenceOnce();
     const db = await this.open();
     const tx = db.transaction([STAGING, ASSETS, META], "readwrite");
     const done = txDone(tx);
@@ -209,7 +209,7 @@ export class IdbStore {
     await done;
   }
 
-  async open() {
+  open() {
     if (this.dbPromise) return this.dbPromise;
     this.dbPromise = new Promise((resolve, reject) => {
       const request = this.indexedDB.open(this.dbName, DB_VERSION);
@@ -239,7 +239,7 @@ export class IdbStore {
     pending?.then((db) => db.close()).catch(() => {});
   }
 
-  async requestPersistenceOnce() {
+  requestPersistenceOnce() {
     if (this.persistRequested) return;
     this.persistRequested = true;
     try {
@@ -270,10 +270,6 @@ async function getAllForIngest(store, ingestId, IDBKeyRangeCtor) {
     return rows.filter((row) => row.ingest_id === ingestId);
   }
   return requestToPromise(store.getAll(IDBKeyRangeCtor.bound([ingestId, ""], [ingestId, "\uffff"])));
-}
-
-async function deleteByHoleId(store, holeId, IDBKeyRangeCtor) {
-  return deleteByPrefix(store, holeId, IDBKeyRangeCtor, "hole_id");
 }
 
 async function deleteByPrefix(store, prefix, IDBKeyRangeCtor, field) {

@@ -1,12 +1,12 @@
 import { CANVAS_SHELL } from "../core/html/shell.js";
-import { createBrain, providerFor } from "./brain/index.js";
+import { createBrain } from "./brain/openai-compatible.js";
+import { providerFor } from "./brain/provider-registry.js";
 import { detectPdfTranscriptionCapability, pdfTranscriptionCapability } from "./brain/pdf-transcription.js";
 import { isHttpUrl } from "./brain/model-endpoint.js";
 import { loadSettings, saveSettings } from "./settings/preferences-store.js";
 import { getApiKey } from "./settings/credential-store.js";
 import { createSettingsPopover } from "./settings/settings-popover.js";
 import { createOllamaRecoveryDialog } from "./settings/ollama-recovery.js";
-import { setKeyStatus, validateKeyForPreset } from "./settings/key-validation.js";
 import { getGenerationSetupStatus, invalidateGenerationSetup } from "./settings/setup-readiness.js";
 import { installTestSeam } from "./test-seam.js";
 import { IdbStore } from "./store/idb-store.js";
@@ -220,9 +220,6 @@ function initAppChrome() {
       if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
       else currentPdfTranscriptionCapability = pdfTranscriptionCapability(loadSettings());
     },
-    eyeSvg,
-    setKeyStatus,
-    validateKey: validateKeyForPreset,
     openOllamaRecovery: ({ settings, trigger }) => ollamaRecoveryController.open({ settings, trigger }),
   });
   // The gear toggles: the layer stack ignores pointerdown on its own trigger,
@@ -1020,10 +1017,6 @@ function applyRailState() {
   }
 }
 
-function eyeSvg(open) {
-  return iconSvg(open ? "eye-off" : "eye");
-}
-
 function refreshCurrentBrain(settings = loadSettings()) {
   if (!currentHost) return;
   currentHost.brain = brainForSettings(settings);
@@ -1068,11 +1061,7 @@ function handleBranchAuthRequired({ node, error, retry }) {
     purpose: "recovery",
     status: error?.message || "Reconnect your model to continue.",
     focusKey: providerFor(loadSettings().preset).requires_key,
-    onReady: async () => {
-      refreshCurrentBrain();
-      retry?.();
-      showToast({ message: `Retrying "${node?.title || "ask"}".` });
-    },
+    onReady: () => retryBranch(node, retry),
   });
 }
 
@@ -1087,14 +1076,16 @@ function handleBranchProviderFailure({ node, error, retry }) {
       ollamaRecoveryController.open({
         settings: loadSettings(),
         trigger: document.getElementById("t-settings"),
-        onResolved: async () => {
-          refreshCurrentBrain();
-          retry?.();
-          showToast({ message: `Retrying "${node?.title || "ask"}".` });
-        },
+        onResolved: () => retryBranch(node, retry),
       });
     },
   });
+}
+
+function retryBranch(node, retry) {
+  refreshCurrentBrain();
+  retry?.();
+  showToast({ message: `Retrying "${node?.title || "ask"}".` });
 }
 
 async function createLiveAssetData(holeId) {

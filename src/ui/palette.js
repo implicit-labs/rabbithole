@@ -1,14 +1,13 @@
 import {
   goToNode,
-  lensLabel,
   mode,
   motionSourceFromEvent,
   nodes,
   palResults,
   palText,
-  paletteEl,
-  truncate
+  paletteEl
 } from "./core.js";
+import { lensLabel, truncate } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
 import { frameAll, tidy } from "./canvas-view.js";
 import { openDialog } from "./primitives/dialog.js";

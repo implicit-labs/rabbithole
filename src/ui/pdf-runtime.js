@@ -1,3 +1,5 @@
+import { destroyPdfCanvasTarget, resetPdfCanvasTarget } from "../core/pdf-shared.js";
+
 const documents = new Map();
 let workerObjectUrl = null;
 let configured = false;
@@ -114,22 +116,15 @@ function scheduleDestroy(cacheKey, entry, delay) {
 
 function runtimeCanvasFactoryOption() {
   if (typeof process === "undefined" || !process.versions?.node || typeof document === "undefined" || typeof document.createElement !== "function") return {};
-  const RuntimeCanvasFactory = class {
+  return { canvasFactory: {
     create(width, height) {
       if (!(width > 0 && height > 0)) throw new Error("Canvas dimensions must be positive.");
       const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
       return { canvas, context: canvas.getContext("2d") };
-    }
-    reset(target, width, height) {
-      if (!target?.canvas) throw new Error("Canvas target is missing.");
-      target.canvas.width = width; target.canvas.height = height;
-    }
-    destroy(target) {
-      if (!target?.canvas) return;
-      target.canvas.width = 0; target.canvas.height = 0; target.canvas = null; target.context = null;
-    }
-  };
-  return { canvasFactory: new RuntimeCanvasFactory() };
+    },
+    reset: resetPdfCanvasTarget,
+    destroy: destroyPdfCanvasTarget
+  } };
 }
 
 export function renderPdfTextLayer(params) {

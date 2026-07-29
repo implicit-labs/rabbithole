@@ -81,6 +81,7 @@ export class RabbitHoleSession {
     this.server = null;
     this.url = null;
     this.closed = false;
+    this.closePromise = null;
 
     this.queue = []; // agent-facing events awaiting consumption
     this.waiters = []; // FIFO of {resolve, cleanup} for blocked waitForEvent() calls
@@ -101,16 +102,13 @@ export class RabbitHoleSession {
     this.lastOutboundEventId = 0;
 
     this.timeoutHandle = null;
-    this.saveTimer = null;
     this.saveChain = createSaveChain({
       debounceMs: SAVE_DEBOUNCE_MS,
-      onTimerChange: (timer) => { this.saveTimer = timer; },
       save: () => {
         const snapshot = this.toHole();
         return () => defaultFsStore.saveHole(snapshot).catch((err) => logError(`Save failed: ${err.message}`));
       },
     });
-    this.savingChain = Promise.resolve();
     this.shutdownScheduled = false;
 
     // Saved asks: questions the human asked while no agent was listening are
@@ -190,7 +188,7 @@ export class RabbitHoleSession {
   }
 
   close(reason = "session_closed") {
-    if (this.closed) return;
+    if (this.closed) return this.closePromise;
     for (const request of this.convertRequests.values()) if (request.markdown) this.restoreNodeConversion(request.node_id);
     // Only this session's own crops — a successor session for the same hole may
     // already be writing fresh ones under different request ids.
@@ -204,7 +202,7 @@ export class RabbitHoleSession {
     this.clearAnswerWatchdog();
     this.clearRearmDetach();
     this.clearDisconnectClose();
-    this.flushSave();
+    this.closePromise = this.flushSave();
 
     this.broadcast({ type: "session_closed", reason });
 
@@ -219,7 +217,7 @@ export class RabbitHoleSession {
       waiter.resolve({ status: "session_closed", session_id: this.id });
     }
 
-    if (this.shutdownScheduled) return;
+    if (this.shutdownScheduled) return this.closePromise;
     this.shutdownScheduled = true;
     setTimeout(() => {
       for (const client of this.sseClients) {
@@ -242,6 +240,7 @@ export class RabbitHoleSession {
         },
       });
     }, 0);
+    return this.closePromise;
   }
 
   // ---- agent-facing event queue ------------------------------------------
@@ -460,8 +459,7 @@ export class RabbitHoleSession {
   }
 
   flushSave() {
-    this.savingChain = this.saveChain.flush();
-    return this.savingChain;
+    return this.saveChain.flush();
   }
 
   // ---- the answer path (agent -> server -> browser) -----------------------

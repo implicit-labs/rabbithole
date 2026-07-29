@@ -3,7 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { PDF_AGENT_CROP_MAX_LONG_EDGE, expandPdfBounds, pdfAnchorBounds } from "../core/pdf-shared.js";
+import {
+  PDF_AGENT_CROP_MAX_LONG_EDGE,
+  destroyPdfCanvasTarget,
+  expandPdfBounds,
+  normalizedRectToPdfBounds,
+  pdfAnchorBounds,
+  resetPdfCanvasTarget,
+  viewportBounds
+} from "../core/pdf-shared.js";
 import { ensureAssetDir, resolveAsset } from "./fs-store.js";
 
 const require = createRequire(import.meta.url);
@@ -56,14 +64,8 @@ function napiCanvasFactory(canvas) {
       const surface = canvas.createCanvas(width, height);
       return { canvas: surface, context: surface.getContext("2d") };
     },
-    reset(target, width, height) {
-      if (!target?.canvas) throw new Error("Canvas target is missing.");
-      target.canvas.width = width; target.canvas.height = height;
-    },
-    destroy(target) {
-      if (!target?.canvas) return;
-      target.canvas.width = 0; target.canvas.height = 0; target.canvas = null; target.context = null;
-    },
+    reset: resetPdfCanvasTarget,
+    destroy: destroyPdfCanvasTarget,
   };
 }
 
@@ -131,20 +133,4 @@ async function renderPdfRegion({ source, pageNumber, bounds = null, normalizedRe
   } finally {
     page?.cleanup?.(); lease.release();
   }
-}
-
-function normalizedRectToPdfBounds(viewport, rect) {
-  const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-  const x0 = clamp(rect?.x) * viewport.width, y0 = clamp(rect?.y) * viewport.height;
-  const x1 = Math.min(1, clamp(rect?.x) + clamp(rect?.w)) * viewport.width;
-  const y1 = Math.min(1, clamp(rect?.y) + clamp(rect?.h)) * viewport.height;
-  const points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => viewport.convertToPdfPoint(x, y));
-  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-}
-
-function viewportBounds(viewport, bounds) {
-  const points = [[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]]].map(([x, y]) => viewport.convertToViewportPoint(x, y));
-  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }

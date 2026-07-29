@@ -1,4 +1,10 @@
-import { PDF_AGENT_CROP_MAX_LONG_EDGE, expandPdfBounds, pdfAnchorBounds } from "../core/pdf-shared.js";
+import {
+  PDF_AGENT_CROP_MAX_LONG_EDGE,
+  expandPdfBounds,
+  normalizedRectToPdfBounds,
+  pdfAnchorBounds,
+  viewportBounds
+} from "../core/pdf-shared.js";
 import { acquirePdfDocument } from "../ui/pdf-runtime.js";
 
 export async function cropPdfSourceToDataUrl(blob, options) {
@@ -32,22 +38,6 @@ export async function cropPdfSourceToBlob(blob, { sourceKey, pageNumber, anchor 
   } finally {
     page?.cleanup?.(); lease.release();
   }
-}
-
-function normalizedRectToPdfBounds(viewport, rect) {
-  const clamp = (value) => Math.max(0, Math.min(1, Number(value) || 0));
-  const x0 = clamp(rect?.x) * viewport.width, y0 = clamp(rect?.y) * viewport.height;
-  const x1 = Math.min(1, clamp(rect?.x) + clamp(rect?.w)) * viewport.width;
-  const y1 = Math.min(1, clamp(rect?.y) + clamp(rect?.h)) * viewport.height;
-  const points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => viewport.convertToPdfPoint(x, y));
-  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-}
-
-function viewportBounds(viewport, bounds) {
-  const points = [[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]]].map(([x, y]) => viewport.convertToViewportPoint(x, y));
-  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
 function createCanvas(width, height) {

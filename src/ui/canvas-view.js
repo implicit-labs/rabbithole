@@ -6,9 +6,6 @@ import {
   MIN_SCALE,
   READER_BASE,
   SVGNS,
-  TREE_PARENT_GAP,
-  TREE_STACK_GAP,
-  boundsOverlap,
   buildDocContent,
   canvasBuilt,
   canvasFramed,
@@ -18,14 +15,9 @@ import {
   edgesSvg,
   fontPx,
   flashHint,
-  isFollowup,
-  isSelectionBranch,
   isVisible,
-  lensLabel,
   mode,
   motionSourceFromEvent,
-  nodeBounds,
-  nodeOrder,
   nodes,
   readerMain,
   registerCoreHooks,
@@ -34,15 +26,28 @@ import {
   setCanvasFramed,
   setModeValue,
   setViewAdjusted,
-  shiftBounds,
   shouldReduceMotion,
   sessionPhase,
-  unionBounds,
   view,
   viewport,
   world,
   zoomLabel
 } from "./core.js";
+import {
+  TREE_PARENT_GAP,
+  TREE_STACK_GAP,
+  boundsOverlap,
+  nodeBounds,
+  nodeOrder,
+  shiftBounds,
+  unionBounds
+} from "../core/layout.js";
+import {
+  BRANCH_FOLLOWUP,
+  BRANCH_SELECTION,
+  branchTypeOfNode,
+  lensLabel
+} from "../core/model.js";
 import { openNode } from "./reader.js";
 import { applyChildHighlights } from "./text-marks.js";
 import { easeInOutMotion, easeOutMotion } from "./easing.js";
@@ -53,6 +58,14 @@ import { createModuleLifecycle } from "./lifecycle.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
 import { applyComposerState } from "./composer-state.js";
 import { ENTER_SEND_HINT, isSubmitEnter } from "./input-intent.js";
+
+function isSelectionBranch(node) {
+  return branchTypeOfNode(node) === BRANCH_SELECTION;
+}
+
+function isFollowup(node) {
+  return branchTypeOfNode(node) === BRANCH_FOLLOWUP;
+}
 
 function defaultCanvasHooks(){
   return {
@@ -80,8 +93,7 @@ export function initCanvasView(){
   if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(scheduleEdges);
   registerCoreHooks({
     ensureCanvasBuilt: ensureCanvasBuilt,
-    diveToNode: diveToNode,
-    effH: effH
+    diveToNode: diveToNode
   });
   canvasScope.listen(world, "mouseover", onWorldMouseOver);
   canvasScope.listen(world, "mouseout", onWorldMouseOut);
@@ -125,8 +137,7 @@ function cleanupCanvasView(resetHooks){
   if (resetHooks) {
     registerCoreHooks({
       ensureCanvasBuilt: function(){},
-      diveToNode: function(){},
-      effH: function(n){ return n.h; }
+      diveToNode: function(){}
     });
   }
 }
@@ -892,7 +903,7 @@ export function tidy(source){
     function place(node, x, y){
       visited[node.id] = true;
       node.x = x; node.y = y;
-      var bounds = nodeBounds(node);
+      var bounds = nodeBounds(node, { effH: effH });
       if (node.collapsed) return bounds;
 
       var kids = childrenOf(node.id).sort(nodeOrder);

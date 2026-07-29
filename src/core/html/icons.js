@@ -57,7 +57,6 @@ export function iconSvg(name, options = {}) {
   return `<svg${dimensions} ${definition.attrs} focusable="false" aria-hidden="true">${definition.body}</svg>`;
 }
 
-export const BUNNY_MARK_SHAPES = BUNNY_SHAPES;
 export const BUNNY_MARK_SVG = iconSvg("bunny");
 
 export function faviconSvg() {

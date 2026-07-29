@@ -42,7 +42,7 @@ export function parsePortableImportPayload(text, kind = "rabbithole") {
     const label = kind === "snapshot" ? "snapshot payload" : ".rabbithole";
     throw new Error(`Import failed: ${label} must be valid JSON.`);
   }
-  preflightPortableImportCaps(parsed);
+  validatePortableImportCaps(parsed);
   const projection = validatePortableProjection(parsed);
   return projection;
 }
@@ -54,21 +54,16 @@ function assertPayloadTextSize(text) {
   }
 }
 
-/** @param {import("./contracts/artifact.js").PortableArtifact} projection */
+/** @param {unknown} projection */
 export function validatePortableImportCaps(projection) {
-  return preflightPortableImportCaps(projection);
-}
-
-/** @param {unknown} raw */
-function preflightPortableImportCaps(raw) {
-  const projection = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? /** @type {Record<string, any>} */ (raw)
+  const checked = projection && typeof projection === "object" && !Array.isArray(projection)
+    ? /** @type {Record<string, any>} */ (projection)
     : {};
-  if (Array.isArray(projection.hole?.nodes) && projection.hole.nodes.length > MAX_IMPORT_NODES) {
+  if (Array.isArray(checked.hole?.nodes) && checked.hole.nodes.length > MAX_IMPORT_NODES) {
     throw new Error("Import failed: portable payload exceeds 5,000 nodes.");
   }
-  const assets = projection.assets && typeof projection.assets === "object" && !Array.isArray(projection.assets)
-    ? Object.entries(projection.assets)
+  const assets = checked.assets && typeof checked.assets === "object" && !Array.isArray(checked.assets)
+    ? Object.entries(checked.assets)
     : [];
   if (assets.length > MAX_IMPORT_ASSETS) throw new Error("Import failed: portable payload exceeds 200 assets.");
   let aggregate = 0;
@@ -83,7 +78,7 @@ function preflightPortableImportCaps(raw) {
       throw new Error("Import failed: decoded assets exceed 140 MB aggregate.");
     }
   }
-  return projection;
+  return checked;
 }
 
 /** @param {string} encoded */

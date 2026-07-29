@@ -42,7 +42,6 @@ const INLINE_DOLLAR = "$";
 const DISPLAY_DOLLARS = "$$";
 const BACKSLASH_OPEN_INLINE = "\\(";
 const BACKSLASH_CLOSE_INLINE = "\\)";
-const BACKSLASH_OPEN_DISPLAY = "\\[";
 const BACKSLASH_CLOSE_DISPLAY = "\\]";
 const TRAILING_NEWLINE = /\n$/;
 const BLOCK_MATH_START = /(?:^|\n) {0,3}(?:\$\$(?!\$)|\\\[)/;

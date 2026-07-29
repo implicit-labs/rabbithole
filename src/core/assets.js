@@ -92,7 +92,7 @@ export function resolveAssetMarkdownImageUrl(raw, { assetNames = null, resolveAs
 }
 
 /** @param {unknown} markdown */
-export function extractAssetRefsFromMarkdown(markdown) {
+function extractAssetRefsFromMarkdown(markdown) {
   const refs = new Set();
   for (const match of String(markdown ?? "").matchAll(ASSET_REF_RE)) {
     const name = match[1].toLowerCase();
@@ -120,15 +120,4 @@ export function extractNodeAssetRefs(node) {
 /** @param {unknown} name */
 export function maxAssetBytes(name) {
   return getAssetExtension(name) === "pdf" ? MAX_PDF_SOURCE_BYTES : MAX_ASSET_BYTES;
-}
-
-/** Deterministic durable name for a region crop owned by a branch node. */
-/** @param {unknown} nodeId */
-export function cropAssetNameForNode(nodeId) {
-  const safe = String(nodeId ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 96) || "selection";
-  return `crop-${safe}.jpg`;
 }

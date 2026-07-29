@@ -51,7 +51,7 @@ function assetDir(holeId) {
   return path.join(assetsDir(), assertSafeHoleId(holeId));
 }
 
-async function ensureAssetDir(holeId) {
+export async function ensureAssetDir(holeId) {
   const dir = assetDir(holeId);
   await fs.mkdir(dir, { recursive: true });
   return dir;
@@ -343,7 +343,6 @@ async function deleteHoleAssets(holeId) {
   await fs.rm(assetDir(holeId), { recursive: true, force: true });
 }
 
-export { ensureAssetDir };
 
 const holeSaveQueues = new Map();
 

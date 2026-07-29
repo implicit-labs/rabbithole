@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { openRabbithole } from "../../src/node/index.js";
+import { openRabbithole } from "../../src/node/rabbithole.js";
 import { ingestPdfDocument } from "../../src/node/pdf-ingest.js";
 import { closeAllSessions, getSession } from "../../src/node/sessions.js";
 import { defaultFsStore, resolveAsset } from "../../src/node/fs-store.js";

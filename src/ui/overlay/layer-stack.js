@@ -1,6 +1,6 @@
 var layers = [];
 
-function focus(element) {
+export function focusElement(element) {
   if (!element || !element.isConnected || typeof element.focus !== "function") return false;
   try { element.focus({ preventScroll: true }); } catch (error) { try { element.focus(); } catch (_error) { return false; } }
   return true;
@@ -21,7 +21,7 @@ function onPointerdown(event) {
   layer.onClose("outside-pointer");
   if (layer.restoreFocus) layer.focusTimer = setTimeout(function(){
     layer.focusTimer = 0;
-    if (!focus(layer.trigger)) focus(layer.previousFocus);
+    if (!focusElement(layer.trigger)) focusElement(layer.previousFocus);
   }, 0);
 }
 function syncListeners() {
@@ -43,7 +43,7 @@ export function registerLayer(options) {
     if (!layers.length) syncListeners();
     if (layer.focusTimer){ clearTimeout(layer.focusTimer); layer.focusTimer = 0; }
     if (layer.restoreFocus && (!settings || settings.restoreFocus !== false)) {
-      if (!focus(layer.trigger)) focus(layer.previousFocus);
+      if (!focusElement(layer.trigger)) focusElement(layer.previousFocus);
     }
   };
 }

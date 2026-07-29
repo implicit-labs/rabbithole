@@ -6,7 +6,8 @@ import { GenerationRun } from "../../core/generation-run.js";
 import { applyPersistedBrowserEvent, assetsOrphanedByDeletion, buildNodeAnsweredEvent, createSaveChain, dispatchBrowserEvent } from "../../core/hole-host.js";
 import { randomId } from "../../core/utils.js";
 import { createWhimsicalHoleId } from "../hole-id.js";
-import { ProviderError, fallbackTitleForNode, normalizeProviderError } from "../brain/index.js";
+import { ProviderError, normalizeProviderError } from "../brain/errors.js";
+import { fallbackTitleForNode } from "../brain/title-sentinel.js";
 import { MAX_PDF_FIGURE_ASSET_BYTES, normalizePdfExtension, parseFigureRefs, rewriteFigureRefs } from "../../core/pdf-shared.js";
 import { cropPdfSourceToBlob, cropPdfSourceToDataUrl } from "../pdf-crop.js";
 
@@ -617,7 +618,7 @@ export class DirectRabbitholeHost {
     this.saveChain.schedule();
   }
 
-  async flushSave() {
+  flushSave() {
     if (this.disposed) return this.savingChain;
     this.savingChain = this.saveChain.flush();
     return this.savingChain;

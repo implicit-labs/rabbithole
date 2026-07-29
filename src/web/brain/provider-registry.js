@@ -67,7 +67,7 @@ export function settingsForProvider(id, current = {}) {
   };
 }
 
-export function providerDefaults() {
+function providerDefaults() {
   return Object.fromEntries(Object.values(PROVIDERS).map((provider) => [provider.id, settingsSlot(provider)]));
 }
 

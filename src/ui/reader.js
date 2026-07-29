@@ -3,16 +3,12 @@ import {
   MAX_FS,
   MIN_FS,
   READER_BASE,
-  anchorStart,
   breadcrumbEl,
   buildDocContent,
   childrenOf,
   currentNodeId,
   fontPx,
-  isFollowup,
   goToNode,
-  lensBadgeHtml,
-  lineageNodes,
   mode,
   motionSourceFromEvent,
   nodes,
@@ -20,16 +16,34 @@ import {
   readerMain,
   setCurrentNodeId,
   setModeValue,
-  truncate,
   world,
   sessionPhase
 } from "./core.js";
+import {
+  BRANCH_FOLLOWUP,
+  branchTypeOfNode,
+  lensLabel,
+  lineageNodesFromMap,
+  truncate
+} from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
 import { mountVisuals } from "./visuals.js";
 import { applyChildHighlights } from "./text-marks.js";
 import { buildOriginCrop } from "./origin-provenance.js";
+
+function anchorStart(node) {
+  return node.origin?.anchor?.offset_start ?? 1e9;
+}
+
+function isFollowup(node) {
+  return branchTypeOfNode(node) === BRANCH_FOLLOWUP;
+}
+
+function lensBadgeHtml(key) {
+  return '<span class="lens-badge">' + escapeHtml(lensLabel(key)) + "</span>";
+}
 
 function defaultReaderHooks(){
   return {
@@ -86,7 +100,7 @@ export function openNode(id){
   }
 
 export function renderBreadcrumb(){
-    var path = lineageNodes(currentNodeId);
+    var path = lineageNodesFromMap(nodes, currentNodeId);
     var fragment = document.createDocumentFragment();
     path.forEach(function(n, i){
       var crumb = breadcrumbNodes[n.id];
@@ -374,7 +388,7 @@ function mountNoteVisuals(panes){
     for (var i = 0; i < panes.length; i++){
       var key = "margin-notes:" + panes[i].node.id;
       mountVisuals(panes[i].pane, key);
-      if (typeof readerLifecycle.hooks.mountDocImages === "function") readerLifecycle.hooks.mountDocImages(panes[i].pane, panes[i].node, null, key);
+      if (typeof readerLifecycle.hooks.mountDocImages === "function") readerLifecycle.hooks.mountDocImages(panes[i].pane, key);
     }
   }
 function pendingStatusHtml(k){

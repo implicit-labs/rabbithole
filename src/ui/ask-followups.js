@@ -1,8 +1,4 @@
 import {
-  BRANCH_FOLLOWUP,
-  BRANCH_SELECTION,
-  DEFAULT_CHILD,
-  LENSES,
   ask,
   askGo,
   askText,
@@ -15,23 +11,29 @@ import {
   currentNodeId,
   flashHint,
   frozen,
-  lensLabel,
   mode,
   motionSourceFromEvent,
   nextOrder,
-  nodeOrder,
   nodes,
   readerMain,
   registerNode,
   shouldReduceMotion,
   sessionPhase,
-  truncate,
   uuid
 } from "./core.js";
 import {
+  DEFAULT_CHILD,
+  nodeOrder,
   placeChild as sharedPlaceChild,
   subtreeBounds as sharedSubtreeBounds
 } from "../core/layout.js";
+import {
+  BRANCH_FOLLOWUP,
+  BRANCH_SELECTION,
+  LENSES,
+  lensLabel,
+  truncate
+} from "../core/model.js";
 import {
   autoGrowEl,
   createNodeEl,

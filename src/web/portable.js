@@ -127,14 +127,10 @@ function removeCredentialShapedKeys(value) {
   for (const child of Object.values(value)) removeCredentialShapedKeys(child);
 }
 
-async function freshHoleId(store, mintHoleId = newHoleId) {
+async function freshHoleId(store, mintHoleId = createWhimsicalHoleId) {
   for (let i = 0; i < 20; i += 1) {
     const id = mintHoleId();
     if (!(await store.loadHole(id))) return id;
   }
   throw new Error("Import failed: could not generate a fresh hole id.");
-}
-
-function newHoleId() {
-  return createWhimsicalHoleId();
 }

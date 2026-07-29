@@ -1,7 +1,22 @@
-import { buildAnswerMessages, buildAuthorMessages, buildExplainerMessages, buildTranscribeMessages } from "../../core/prompts/index.js";
+import { buildAnswerMessages } from "../../core/prompts/answering-v1.js";
+import { buildAuthorMessages } from "../../core/prompts/authoring-v1.js";
+import { buildExplainerMessages } from "../../core/prompts/explainer-v1.js";
+import { buildTranscribeMessages } from "../../core/prompts/transcribe-v1.js";
 import { ProviderError, normalizeProviderError } from "./errors.js";
 import { addressSpaceHint } from "./model-endpoint.js";
 import { adaptBranchGeneration, adaptTextGeneration } from "./generation-events.js";
+import { providerFor } from "./provider-registry.js";
+
+export function createBrain(settings, apiKey) {
+  const preset = providerFor(settings?.preset);
+  const model = settings?.model || preset.model;
+  return new OpenAICompatibleBrain({
+    baseUrl: settings?.base_url || preset.base_url,
+    apiKey,
+    model,
+    transcribeModel: settings?.transcribe_model || preset.transcribe_model || model,
+  });
+}
 
 export class OpenAICompatibleBrain {
   constructor({ baseUrl, apiKey, model, transcribeModel, extraHeaders = {}, title = "Rabbithole" } = {}) {

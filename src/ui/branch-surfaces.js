@@ -7,8 +7,6 @@ import {
   frozen,
   closed,
   goToNode,
-  lensLabel,
-  lineageNodes,
   mode,
   motionSourceFromEvent,
   nodes,
@@ -16,9 +14,9 @@ import {
   rootId,
   setCurrentNodeId,
   setSurfaceOrigin,
-  shareMenu,
-  truncate
+  shareMenu
 } from "./core.js";
+import { lensLabel, lineageNodesFromMap, truncate } from "../core/model.js";
 import { sendFollowup } from "./ask-followups.js";
 import {
   clearEdgeHighlight,
@@ -185,7 +183,7 @@ export function closeShare(settings){
     return h + " " + (n.title || "Untitled") + "\n\n" + originLine(n) + body + "\n";
   }
   function trailMarkdown(id){
-    var path = lineageNodes(id), parts = [];
+    var path = lineageNodesFromMap(nodes, id), parts = [];
     for (var i = 0; i < path.length; i++) parts.push(docMarkdown(path[i], i));
     return parts.join("\n---\n\n");
   }
@@ -197,7 +195,7 @@ export function closeShare(settings){
   }
   function onCopyTrail(){
     closeShare();
-    var path = lineageNodes(currentNodeId);
+    var path = lineageNodesFromMap(nodes, currentNodeId);
     copyText(trailMarkdown(currentNodeId), path.length === 1
       ? "Copied this document as Markdown"
       : "Copied the trail — " + path.length + " documents");

@@ -1,5 +1,4 @@
 import {
-  DEFAULT_CHILD,
   agentReason,
   bannerNotice,
   buildLoading,
@@ -26,6 +25,7 @@ import {
   view,
   viewAdjusted
 } from "./core.js";
+import { DEFAULT_CHILD } from "../core/layout.js";
 import {
   renderBreadcrumb,
   renderReaderBody,
@@ -138,11 +138,7 @@ export function connectSse(){
     if (transportAdapter && typeof transportAdapter.connect === "function") {
       webTransport = transportAdapter.connect({
         after: hydration.last_event_id || 0,
-        onOpen: function(){
-          if (!isCurrentTransport(epoch)) return;
-          resetSseFails();
-          if (connLost){ setConnLost(false); refreshStatus(); }
-        },
+        onOpen: function(){ handleTransportOpen(epoch); },
         onMessage: function(msg){ if (isCurrentTransport(epoch)) handleServer(msg); },
         onError: function(){
           if (!isCurrentTransport(epoch) || closed) return;
@@ -155,11 +151,7 @@ export function connectSse(){
     // this connect is replayed (the first connect has no Last-Event-ID header).
     var after = hydration.last_event_id || 0;
     sse = new EventSource("/sse?after=" + after);
-    sse.onopen = function(){
-      if (!isCurrentTransport(epoch)) return;
-      resetSseFails();
-      if (connLost){ setConnLost(false); refreshStatus(); }
-    };
+    sse.onopen = function(){ handleTransportOpen(epoch); };
     sse.onmessage = function(ev){ if (!isCurrentTransport(epoch)) return; try { handleServer(JSON.parse(ev.data)); } catch(e){} };
     // EventSource retries forever on its own; after a couple of failures probe
     // the server once — if it's gone (agent process died), say so instead of
@@ -180,6 +172,11 @@ export function connectSse(){
       }
     };
     return sse;
+  }
+  function handleTransportOpen(epoch){
+    if (!isCurrentTransport(epoch)) return;
+    resetSseFails();
+    if (connLost){ setConnLost(false); refreshStatus(); }
   }
   var streamRenderRaf = 0;
   var streamRenderQueue = {};

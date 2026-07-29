@@ -1,5 +1,6 @@
 import katex from "katex";
-import { createMarkdownRenderer, encodeBase64Utf8 } from "../../src/core/markdown.js";
+import { encodeBase64Utf8 } from "../../src/core/markdown.js";
+import { createMarkdownRenderer } from "../../src/core/markdown-renderer.js";
 import { OpenAICompatibleBrain } from "../../src/web/brain/openai-compatible.js";
 
 const REQUIRED_ENV = ["EVAL_BASE_URL", "EVAL_API_KEY", "EVAL_MODEL"];

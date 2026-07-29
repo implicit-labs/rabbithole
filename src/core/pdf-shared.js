@@ -1,8 +1,8 @@
 export const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const DEFAULT_PAGE_CAP = 40;
-export const PDF_RENDER_VERSION = 2;
+const PDF_RENDER_VERSION = 2;
 export const PDF_AGENT_CROP_MAX_LONG_EDGE = 3072;
-export const PDF_AGENT_CROP_PADDING_POINTS = 12;
+const PDF_AGENT_CROP_PADDING_POINTS = 12;
 
 const FIGURE_REF_RE = /!\[([^\]\n]*)\]\(figure:page-(\d{1,6}):([^\s)]+)\)/g;
 
@@ -293,12 +293,6 @@ function orderLinesForReading(lines, pageWidth) {
   return ordered;
 }
 
-/** @param {{ items?: PdfTextItem[] } | null | undefined} content @param {number} pageWidth */
-function extractTextFromPdfContent(content, pageWidth) {
-  const lines = orderLinesForReading(clusterTextLines(content?.items || []), pageWidth);
-  return lines.map((line) => line.text).join("\n");
-}
-
 /** @param {any} page */
 export async function extractPdfPageLines(page) {
   const content = await page.getTextContent({ includeMarkedContent: false });
@@ -431,6 +425,40 @@ export function expandPdfBounds(bounds, pageView, padding = PDF_AGENT_CROP_PADDI
   return expanded[2] > expanded[0] && expanded[3] > expanded[1] ? expanded : null;
 }
 
+/** @param {any} viewport @param {{ x?: unknown, y?: unknown, w?: unknown, h?: unknown }} rect */
+export function normalizedRectToPdfBounds(viewport, rect) {
+  const clamp = (/** @type {unknown} */ value) => Math.max(0, Math.min(1, Number(value) || 0));
+  const x0 = clamp(rect?.x) * viewport.width, y0 = clamp(rect?.y) * viewport.height;
+  const x1 = Math.min(1, clamp(rect?.x) + clamp(rect?.w)) * viewport.width;
+  const y1 = Math.min(1, clamp(rect?.y) + clamp(rect?.h)) * viewport.height;
+  const points = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => viewport.convertToPdfPoint(x, y));
+  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+/** @param {any} viewport @param {number[]} bounds */
+export function viewportBounds(viewport, bounds) {
+  const points = [[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]]].map(([x, y]) => viewport.convertToViewportPoint(x, y));
+  const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+/** @param {{ canvas?: { width: number, height: number } | null }} target @param {number} width @param {number} height */
+export function resetPdfCanvasTarget(target, width, height) {
+  if (!target?.canvas) throw new Error("Canvas target is missing.");
+  target.canvas.width = width;
+  target.canvas.height = height;
+}
+
+/** @param {{ canvas?: { width: number, height: number } | null, context?: unknown }} target */
+export function destroyPdfCanvasTarget(target) {
+  if (!target?.canvas) return;
+  target.canvas.width = 0;
+  target.canvas.height = 0;
+  target.canvas = null;
+  target.context = null;
+}
+
 /** @param {string} markdown */
 function linePositions(markdown) {
   const positions = [];
@@ -442,7 +470,6 @@ function linePositions(markdown) {
   return positions;
 }
 
-/** @param {unknown} value */
 /** @param {unknown} value */
 function cleanHeading(value) {
   return String(value || "PDF Document").replace(/\s+/g, " ").replace(/^#+\s*/, "").trim() || "PDF Document";
