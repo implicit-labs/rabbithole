@@ -28,6 +28,15 @@ function copyText(text){
   return Promise.resolve();
 }
 
+function setCopied(button, copied){
+  var copyIcon = button.querySelector(".ic-copy");
+  var checkIcon = button.querySelector(".ic-check");
+  button.classList.toggle("copied", copied);
+  button.setAttribute("aria-label", copied ? "Copied" : "Copy code");
+  if (copyIcon) copyIcon.hidden = copied;
+  if (checkIcon) checkIcon.hidden = !copied;
+}
+
 function onCopyClick(e){
   e.preventDefault();
   e.stopPropagation();
@@ -36,12 +45,10 @@ function onCopyClick(e){
   if (!code) return;
   copyText(code.textContent.replace(/\n$/, "")).then(function(){
     if (!button.isConnected) return;
-    button.classList.add("copied");
-    button.setAttribute("aria-label", "Copied");
+    setCopied(button, true);
     clearTimeout(button._rhCopiedTimer);
     button._rhCopiedTimer = setTimeout(function(){
-      button.classList.remove("copied");
-      button.setAttribute("aria-label", "Copy code");
+      setCopied(button, false);
     }, COPIED_MS);
   });
 }
@@ -65,7 +72,7 @@ export function mountCodeCopy(root){
     button.setAttribute("aria-label", "Copy code");
     button.title = "Copy";
     button.innerHTML = '<span class="ic-copy">' + iconSvg("copy", { size: 14 }) + '</span>' +
-      '<span class="ic-check">' + iconSvg("check", { size: 14 }) + '</span>';
+      '<span class="ic-check" hidden>' + iconSvg("check", { size: 14 }) + '</span>';
     button.addEventListener("click", onCopyClick);
     button.addEventListener("dblclick", stopBubble);
     button.addEventListener("pointerdown", stopBubble);

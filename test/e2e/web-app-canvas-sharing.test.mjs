@@ -4,6 +4,7 @@ import path from "node:path";
 import { webkit } from "playwright";
 import { extractSnapshotPayload } from "../../src/core/portable-import.js";
 import { serializeForInlineScript } from "../../src/core/utils.js";
+import { assertCodeCopy } from "../support/code-copy.mjs";
 import { MOCK_MODEL, corsHeaders, routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { ROOT, bootWebApp } from "../support/web-app-harness.mjs";
 
@@ -955,13 +956,14 @@ async function verifyCanvasBranching() {
   await page.keyboard.press("Escape");
   await page.waitForSelector("#web-settings-popover", { state: "detached" });
 
+  const smokeCode = "console.log('math branch');";
   const markdown = [
     "# Web Smoke",
     "",
     "Euler identity $e^{i\\pi}+1=0$ ties exponentials to geometry.",
     "",
     "```js",
-    "console.log('math branch');",
+    smokeCode,
     "```",
     "",
     "```show",
@@ -979,6 +981,7 @@ async function verifyCanvasBranching() {
   await page.waitForSelector(".node .katex");
   await page.waitForSelector(".node .hljs");
   await page.waitForSelector(".node .viz-show");
+  await assertCodeCopy(page, { scope: ".node.root .doc-content", rawCode: smokeCode, label: "web Canvas" });
 
   const rootDrawer = page.locator(".node.root .nc-handle");
   const rootDrawerId = await rootDrawer.getAttribute("aria-controls");
@@ -1056,6 +1059,7 @@ async function verifyCanvasBranching() {
   });
   assert.equal(readerReadingPosition.block, canvasReadingPosition.block, "canvas-to-reader should preserve the visible content block");
   assert(Math.abs(readerReadingPosition.offset - canvasReadingPosition.offset) < 0.2, `canvas-to-reader should preserve the position within the visible block: ${JSON.stringify({ canvasReadingPosition, readerReadingPosition })}`);
+  await assertCodeCopy(page, { scope: "#reader-main .doc-content", rawCode: smokeCode, hover: false, label: "web Reader" });
   await page.focus("#r-textup");
   await page.keyboard.press("Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-share", "reader tools should tab straight into the session cluster");
@@ -1082,6 +1086,7 @@ async function verifyCanvasBranching() {
   });
   assert.equal(canvasReturnPosition.block, readerReturnPosition.block, "reader-to-canvas should preserve the visible content block");
   assert(Math.abs(canvasReturnPosition.offset - readerReturnPosition.offset) < 0.2, `reader-to-canvas should preserve the position within the visible block: ${JSON.stringify({ readerReturnPosition, canvasReturnPosition })}`);
+  await assertCodeCopy(page, { scope: ".node.root .doc-content", rawCode: smokeCode, hover: false, label: "web Canvas after Reader" });
   await page.focus("#t-new");
   await page.keyboard.press("Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-reader");
@@ -1165,6 +1170,7 @@ async function verifyCanvasBranching() {
   assert(!frozenHtml.includes(".web-rail"), "web-exported snapshots must exclude web-only rail styling");
   const frozenPage = await context.newPage();
   await frozenPage.setContent(frozenHtml, { waitUntil: "load" });
+  await assertCodeCopy(frozenPage, { scope: ".node.root .doc-content", rawCode: smokeCode, hover: false, label: "web frozen snapshot" });
   const frozenStyles = await frozenPage.evaluate(() => ({
     surfaceGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--surface-gap")),
     toolbarPosition: getComputedStyle(document.getElementById("taskbar")).position,

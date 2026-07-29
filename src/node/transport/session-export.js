@@ -2,10 +2,9 @@ import fs from "node:fs/promises";
 import { extractNodeAssetRefs } from "../../core/assets.js";
 import { createSnapshotProjection } from "../../core/snapshot-projection.js";
 import { buildSnapshotHtml, snapshotProjectionUsesMermaid, snapshotProjectionUsesPdf } from "../../core/snapshot-html.js";
-import { CANVAS_STYLES } from "../../core/html/styles.js";
 import { toPersistedHole } from "../../core/schema.js";
 import { resolveAsset } from "../fs-store.js";
-import { getDompurifyScript, getFrozenClientBundle, getKatexCss, getMermaidScript, getPdfJsScript, getPdfWorkerScript } from "../html/built-assets.js";
+import { getDompurifyScript, getMermaidScript, getPdfJsScript, getPdfWorkerScript, getUiAssets } from "../html/built-assets.js";
 
 /** @param {import("./session.js").RabbitHoleSession} session */
 async function buildSessionSnapshotProjection(session) {
@@ -35,14 +34,15 @@ async function buildSessionSnapshotProjection(session) {
 /** @param {import("./session.js").RabbitHoleSession} session */
 export async function buildSessionExportHtml(session) {
   const snapshotProjection = await buildSessionSnapshotProjection(session);
+  const { stylesheetText, frozenClientSource } = getUiAssets();
   return buildSnapshotHtml({
     title: snapshotProjection.hole.title || "Rabbithole",
-    stylesheetText: `${CANVAS_STYLES}\n${getKatexCss()}`,
+    stylesheetText,
     dompurifySource: getDompurifyScript(),
     mermaidSource: snapshotProjectionUsesMermaid(snapshotProjection) ? getMermaidScript() : "",
     pdfWorkerSource: snapshotProjectionUsesPdf(snapshotProjection) ? getPdfWorkerScript() : "",
     pdfJsSource: snapshotProjectionUsesPdf(snapshotProjection) ? getPdfJsScript() : "",
-    frozenClientSource: getFrozenClientBundle(),
+    frozenClientSource,
     snapshotProjection,
   });
 }

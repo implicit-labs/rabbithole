@@ -5,13 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { renderMarkdownToHtml } from "../../src/core/markdown.js";
 import { buildCanvasHtml } from "../../src/node/html/canvas.js";
-import { getKatexCss } from "../../src/node/html/built-assets.js";
+import { getUiAssets } from "../../src/node/html/built-assets.js";
 import { createSession, closeAllSessions } from "../../src/node/sessions.js";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-markdown-renderer-"));
 
 const KATEX_CSS_SENTINEL = ".katex .katex-version::after";
+const CODE_COPY_CSS_SENTINEL = ".md .code-copy { position: absolute; top: 7px; right: 7px;";
+const CODE_COPY_MARKUP_SENTINEL = '<span class="ic-check" hidden>';
 
 function count(haystack, needle) {
   return haystack.split(needle).length - 1;
@@ -210,6 +212,8 @@ async function assertPageAssembly() {
       ["export", exportHtml],
     ]) {
       assert.equal(count(html, KATEX_CSS_SENTINEL), 1, `${label} should include KaTeX CSS once`);
+      assert.equal(count(html, CODE_COPY_CSS_SENTINEL), 1, `${label} should include code-copy CSS once`);
+      assert(html.includes(CODE_COPY_MARKUP_SENTINEL), `${label} should bundle the code-copy control`);
       assert.equal(count(html, "data:font/woff2;base64,"), 20, `${label} should inline KaTeX woff2 fonts`);
       assert(!/fonts\/KaTeX_[^)]+\.(?:woff|ttf)/.test(html), `${label} should not reference external KaTeX fonts`);
       assert(html.includes("Root with $x^2$."), `${label} should carry markdown in hydration`);
@@ -227,9 +231,9 @@ async function assertPageAssembly() {
     const check = spawnSync(process.execPath, ["--check", scriptPath], { encoding: "utf8" });
     assert.equal(check.status, 0, check.stderr || check.stdout);
 
-    const katexCssBytes = Buffer.byteLength(getKatexCss(), "utf8");
+    const stylesheetBytes = Buffer.byteLength(getUiAssets().stylesheetText, "utf8");
     const pageBytes = Buffer.byteLength(liveHtml, "utf8");
-    console.log(`ok page assembly: KaTeX CSS ${katexCssBytes} bytes, live page ${pageBytes} bytes`);
+    console.log(`ok page assembly: UI stylesheet ${stylesheetBytes} bytes, live page ${pageBytes} bytes`);
   } finally {
     await closeAllSessions("markdown_renderer_test_complete");
   }
