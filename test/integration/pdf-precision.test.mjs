@@ -396,6 +396,37 @@ try {
     { text: "convolutional neural networks that include an encoder and a decoder. The best", start: 0, end: 13 },
   ]);
   assert(multiAlignment.horizontalEdgeError <= 0.75, `every persisted abstract-line quad must match the native selection horizontally (error ${multiAlignment.horizontalEdgeError}px)`);
+  const multiMark = page.locator(`.node .rh-pdf-mark[data-child="${multi.id}"]`).first();
+  const multiPolygon = multiMark.locator("polygon").first();
+  await multiPolygon.dispatchEvent("mouseover");
+  await page.waitForFunction(({ multiId, unrelatedId }) => {
+    const marks = [...document.querySelectorAll(".node .rh-pdf-mark[data-child]")];
+    const group = marks.filter((mark) => mark.dataset.child === multiId);
+    const unrelated = marks.find((mark) => mark.dataset.child === unrelatedId);
+    const fills = group.flatMap((mark) => [...mark.querySelectorAll("polygon")].map((polygon) => getComputedStyle(polygon).fill));
+    const normal = unrelated && getComputedStyle(unrelated.querySelector("polygon")).fill;
+    return fills.length >= 2 && fills.every((fill) => fill === fills[0]) && fills[0] !== normal;
+  }, { multiId: multi.id, unrelatedId: pointerChild.id });
+  const multiHover = await page.evaluate(({ multiId, unrelatedId }) => {
+    const marks = [...document.querySelectorAll(".node .rh-pdf-mark[data-child]")];
+    const group = marks.filter((mark) => mark.dataset.child === multiId);
+    const unrelated = marks.find((mark) => mark.dataset.child === unrelatedId);
+    return {
+      fragments: group.length,
+      groupState: group.every((mark) => mark.classList.contains("mark-hover")),
+      fills: group.flatMap((mark) => [...mark.querySelectorAll("polygon")].map((polygon) => getComputedStyle(polygon).fill)),
+      unrelatedFill: unrelated && getComputedStyle(unrelated.querySelector("polygon")).fill,
+    };
+  }, { multiId: multi.id, unrelatedId: pointerChild.id });
+  assert(multiHover.fills.length >= 2, `the multi-line PDF fixture must expose both persisted line polygons: ${JSON.stringify(multiHover)}`);
+  assert.equal(multiHover.groupState, true, "hovering a PDF mark must apply the shared logical-group state");
+  assert.equal(multiHover.fills.every((fill) => fill === multiHover.fills[0]), true,
+    `every polygon in the multi-line PDF mark must receive the strong hover fill: ${JSON.stringify(multiHover)}`);
+  assert.notEqual(multiHover.fills[0], multiHover.unrelatedFill,
+    `an unrelated PDF mark must retain its normal fill: ${JSON.stringify(multiHover)}`);
+  await multiPolygon.dispatchEvent("mouseout");
+  assert.equal(await page.locator(`.node .rh-pdf-mark[data-child="${multi.id}"].mark-hover`).count(), 0,
+    "leaving the multi-line PDF mark must clear its logical-group hover state");
 
   await setPdfZoom(page, 1.3);
   const desiredBounds = [108, 486, 504, 735];

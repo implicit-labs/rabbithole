@@ -1,5 +1,54 @@
 import { childrenOf, nodes } from "./core.js";
 
+export var MARK_FRAGMENT_SELECTOR = "mark[data-child], .rh-pdf-mark[data-child]";
+
+function markGroupsAt(target){
+  var el = target && target.nodeType === 1 ? target : target && target.parentElement;
+  var groups = [];
+  while (el){
+    if (el.matches && el.matches(MARK_FRAGMENT_SELECTOR)){
+      var root = el.closest(".doc-content");
+      var childId = el.dataset.child;
+      var seen = false;
+      for (var i = 0; i < groups.length; i++){
+        if (groups[i].root === root && groups[i].childId === childId){ seen = true; break; }
+      }
+      if (root && childId != null && !seen) groups.push({ root: root, childId: childId, fragment: el });
+    }
+    if (el.classList && el.classList.contains("doc-content")) break;
+    el = el.parentElement;
+  }
+  return groups;
+}
+
+function sameMarkGroup(groups, group){
+  for (var i = 0; i < groups.length; i++){
+    if (groups[i].root === group.root && groups[i].childId === group.childId) return true;
+  }
+  return false;
+}
+
+export function toggleMarkGroup(fragment, stateClass, on){
+  if (!fragment || !fragment.matches || !fragment.matches(MARK_FRAGMENT_SELECTOR)) return;
+  var root = fragment.closest(".doc-content"), childId = fragment.dataset.child;
+  if (!root || childId == null) return;
+  var marks = root.querySelectorAll(MARK_FRAGMENT_SELECTOR);
+  for (var i = 0; i < marks.length; i++){
+    if (marks[i].dataset.child === childId) marks[i].classList.toggle(stateClass, on);
+  }
+}
+
+export function transitionMarkGroups(event, entering, stateClass, onTransition){
+  var active = markGroupsAt(event.target);
+  var related = markGroupsAt(event.relatedTarget);
+  for (var i = 0; i < active.length; i++){
+    var group = active[i];
+    if (sameMarkGroup(related, group)) continue;
+    toggleMarkGroup(group.fragment, stateClass, entering);
+    if (onTransition) onTransition(group.childId, entering);
+  }
+}
+
 export function applyChildHighlights(dc, node){
   if (dc && dc.classList.contains("rh-pdf")) return;
   var kids = childrenOf(node.id).filter(function(k){ return k.origin && k.origin.anchor; });

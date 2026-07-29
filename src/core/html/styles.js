@@ -150,7 +150,7 @@ html[data-theme="dark"] .rh-lightbox-img { padding: 8px; background: #f4f4f1; bo
 .doc-content mark.hl::after { content: ""; position: absolute; inset: -0.05em -2px; border-radius: 3px; background: var(--hl-strong); opacity: 0; pointer-events: none; transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .doc-content mark.mark-pending { border-bottom: 2px dotted color-mix(in srgb, var(--accent) 55%, transparent); }
 .doc-content mark.mark-ready { border-bottom: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); }
-.doc-content mark.mark-ready:hover, .doc-content mark.mark-pending:hover, .doc-content mark.mark-focus { background: var(--hl-strong); border-bottom-color: var(--accent); }
+.doc-content mark.mark-ready:hover, .doc-content mark.mark-pending:hover, .doc-content mark.mark-hover, .doc-content mark.mark-dom-focus, .doc-content mark.mark-focus { background: var(--hl-strong); border-bottom-color: var(--accent); }
 .doc-content mark.hl:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 /* Landing flash when a jump (FROM strip, ⌘K) brings you to a mark. */
 .doc-content mark.mark-flash::after { opacity: 1; }
@@ -596,7 +596,7 @@ body:not(.mode-canvas) #hint.flash { bottom: 84px; }
 .doc-content .rh-pdf-mark { pointer-events: auto; cursor: pointer; }
 .doc-content .rh-pdf-mark polygon { pointer-events: all; fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: color-mix(in srgb, var(--accent) 32%, transparent); stroke-width: .75; vector-effect: non-scaling-stroke; transition: fill 0.15s, stroke 0.15s; }
 .doc-content .rh-pdf-mark.mark-pending polygon { fill: color-mix(in srgb, var(--accent) 9%, transparent); stroke-dasharray: 3 2; }
-.doc-content .rh-pdf-mark:hover polygon, .doc-content .rh-pdf-mark.mark-focus polygon { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
+.doc-content .rh-pdf-mark:hover polygon, .doc-content .rh-pdf-mark.mark-hover polygon, .doc-content .rh-pdf-mark.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-focus polygon { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
 .rh-pdf-textlayer span::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .rh-pdf-box-mode .rh-pdf-page, .rh-pdf-box-mode .rh-pdf-textlayer { cursor: crosshair; user-select: none; }
 .rh-pdf-box-draft { position: absolute; z-index: 4; border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: none;

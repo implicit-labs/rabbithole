@@ -49,7 +49,7 @@ import {
   lensLabel
 } from "../core/model.js";
 import { openNode } from "./reader.js";
-import { applyChildHighlights } from "./text-marks.js";
+import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { easeInOutMotion, easeOutMotion } from "./easing.js";
 import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
 import { buildOriginCrop } from "./origin-provenance.js";
@@ -661,12 +661,10 @@ function focusOrigin(node, on){
   }
   // Hovering the highlighted text lights up the edge to the branch it spawned.
   function onWorldMouseOver(e){
-    var m = e.target.closest && e.target.closest("[data-child].rh-pdf-mark, mark[data-child]");
-    if (m) setEdgeHighlight(m.dataset.child, true);
+    transitionMarkGroups(e, true, "mark-hover", setEdgeHighlight);
   }
   function onWorldMouseOut(e){
-    var m = e.target.closest && e.target.closest("[data-child].rh-pdf-mark, mark[data-child]");
-    if (m) setEdgeHighlight(m.dataset.child, false);
+    transitionMarkGroups(e, false, "mark-hover", setEdgeHighlight);
   }
 
   function initViewportPan(){

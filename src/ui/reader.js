@@ -30,7 +30,7 @@ import { escapeHtml } from "../core/utils.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
 import { mountVisuals } from "./visuals.js";
-import { applyChildHighlights } from "./text-marks.js";
+import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { buildOriginCrop } from "./origin-provenance.js";
 
 function anchorStart(node) {
@@ -149,6 +149,10 @@ export function initReader(){
     readerScope.listen(readerMain, "scroll", onReaderScroll, { passive: true });
     readerScope.listen(readerMain, "click", onMarkClick);
     readerScope.listen(readerMain, "keydown", onMarkKeydown);
+    readerScope.listen(readerMain, "mouseover", function(e){ transitionMarkGroups(e, true, "mark-hover"); });
+    readerScope.listen(readerMain, "mouseout", function(e){ transitionMarkGroups(e, false, "mark-hover"); });
+    readerScope.listen(readerMain, "focusin", function(e){ transitionMarkGroups(e, true, "mark-dom-focus"); });
+    readerScope.listen(readerMain, "focusout", function(e){ transitionMarkGroups(e, false, "mark-dom-focus"); });
     // Canvas marks dive to the answer card in place — never yank into the reader.
     readerScope.listen(world, "click", onCanvasMarkClick);
     readerScope.listen(world, "keydown", onCanvasMarkKeydown);
