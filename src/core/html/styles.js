@@ -64,6 +64,18 @@ body {
 .md pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.85em 1em; margin: 0.4em 0 1em; overflow-x: auto; overscroll-behavior-x: contain; line-height: 1.55; }
 .md pre code { background: none; border: none; padding: 0; font-size: 0.8em; }
 .md pre code.hljs { display: block; overflow-x: visible; padding: 0; color: var(--hljs-fg); background: transparent; }
+.md .code-block { position: relative; margin: 0.4em 0 1em; }
+.md .code-block pre { margin: 0; }
+.md .code-copy { position: absolute; top: 7px; right: 7px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); color: var(--fg-dim); cursor: pointer; opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard), var(--transition-color); }
+.md .code-block:hover .code-copy, .md .code-copy:focus-visible, .md .code-copy.copied { opacity: 1; }
+.md .code-copy:hover { background: var(--node-bg); border-color: var(--border-focus); color: var(--fg-bold); }
+.md .code-copy:focus { outline: none; }
+.md .code-copy:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.md .code-copy > span { display: flex; }
+.md .code-copy .ic-check, .md .code-copy.copied .ic-copy { display: none; }
+.md .code-copy.copied .ic-check { display: flex; }
+.md .code-copy.copied { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+@media (hover: none) { .md .code-copy { opacity: 1; } }
 .md code.hljs { background: transparent; padding: 0; }
 .md .hljs { color: var(--hljs-fg); background: transparent; }
 .md .hljs-doctag, .md .hljs-keyword, .md .hljs-meta .hljs-keyword, .md .hljs-template-tag, .md .hljs-template-variable, .md .hljs-type, .md .hljs-variable.language_ { color: var(--hljs-keyword); }

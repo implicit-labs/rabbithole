@@ -2,6 +2,7 @@ import { wireNotice } from "./primitives/notice.js";
 import { BUNNY_MARK_SVG } from "../core/html/icons.js";
 import { createCleanupScope } from "./lifecycle.js";
 import { mountVisuals } from "./visuals.js";
+import { mountCodeCopy } from "./code-copy.js";
 
 export var SVGNS = "http://www.w3.org/2000/svg";
 export var MIN_SCALE = 0.15, MAX_SCALE = 2.5;
@@ -370,6 +371,7 @@ function visualSurfaceKey(node, base){
     var surfaceKey = visualSurfaceKey(node, base);
     mountVisuals(dc, surfaceKey);
     if (typeof coreHooks.mountDocImages === "function") coreHooks.mountDocImages(dc, surfaceKey);
+    mountCodeCopy(dc);
   }
   // A pending node that has streamed content renders it live: the words so far,
   // a breathing caret at the end of the text, and a quiet status row beneath.
@@ -393,6 +395,7 @@ export function fillStreaming(dc, node, surfaceKey){
     surfaceKey = surfaceKey || ("stream:" + ((node && node.id) || "unknown"));
     mountVisuals(dc, surfaceKey);
     if (typeof coreHooks.mountDocImages === "function") coreHooks.mountDocImages(dc, surfaceKey);
+    mountCodeCopy(dc);
   }
   function formatElapsed(ms){
     var s = Math.floor(ms / 1000);

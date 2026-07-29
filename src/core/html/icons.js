@@ -44,6 +44,8 @@ const ICON_DEFINITIONS = Object.freeze({
   eye: { size: 14, attrs: 'viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"', body: '<path d="M1.9 8S4.2 3.8 8 3.8 14.1 8 14.1 8 11.8 12.2 8 12.2 1.9 8 1.9 8Z"/><circle cx="8" cy="8" r="1.9"/>' },
   "eye-off": { size: 14, attrs: 'viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"', body: '<path d="M1.9 8S4.2 3.8 8 3.8 14.1 8 14.1 8 11.8 12.2 8 12.2 1.9 8 1.9 8Z"/><circle cx="8" cy="8" r="1.9"/><path d="m3.2 2.6 9.6 10.8"/>' },
   chevron: { size: 12, attrs: 'viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"', body: '<path d="m4.5 6.5 3.5 3.5 3.5-3.5"/>' },
+  copy: { size: 16, attrs: STROKE_16, body: '<rect x="5.75" y="5.75" width="7" height="7" rx="1.5"/><path d="M3.25 10.25v-5.5c0-.83.67-1.5 1.5-1.5h5.5"/>' },
+  check: { size: 16, attrs: STROKE_16, body: '<path d="m3.25 8.5 3.25 3.25L12.75 5.5"/>' },
   info: { size: 13, attrs: 'viewBox="0 0 16 16" fill="none"', body: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.35"/><path d="M8 7.15v4" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><circle cx="8" cy="4.7" r=".75" fill="currentColor"/>' },
 });
 
