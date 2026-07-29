@@ -17,6 +17,7 @@ const absOutdir = path.resolve(rootDir, outdir);
 const PUBLIC_FETCH_PROXY_URL = "https://rabbithole-fetch-proxy.khemanishlok.workers.dev";
 const proxyConfig = readProxyConfig(process.env.RABBITHOLE_PROXY_URL ?? PUBLIC_FETCH_PROXY_URL);
 
+const CANONICAL_HOST_SCRIPT = `if(location.hostname==="www.rabbithole.ing")location.replace("https://rabbithole.ing"+location.pathname+location.search+location.hash);`;
 // This runs in the parser-blocking head, before the external stylesheet or app
 // module can produce a frame. Keep it tiny: its hash is pinned in the CSP below.
 const INITIAL_THEME_SCRIPT = `(function(){var theme="";try{theme=localStorage.getItem("rh-theme")||"";}catch(error){}if(theme!=="dark"&&theme!=="light"){theme=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.setAttribute("data-theme",theme);})();`;
@@ -224,10 +225,11 @@ function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
   if (proxyOrigin && !connectSrc.includes(proxyOrigin)) {
     connectSrc.push(proxyOrigin);
   }
+  const canonicalHostHash = createHash("sha256").update(CANONICAL_HOST_SCRIPT).digest("base64");
   const initialThemeHash = createHash("sha256").update(INITIAL_THEME_SCRIPT).digest("base64");
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'sha256-${initialThemeHash}'`,
+    `script-src 'self' 'sha256-${canonicalHostHash}' 'sha256-${initialThemeHash}'`,
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' blob: data: https:",
@@ -239,6 +241,7 @@ function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
   return `<!doctype html>
 <html lang="en">
 <head>
+<script id="canonical-host-script">${CANONICAL_HOST_SCRIPT}</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${csp}">

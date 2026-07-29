@@ -245,7 +245,7 @@ async function verifyPublishOutput() {
     await fs.access(path.join(publishDir, file));
   }
   const redirects = await fs.readFile(path.join(publishDir, "_redirects"), "utf8");
-  assert.equal(redirects.split("\n")[0], "https://www.rabbithole.ing/* https://rabbithole.ing/:splat 301", "the www origin should redirect to the canonical origin before path rules");
+  assert.equal(redirects.includes("www.rabbithole.ing"), false, "Cloudflare Pages redirects should contain only supported path rules");
   assert(redirects.includes("/* /index.html 200"), "publish fallback should make Rabbithole pathnames refreshable");
   assert(redirects.includes("/about /about/ 301"), "the historical homepage should have a canonical trailing-slash route");
   assert(redirects.includes("/install https://github.com/shlokkhemani/rabbithole#quick-start 302"), "the stable install route should lead to canonical GitHub instructions");
@@ -259,6 +259,9 @@ async function verifyPublishOutput() {
   assert(/script-src 'self' 'sha256-[^']+'/.test(html), "a broad connect-src is only safe while script-src stays locked to this origin");
   assert(html.includes("http://localhost:*") && html.includes("http://127.0.0.1:*"), "local endpoints stay reachable over plain http");
   assert(!html.includes('<html lang="en" data-theme="light">'), "published HTML must not force a light frame before theme initialization");
+  const canonicalScript = html.match(/<script id="canonical-host-script">([\s\S]*?)<\/script>/)?.[1] || "";
+  assert.equal(canonicalScript, 'if(location.hostname==="www.rabbithole.ing")location.replace("https://rabbithole.ing"+location.pathname+location.search+location.hash);');
+  assert.equal(html.indexOf('<script id="canonical-host-script">'), html.indexOf("<head>") + "<head>\n".length, "host canonicalization should be the first thing in the head");
   const entryVersions = [...html.matchAll(/(?:favicon\.svg|styles\.css|dompurify\.js|frozen-source\.js|app\.js)\?v=([a-f0-9]{12})/g)].map((match) => match[1]);
   assert.equal(entryVersions.length, 5, "every mutable browser entry asset should carry a content-derived version");
   assert.equal(new Set(entryVersions).size, 1, "browser entry assets should share one atomic release version");
@@ -276,8 +279,9 @@ async function verifyPublishOutput() {
   const initialScript = html.match(/<script id="initial-theme-script">([\s\S]*?)<\/script>/)?.[1] || "";
   assert(initialScript.includes('localStorage.getItem("rh-theme")'), "the first-paint theme should honor the saved choice");
   assert(initialScript.includes("prefers-color-scheme: dark"), "the first-paint theme should fall back to the system preference");
+  const canonicalScriptHash = createHash("sha256").update(canonicalScript).digest("base64");
   const initialScriptHash = createHash("sha256").update(initialScript).digest("base64");
-  assert(html.includes(`script-src 'self' 'sha256-${initialScriptHash}'`), "CSP should permit only the exact inline theme bootstrap");
+  assert(html.includes(`script-src 'self' 'sha256-${canonicalScriptHash}' 'sha256-${initialScriptHash}'`), "CSP should permit only the exact inline bootstraps");
   const llms = await fs.readFile(path.join(publishDir, "llms.txt"), "utf8");
   assert(llms.includes("https://rabbithole.ing/about/"), "agent-facing discovery should include the about page");
   assert(llms.includes("#run-the-browser-version-locally"), "agent-facing discovery should include local browser instructions");
