@@ -599,7 +599,6 @@ export class DirectRabbitholeHost {
       selected_text: node.origin?.selected_text || "",
       question: node.origin?.question || "",
       lens: node.origin?.lens || null,
-      synthesis: !!node.origin?.synthesis,
     };
   }
 

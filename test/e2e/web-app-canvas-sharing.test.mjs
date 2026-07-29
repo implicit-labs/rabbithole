@@ -1135,14 +1135,14 @@ async function verifyCanvasBranching() {
   assert.equal(shareStandard.itemPaddingTop, "8px");
   assert.equal(shareStandard.itemPaddingBottom, "8px");
   assert.equal(shareStandard.expanded, "true");
-  assert.equal(shareStandard.menuItems, 5);
-  assert.deepEqual(await page.locator('#sharemenu [role="menuitem"]').evaluateAll((items) => items.map((item) => item.tabIndex)), [0, -1, -1, -1, -1], "Share should expose one item in the Tab sequence");
+  assert.equal(shareStandard.menuItems, 4);
+  assert.deepEqual(await page.locator('#sharemenu [role="menuitem"]').evaluateAll((items) => items.map((item) => item.tabIndex)), [0, -1, -1, -1], "Share should expose one item in the Tab sequence");
   await page.keyboard.press("ArrowUp");
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-synth", "ArrowUp should wrap to the last visible Share item");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-portable", "ArrowUp should wrap to the last visible Share item");
   await page.keyboard.press("ArrowDown");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-trail", "ArrowDown should wrap to the first visible Share item");
   await page.keyboard.press("End");
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-synth");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-portable");
   await page.keyboard.press("Home");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "sm-trail");
   await page.keyboard.press("ArrowDown");
@@ -1181,13 +1181,12 @@ async function verifyCanvasBranching() {
   await frozenPage.keyboard.press("Enter");
   await frozenPage.waitForSelector("#sharemenu.visible");
   await frozenPage.waitForFunction(() => document.activeElement?.id === "sm-trail");
-  assert.deepEqual(await frozenPage.locator('#sharemenu [role="menuitem"]:visible').evaluateAll((items) => items.map((item) => item.id)), ["sm-trail", "sm-doc"], "Frozen Share should suppress export, portable export, and synthesis");
+  assert.deepEqual(await frozenPage.locator('#sharemenu [role="menuitem"]:visible').evaluateAll((items) => items.map((item) => item.id)), ["sm-trail", "sm-doc"], "Frozen Share should suppress export and portable export");
   assert.deepEqual(await frozenPage.locator('#sharemenu [role="menuitem"]').evaluateAll((items) => items.map((item) => ({ id: item.id, tabIndex: item.tabIndex, visible: item.style.display !== "none" }))), [
     { id: "sm-trail", tabIndex: 0, visible: true },
     { id: "sm-doc", tabIndex: -1, visible: true },
     { id: "sm-export", tabIndex: -1, visible: false },
     { id: "sm-portable", tabIndex: -1, visible: false },
-    { id: "sm-synth", tabIndex: -1, visible: false },
   ], "Frozen roving tabindex should cover exactly the remaining items");
   await frozenPage.keyboard.press("ArrowDown");
   assert.equal(await frozenPage.evaluate(() => document.activeElement?.id), "sm-doc");

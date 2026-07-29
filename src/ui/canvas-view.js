@@ -404,10 +404,7 @@ export function fillBody(node){
     var previous = body.querySelector(".doc-content"); if (previous && previous._rhDispose) previous._rhDispose();
     body.classList.remove("pdf-body");
     body.innerHTML = "";
-    if (node.origin && node.origin.synthesis){
-      var sq = document.createElement("div"); sq.className = "origin-quote"; sq.textContent = "✦ Synthesis of this Rabbithole";
-      body.appendChild(sq);
-    } else if (node.origin && node.origin.selected_text){
+    if (node.origin && node.origin.selected_text){
       var q = document.createElement("div"); q.className = "origin-quote"; q.textContent = "“" + node.origin.selected_text + "”";
       body.appendChild(q);
     } else if (node.origin && (node.origin.question || node.origin.lens)){

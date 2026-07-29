@@ -195,9 +195,7 @@ export function renderReaderBody(){
     if (node.origin && (node.origin.selected_text || node.origin.question)){
       var ctx = document.createElement("div");
       ctx.className = "reader-context";
-      if (node.origin.synthesis){
-        ctx.innerHTML = '<span class="rc-label">Synthesis</span>The journey so far, distilled';
-      } else if (node.origin.selected_text){
+      if (node.origin.selected_text){
         var tail = node.origin.lens ? " — " + lensBadgeHtml(node.origin.lens)
           : (node.origin.question ? " — " + escapeHtml(node.origin.question) : "");
         ctx.innerHTML = '<span class="rc-label">From</span>“' + escapeHtml(truncate(node.origin.selected_text, 200)) + '”' + tail + '<span class="rc-go">→</span>';
@@ -207,7 +205,7 @@ export function renderReaderBody(){
       }
       // The strip is a live link: click it to land on the exact spot in the
       // parent this branch grew from (flashed so the eye finds it).
-      if (node.parent_id && nodes[node.parent_id] && !node.origin.synthesis){
+      if (node.parent_id && nodes[node.parent_id]){
         ctx.classList.add("linked");
         ctx.title = "See this in its original context";
         ctx.setAttribute("role", "link");
@@ -310,8 +308,7 @@ export function renderMarginNotes(){
     var newLivePanes = [];
     kids.forEach(function(k){
       var pending = k.status !== "answered";
-      var qHtml = (k.origin && k.origin.synthesis) ? '<span class="lens-badge">✦ Synthesis</span>'
-        : (k.origin && k.origin.lens) ? lensBadgeHtml(k.origin.lens)
+      var qHtml = (k.origin && k.origin.lens) ? lensBadgeHtml(k.origin.lens)
         : escapeHtml((k.origin && k.origin.question) ? k.origin.question : (k.title || "Untitled"));
       var quote = (k.origin && k.origin.selected_text) ? k.origin.selected_text : "";
       var status = pending ? pendingStatusHtml(k) : 'open →';
@@ -334,8 +331,7 @@ export function renderMarginNotes(){
       tile._quote.textContent = quote ? "“" + truncate(quote, 80) + "”" : "";
       tile._quote.hidden = !quote;
       tile._status.innerHTML = status;
-      var name = (k.origin && k.origin.synthesis) ? "Synthesis"
-        : ((k.origin && k.origin.question) || k.title || "Untitled");
+      var name = (k.origin && k.origin.question) || k.title || "Untitled";
       tile.setAttribute("aria-label", "Open branch: " + name + (pending ? ", pending" : ""));
       // A streaming answer is watchable right here: its last lines render live
       // inside the note (and the whole note opens the full streaming view).

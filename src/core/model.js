@@ -163,7 +163,6 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
   const selectedText = String(payload.selected_text ?? "").trim();
   const question = String(payload.question ?? "").trim();
   const lens = normalizeLens(payload.lens);
-  const synthesis = payload.synthesis === true;
   const anchor = normalizeAnchor(payload.anchor);
   const branchType = normalizeBranchType(payload.branch_type, selectedText);
   const inheritedBase = inheritedNodeBaseUrl(parent);
@@ -174,7 +173,7 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
   return /** @type {ModelHoleNode} */ ({
     id: nodeId,
     parent_id: String(payload.parent_id || ""),
-    title: synthesis ? "Synthesis" : lens ? lensLabel(lens) : question ? truncate(question, 48) : "…",
+    title: lens ? lensLabel(lens) : question ? truncate(question, 48) : "…",
     markdown: "",
     base_url: inheritedBase.base_url,
     base_url_source: inheritedBase.base_url_source,
@@ -182,7 +181,6 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
       selected_text: selectedText,
       question,
       lens,
-      synthesis,
       anchor,
       branch_type: branchType,
       ...(cropAsset ? { crop_asset: cropAsset } : {}),

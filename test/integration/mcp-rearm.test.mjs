@@ -118,7 +118,6 @@ async function runSavedAskRequeueFixture() {
       selected_text: "Root",
       question: "Saved while away?",
       lens: null,
-      synthesis: false,
       anchor: null,
       branch_type: "selection",
     },

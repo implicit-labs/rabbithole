@@ -230,8 +230,7 @@ links, prefer fetching the HTML version and opening that content with
   snapshot** produces a single self-contained `.html` — data, assets, and a
   read-only client in one file anyone can open; **Export Rabbithole** (web
   app) produces a `.rabbithole` backup for device transfer — MCP holes are
-  already plain JSON on disk; or ask the agent for a synthesis of the whole
-  journey.
+  already plain JSON on disk.
 - **Durable asks:** questions asked while the agent is away are saved and
   re-queued on resume — the agent answers them first thing.
 - **Persistence:** holes auto-save as JSON under `~/.rabbithole/`; resuming

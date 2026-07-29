@@ -372,20 +372,19 @@ export function updateComposerState(){
   function autoGrowComposer(){ autoGrowEl(composerText, 140); }
 
   // Shared follow-up submission: from the reader composer or a card's docked
-  // one. Every direct child uses the same Reader branch rail; selection asks,
-  // general follow-ups, and syntheses differ in context, not navigation.
-export function sendFollowup(parent, question, lens, synthesis){
+  // one. Every direct child uses the same Reader branch rail.
+export function sendFollowup(parent, question, lens){
     if (parent?.extensions?.pdf?.converting) return null;
     var requestId = uuid(), childId = uuid();
     var pos = placeChild(parent, BRANCH_FOLLOWUP);
     var node = {
 	      id: childId, parent_id: parent.id,
-	      title: synthesis ? "Synthesis" : lens ? lensLabel(lens) : truncate(question, 48),
+	      title: lens ? lensLabel(lens) : truncate(question, 48),
 	      html: "", md: "",
 	      base_url: parent.base_url || null,
 	      base_url_source: parent.base_url ? "inherited" : null,
 	      read: false,
-      origin: { selected_text: "", question: question, lens: lens, synthesis: !!synthesis, anchor: null, branch_type: BRANCH_FOLLOWUP },
+      origin: { selected_text: "", question: question, lens: lens, anchor: null, branch_type: BRANCH_FOLLOWUP },
       x: pos.x, y: pos.y, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
       status: "pending", _order: nextOrder(), _startTs: Date.now()
     };
@@ -397,7 +396,6 @@ export function sendFollowup(parent, question, lens, synthesis){
            selected_text: "", question: question, lens: lens, anchor: null,
            branch_type: BRANCH_FOLLOWUP,
            position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } };
-    if (synthesis) payload.synthesis = true;
     askLifecycle.hooks.post(payload).then(function(res){ if (!res || !res.ok) rollbackBranch(node); });
     return node;
   }

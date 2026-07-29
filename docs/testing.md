@@ -168,7 +168,7 @@ in CI.
 
 `test/evals/run-eval.mjs` is an opt-in quality probe, not a deterministic contract
 suite. It uses live providers and heuristic scoring for math, diagrams, explanation
-lenses, code-aware answers, follow-ups, synthesis, long documents, title handling,
+lenses, code-aware answers, follow-ups, long documents, title handling,
 hostile selected text, and baseline factual responses. See
 `test/evals/README.md` for credentials and invocation details.
 

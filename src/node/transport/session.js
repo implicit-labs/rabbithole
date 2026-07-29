@@ -725,7 +725,6 @@ export class RabbitHoleSession {
       selected_text: node.origin.selected_text,
       question: node.origin.question,
       lens: node.origin.lens,
-      ...(node.origin.synthesis ? { synthesis: true } : {}),
       lineage: this.lineageTitles(parentId),
     };
 
