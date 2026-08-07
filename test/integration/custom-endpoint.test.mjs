@@ -58,8 +58,17 @@ async function openSettingsOnCustom(page) {
   await page.waitForSelector("#blank-start:not([hidden])");
   await page.click("#blank-start-setup");
   await page.waitForSelector("#web-settings-popover");
-  await page.click('[data-provider="custom_endpoint"]');
+  await clickCustomEndpointMode(page);
   await page.waitForSelector("#provider-base");
+}
+
+/* Custom endpoints live inside the Local surface as a connection mode. */
+async function clickCustomEndpointMode(page) {
+  if (await page.getAttribute('[data-provider="local"]', "aria-pressed") !== "true") {
+    await page.click('[data-provider="local"]');
+  }
+  await page.waitForSelector('[data-local-mode="custom_endpoint"]');
+  await page.click('[data-local-mode="custom_endpoint"]');
 }
 
 async function fillEndpoint(page, value) {
@@ -86,7 +95,9 @@ async function verifyConnectStatesAndAuth() {
     await routeEndpoint(page, { requireKey: true });
     await openSettingsOnCustom(page);
 
-    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Local", "Custom"]);
+    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Subscriptions", "Local"]);
+    assert.deepEqual(await page.locator(".local-mode-choice button").allTextContents(), ["Ollama", "Custom endpoint"]);
+    assert.equal(await page.getAttribute('[data-local-mode="custom_endpoint"]', "aria-pressed"), "true");
     assert.equal(await page.locator("#api-key").count(), 1, "a custom endpoint must be able to authenticate");
     assert.equal(await page.locator("#api-key-status").innerText(), "Optional. Stored only in this browser, sent only to your endpoint.");
     assert.equal(await page.locator("#local-model").count(), 0, "the Ollama model picker belongs to Local");
@@ -127,8 +138,7 @@ async function verifyConnectStatesAndAuth() {
     await page.fill("#api-key", KEY);
     await waitForEndpointStatus(page, "Connected · 2 models");
     assert.equal(await page.locator("#endpoint-model-value").innerText(), "my-model", "connecting should choose a usable model");
-    assert.equal(await page.locator("#transcribe-model-help").innerText(), "Uses a vision model to turn PDF pages into searchable Markdown. Page images go to your custom endpoint.");
-    assert.equal(await page.locator("#transcribe-model").isDisabled(), false, "a custom endpoint must not inherit Local's vision gate");
+    assert.equal(await page.locator(".transcription-model-section").count(), 0, "first-run custom endpoint setup should defer PDF transcription");
     assert.equal(await page.locator("#complete-model-setup").isDisabled(), false);
 
     /* The picker lists what the endpoint reported, and still takes a name it never listed. */
@@ -242,11 +252,14 @@ async function verifySettingsSurviveProviderSwitching() {
       status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ capabilities: ["completion"] }),
     }));
     await openSettingsOnCustom(page);
+    /* The trip through the Local surface may probe Ollama once; configuring the
+     * custom endpoint itself must not. */
+    const probesBeforeConfiguring = localModelCalls;
     await fillEndpoint(page, ENDPOINT);
     await page.waitForSelector("#endpoint-status.valid");
-    assert.equal(localModelCalls, 0, "configuring a custom endpoint must never probe Ollama");
+    assert.equal(localModelCalls, probesBeforeConfiguring, "configuring a custom endpoint must never probe Ollama");
 
-    await page.click('[data-provider="local"]');
+    await page.click('[data-local-mode="local"]');
     await page.waitForSelector("#local-model");
     assert.equal(await page.locator("#provider-base").inputValue(), "http://localhost:11434/v1", "Local keeps its own endpoint");
     assert.equal(await page.locator("#endpoint-status").count(), 0, "the Custom status line belongs to Custom");
@@ -256,7 +269,7 @@ async function verifySettingsSurviveProviderSwitching() {
     await page.click('[data-provider="openrouter"]');
     await page.waitForSelector("#model-select");
 
-    await page.click('[data-provider="custom_endpoint"]');
+    await clickCustomEndpointMode(page);
     await page.waitForSelector("#endpoint-status.valid");
     assert.equal(await page.locator("#provider-base").inputValue(), ENDPOINT, "a typed endpoint survives the trip through other providers");
     assert.equal(await page.locator("#endpoint-model-value").innerText(), "my-model");

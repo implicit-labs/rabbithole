@@ -80,7 +80,7 @@ export function initCore(inputHydration) {
   nodes = {};
   childrenByParent = Object.create(null);
   currentNodeId = rootId;
-  mode = "reader";
+  setModeValue("reader");
   view = { x: 0, y: 0, scale: 1 };
   closed = frozen;
   closedReason = frozen ? "frozen" : null;
@@ -176,7 +176,13 @@ function resetCoreState(){
 }
 
 export function setCurrentNodeId(id){ currentNodeId = id; }
-export function setModeValue(value){ mode = value; }
+export function setModeValue(value){
+  mode = value;
+  var readerButton = document.getElementById("t-reader");
+  var canvasButton = document.getElementById("t-canvas");
+  if (readerButton) readerButton.setAttribute("aria-pressed", String(value === "reader"));
+  if (canvasButton) canvasButton.setAttribute("aria-pressed", String(value === "canvas"));
+}
 export function setClosedState(value, reason){ closed = !!value; closedReason = reason || null; }
 export function setAgentAttached(value){ agentAttached = !!value; }
 export function setAgentReason(value){ agentReason = value || null; }

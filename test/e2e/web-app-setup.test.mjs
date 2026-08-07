@@ -16,13 +16,16 @@ const LOCAL_SHOW_URL = "http://localhost:11434/api/show";
 const LOCAL_VERSION_URL = "http://localhost:11434/api/version";
 const LOCAL_CHAT_URL = "http://localhost:11434/v1/chat/completions";
 const GITHUB_REPO_API_URL = "https://api.github.com/repos/shlokkhemani/rabbithole";
+const BRIDGE_EVENTS_URL = "http://127.0.0.1:41414/bridge/events";
+const BRIDGE_CHAT_URL = "http://127.0.0.1:41414/v1/chat/completions";
 
 const app = await bootWebApp();
 const { browser, baseUrl } = app;
 try {
   await verifyThemeBeforeAppRuntime();
   await verifyMobileSetupExperience();
-  await verifySetupDefaultsToOpenRouterAndGatesLocalGuide();
+  await verifyExistingWebUserUpgrade();
+  await verifySubscriptionsPanelStates();
   await verifyLocalFailureRequiresTroubleshootChoice();
   await verifyLandingAndComposer();
   await verifyReducedMotionOverlays();
@@ -62,14 +65,27 @@ async function verifyReducedMotionOverlays() {
   }
 }
 
-async function verifySetupDefaultsToOpenRouterAndGatesLocalGuide() {
+async function verifyExistingWebUserUpgrade() {
   const context = await browser.newContext();
+  await installBridgeFetchStub(context);
   await context.addInitScript(() => localStorage.setItem("rh-web-settings", JSON.stringify({
     preset: "custom",
     base_url: "http://localhost:11434/v1",
     model: "llama3.2",
     transcribe_model: "llama3.2",
     session_only: true,
+    providers: {
+      openrouter: {
+        base_url: "https://openrouter.ai/api/v1",
+        model: "anthropic/claude-sonnet-5",
+        transcribe_model: "google/gemini-2.5-flash",
+      },
+      custom: {
+        base_url: "http://localhost:11434/v1",
+        model: "llama3.2",
+        transcribe_model: "llama3.2",
+      },
+    },
   })));
   try {
     const page = await context.newPage();
@@ -84,16 +100,21 @@ async function verifySetupDefaultsToOpenRouterAndGatesLocalGuide() {
     await page.waitForSelector("#web-settings-popover");
     await page.waitForTimeout(180);
 
-    assert.equal(localModelRequests, 0, "opening OpenRouter setup must not probe Local");
-    assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true", "Set up AI should open the complete OpenRouter path by default");
-    assert.equal(await page.locator("#api-key").count(), 1, "default setup should immediately show the OpenRouter form");
-    assert.equal(await page.locator("#local-model").count(), 0, "Local controls should stay hidden until Local is selected");
-    assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "opening setup must not force OpenRouter users into Ollama setup");
-    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Local", "Custom"]);
+    assert.equal(localModelRequests, 1, "opening setup should probe the explicitly chosen Local provider");
+    assert.equal(await page.getAttribute('[data-provider="local"]', "aria-pressed"), "true", "setup must preserve an explicitly chosen incomplete provider");
+    assert.equal(await page.locator("#api-key").count(), 0, "Local setup must not be reset to the OpenRouter key form");
+    assert.equal(await page.locator("#local-model-setup").count(), 1);
+    assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "opening setup must not force users into the Local guide");
+    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Subscriptions", "Local"]);
 
+    await page.click('[data-provider="subscriptions"]');
+    await page.waitForSelector("#bridge-pairing-token");
+    assert.equal(await page.getAttribute('[data-provider="subscriptions"]', "aria-pressed"), "true", "Subscriptions must be reachable from pre-bridge preferences");
+    await page.click('[data-provider="openrouter"]');
+    assert.equal(await page.locator("#api-key").count(), 1);
     await page.click('[data-provider="local"]');
     await page.waitForSelector("#local-model-setup");
-    assert.equal(localModelRequests, 1, "choosing Local should start Local model discovery");
+    assert.equal(localModelRequests, 2, "choosing Local again should start a new Local discovery");
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "failed Local discovery should stay in the Local settings screen");
     assert.equal(await page.locator("#local-model-setup").innerText(), "Set up Local", "the Local screen should offer an explicit setup guide");
     assert.equal(await page.locator("#complete-model-setup").isDisabled(), true, "Local setup cannot finish before a model is connected");
@@ -304,13 +325,11 @@ async function verifyLandingAndComposer() {
   })), { role: "tooltip", opacity: "1", visibility: "visible", transitionDuration: "0s", transitionDelay: "0s" }, "New Rabbithole setup guidance should appear immediately as a tooltip");
   await page.click("#blank-start-new");
   await page.waitForSelector("#web-settings-popover");
-  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Local", "Custom"]);
+  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Subscriptions", "Local"]);
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true", "setup should select OpenRouter by default");
   assert.equal(await page.locator("#api-key").count(), 1, "setup should open the full OpenRouter form immediately");
-  assert.equal(await page.locator(".settings-info-trigger").count(), 1);
-  assert.equal(await page.locator("#transcribe-model-help").textContent(), "Uses a vision model to turn PDF pages into searchable Markdown. Page images go to OpenRouter.");
-  await page.locator(".settings-info-trigger").focus();
-  assert.equal(await page.locator("#transcribe-model-help").evaluate((tooltip) => getComputedStyle(tooltip).visibility), "visible", "PDF transcription help should appear immediately for keyboard focus");
+  assert.equal(await page.locator(".transcription-model-section").count(), 0, "first-run setup should defer PDF transcription");
+  assert.equal(await page.locator("#transcribe-model").count(), 0, "first-run setup should have no transcription control");
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
   assert.equal(await page.locator("#composer-modal").isVisible(), false, "New Rabbithole should open setup, not the composer, before readiness");
   await page.fill("#api-key", MOCK_KEY);
@@ -338,6 +357,14 @@ async function verifyLandingAndComposer() {
   assert.equal(await page.locator("body").evaluate((body) => body.classList.contains("rail-open")), false, "the sidebar should start closed");
   assert.equal(await page.locator(".web-home").count(), 0, "form-based home page must be gone");
   assert.equal(await page.locator("#tb-tools .toolbar-brand").count(), 1, "browser toolbar should carry the Rabbithole mark");
+  assert.deepEqual(await page.locator("#tb-view").evaluate((group) => ({
+    role: group.getAttribute("role"),
+    label: group.getAttribute("aria-label"),
+    display: getComputedStyle(group).display,
+    reader: document.getElementById("t-reader").getAttribute("aria-pressed"),
+    canvas: document.getElementById("t-canvas").getAttribute("aria-pressed"),
+  })), { role: "group", label: "View", display: "none", reader: "false", canvas: "true" },
+  "blank canvas should hide the unavailable view selector while retaining correct initial state");
   const toolbarConformance = await page.locator("#taskbar button").evaluateAll((buttons) => buttons.map((button) => ({
     id: button.id,
     type: button.getAttribute("type"),
@@ -771,6 +798,350 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   await absentContext.close();
 }
 
+
+function bridgeModelsFixture(agentId, { includeOpus = true } = {}) {
+  if (agentId === "codex") {
+    return [
+      { id: "codex/gpt-5.6-sol", name: "GPT-5.6 Sol", images: true, reasoning: { options: ["low", "medium", "high", "xhigh", "max", "ultra"], default: "low" } },
+      { id: "codex/gpt-5.5", name: "GPT-5.5", images: true, reasoning: { options: ["low", "medium", "high", "xhigh"], default: "medium" } },
+    ];
+  }
+  return [
+    { id: "claude/sonnet", name: "Sonnet", images: true, reasoning: { options: ["low", "medium", "high", "xhigh", "max"], default: "medium" } },
+    ...(includeOpus ? [{ id: "claude/opus", name: "Opus", images: true, reasoning: { options: ["low", "medium", "high", "xhigh", "max"], default: "medium" } }] : []),
+  ];
+}
+
+function bridgeAgentFixture(id, state, options = {}) {
+  if (state === "ready") {
+    return {
+      id,
+      state,
+      plan: options.plan || (id === "claude" ? "Max" : "chatgpt"),
+      models: bridgeModelsFixture(id, options),
+    };
+  }
+  if (state === "starting") return { id, state };
+  const fixes = {
+    missing: id === "claude" ? "npm install -g @anthropic-ai/claude-code" : "npm install -g @openai/codex",
+    signed_out: id === "claude" ? "claude /login" : "codex login",
+    error: id === "claude" ? "claude --version" : "codex --version",
+  };
+  return {
+    id,
+    state,
+    fix: fixes[state],
+    ...(state === "error" ? { detail: "Live model discovery failed." } : {}),
+  };
+}
+
+function bridgeStateFixture(claudeState, codexState = "starting", options = {}) {
+  return {
+    bridge: "0.4.0",
+    agents: [
+      bridgeAgentFixture("claude", claudeState, options.claude),
+      bridgeAgentFixture("codex", codexState, options.codex),
+    ],
+  };
+}
+
+async function installBridgeFetchStub(context) {
+  await context.addInitScript(({ eventsUrl, chatUrl }) => {
+    const realFetch = window.fetch.bind(window);
+    const encoder = new TextEncoder();
+    const streams = new Set();
+    const requests = [];
+    const chatQueue = [];
+    let denyNextConnection = false;
+    let online = true;
+    let currentState = null;
+    let hidden = false;
+
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => hidden,
+    });
+
+    function authorization(options) {
+      return new Headers(options?.headers || {}).get("Authorization") || "";
+    }
+
+    function push(state) {
+      currentState = state;
+      const bytes = encoder.encode(`data: ${JSON.stringify(state)}\n\n`);
+      for (const stream of [...streams]) {
+        try { stream.enqueue(bytes); } catch { streams.delete(stream); }
+      }
+    }
+
+    function closeStreams() {
+      for (const stream of [...streams]) {
+        streams.delete(stream);
+        try { stream.close(); } catch {}
+      }
+    }
+
+    window.__bridgeStub = {
+      requests,
+      push,
+      close: closeStreams,
+      kill() {
+        online = false;
+        closeStreams();
+      },
+      restart(state) {
+        online = true;
+        currentState = state;
+      },
+      setHidden(value) {
+        hidden = Boolean(value);
+        document.dispatchEvent(new Event("visibilitychange"));
+      },
+      denyNextConnection() { denyNextConnection = true; },
+      queueChat(...items) { chatQueue.push(...items); },
+    };
+
+    window.fetch = async (input, options = {}) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url === eventsUrl) {
+        requests.push({ kind: "events", url, authorization: authorization(options), at: performance.now() });
+        if (!online) throw new TypeError("Failed to fetch");
+        if (denyNextConnection) {
+          denyNextConnection = false;
+          return new Response(JSON.stringify({ error: { code: "unauthorized" } }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(new ReadableStream({
+          start(controller) {
+            streams.add(controller);
+            if (currentState) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(currentState)}\n\n`));
+            }
+            options.signal?.addEventListener("abort", () => {
+              streams.delete(controller);
+              try { controller.error(new DOMException("Aborted", "AbortError")); } catch {}
+            }, { once: true });
+          },
+          cancel() {},
+        }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      if (url === chatUrl) {
+        const body = JSON.parse(options.body || "{}");
+        requests.push({ kind: "chat", authorization: authorization(options), body });
+        const item = chatQueue.shift() || { text: "Subscription response." };
+        if (item.beforeState) {
+          push(item.beforeState);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        if (item.code) {
+          return new Response(JSON.stringify({ error: { code: item.code, message: item.message || item.code } }), {
+            status: item.status || 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        const sse = `data: ${JSON.stringify({ choices: [{ delta: { content: item.text } }] })}\n\ndata: [DONE]\n\n`;
+        return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      return realFetch(input, options);
+    };
+  }, { eventsUrl: BRIDGE_EVENTS_URL, chatUrl: BRIDGE_CHAT_URL });
+}
+
+async function pushBridgeState(page, state) {
+  await page.evaluate((value) => window.__bridgeStub.push(value), state);
+}
+
+async function verifySubscriptionsPanelStates() {
+  const context = await browser.newContext();
+  await installBridgeFetchStub(context);
+  try {
+    const page = await context.newPage();
+    await page.goto(`${baseUrl}/#route=notes&bridge=paired-token&tab=2`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#blank-start:not([hidden])");
+    await page.waitForFunction(() => window.__bridgeStub.requests.some((request) => request.kind === "events"));
+    assert.equal(await page.evaluate(() => location.hash), "#route=notes&tab=2", "pairing must remove only bridge from the fragment");
+    let stored = await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")));
+    assert.equal(stored.preset, "subscriptions", "fragment pairing should choose Subscriptions");
+    assert.equal(stored.providers.subscriptions.token, "paired-token", "the token belongs to the Subscriptions provider slot");
+    assert.equal(
+      await page.evaluate(() => window.__bridgeStub.requests.find((request) => request.kind === "events").authorization),
+      "Bearer paired-token",
+      "the state stream must carry bearer authorization",
+    );
+
+    await page.click("#blank-start-setup");
+    await page.waitForSelector("#web-settings-popover");
+    await pushBridgeState(page, bridgeStateFixture("starting"));
+    await page.waitForSelector('.bridge-surface[data-state="starting"]');
+    assert.match(await page.locator(".bridge-starting").innerText(), /Connecting/);
+    assert.equal(await page.locator(".bridge-agent-body [data-state-action]").count(), 0, "starting is calm progress with no fix action");
+    assert.equal(await page.locator(".bridge-agent-body .bridge-command").count(), 0, "starting never borrows an error command");
+
+    for (const testCase of [
+      { state: "missing", command: "npm install -g @anthropic-ai/claude-code" },
+      { state: "signed_out", command: "claude /login" },
+      { state: "error", command: "claude --version" },
+    ]) {
+      await pushBridgeState(page, bridgeStateFixture(testCase.state));
+      await page.waitForSelector(`.bridge-surface[data-state="${testCase.state}"]`);
+      assert.equal(await page.locator(".bridge-agent-body [data-state-action]").count(), 1, `${testCase.state} must expose exactly one action`);
+      assert.equal(await page.locator(".bridge-agent-body .bridge-command code").innerText(), testCase.command);
+    }
+
+    const readyState = bridgeStateFixture("ready", "ready");
+    await pushBridgeState(page, readyState);
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
+    stored = await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")));
+    assert.equal(stored.model, "claude/sonnet");
+    assert.equal(stored.reasoning, "medium");
+    assert.match(await page.locator('[data-bridge-agent="claude"]').innerText(), /Max/);
+    assert.equal(await page.locator('[data-bridge-agent="codex"] .bridge-plan-badge').count(), 0);
+
+    await page.evaluate(() => {
+      window.__bridgeMutationCount = 0;
+      window.__bridgeReadyHost = document.querySelector("#bridge-surface");
+      window.__bridgeObserver = new MutationObserver((records) => { window.__bridgeMutationCount += records.length; });
+      window.__bridgeObserver.observe(window.__bridgeReadyHost, { childList: true, subtree: true, attributes: true, characterData: true });
+    });
+    await page.evaluate(async () => {
+      window.__bridgeReadyHost.setAttribute("data-capture-probe", "live");
+      await new Promise((resolve) => queueMicrotask(resolve));
+    });
+    assert.ok(await page.evaluate(() => window.__bridgeMutationCount) > 0,
+      "bridge mutation capture must observe a real mutation");
+    await page.evaluate(async () => {
+      window.__bridgeReadyHost.removeAttribute("data-capture-probe");
+      await new Promise((resolve) => queueMicrotask(resolve));
+      window.__bridgeMutationCount = 0;
+    });
+    await pushBridgeState(page, readyState);
+    await page.waitForTimeout(60);
+    assert.equal(await page.evaluate(() => window.__bridgeMutationCount), 0, "an identical complete state must not mutate the DOM");
+    assert.equal(await page.evaluate(() => document.querySelector("#bridge-surface") === window.__bridgeReadyHost), true, "the ready host must retain identity");
+
+    await page.click("#bridge-model");
+    await page.waitForSelector(".combobox-surface");
+    await pushBridgeState(page, bridgeStateFixture("signed_out", "ready"));
+    await page.waitForSelector('.bridge-surface[data-state="signed_out"]');
+    assert.equal(await page.locator(".combobox-surface").count(), 0, "transition disposal must remove the combobox popup before its host");
+    assert.equal(await page.locator(".bridge-agent-body [data-state-action]").evaluate((button) => document.activeElement === button), true, "focus falls back to the new state's sole action");
+
+    await pushBridgeState(page, readyState);
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
+    await page.locator('[data-bridge-agent="codex"]').focus();
+    const changedPlanState = bridgeStateFixture("ready", "ready", { claude: { plan: "FutureTier" } });
+    await pushBridgeState(page, changedPlanState);
+    await page.waitForFunction(() => document.activeElement?.dataset?.bridgeAgent === "codex");
+    assert.match(await page.locator('[data-bridge-agent="claude"]').innerText(), /FutureTier/, "unknown real plans remain visible");
+
+    const agentRowReadyState = bridgeStateFixture("ready", "ready", { codex: { plan: "Plus" } });
+    await pushBridgeState(page, agentRowReadyState);
+    await page.waitForSelector('[data-bridge-agent="codex"] .bridge-plan-badge');
+    const beforeAgentSignOut = await page.evaluate(() => ({
+      claude: document.querySelector('[data-bridge-agent="claude"]').innerHTML,
+      codex: document.querySelector('[data-bridge-agent="codex"]').innerHTML,
+      body: document.querySelector(".bridge-agent-body").innerHTML,
+    }));
+    await page.click("#bridge-model");
+    await page.waitForSelector(".combobox-surface");
+    await pushBridgeState(page, bridgeStateFixture("ready", "signed_out"));
+    await page.waitForFunction(() => !document.querySelector('[data-bridge-agent="codex"] .bridge-plan-badge'));
+    const afterAgentSignOut = await page.evaluate(() => ({
+      claude: document.querySelector('[data-bridge-agent="claude"]').innerHTML,
+      codex: document.querySelector('[data-bridge-agent="codex"]').innerHTML,
+      body: document.querySelector(".bridge-agent-body").innerHTML,
+      focusedId: document.activeElement?.id || "",
+      popupCount: document.querySelectorAll(".combobox-surface").length,
+    }));
+    assert.equal(afterAgentSignOut.claude, beforeAgentSignOut.claude, "sign-out must not change the other agent row");
+    assert.notEqual(afterAgentSignOut.codex, beforeAgentSignOut.codex, "only the signed-out agent row changes");
+    assert.equal(afterAgentSignOut.body, beforeAgentSignOut.body, "a background-agent sign-out must not change the selected agent body");
+    assert.equal(afterAgentSignOut.focusedId, "bridge-model", "focus returns to the equivalent selected-agent control");
+    assert.equal(afterAgentSignOut.popupCount, 0, "transition disposal leaves no orphan combobox popup");
+
+    await pushBridgeState(page, readyState);
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
+    const loadTimeOrigin = await page.evaluate(() => performance.timeOrigin);
+    const requestsBeforeKill = await page.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").length);
+    const killedAt = performance.now();
+    await page.evaluate(() => window.__bridgeStub.kill());
+    await page.waitForSelector('.bridge-surface[data-state="bridge_down"]');
+    const bridgeDownLatencyMs = performance.now() - killedAt;
+    assert.ok(bridgeDownLatencyMs < 1_000, `bridge-down took ${bridgeDownLatencyMs.toFixed(1)}ms`);
+    assert.equal(await page.locator('.bridge-surface[data-state="bridge_down"] [data-state-action]').count(), 1, "stream close has one bridge command action");
+    assert.equal(await page.locator(".bridge-command code").innerText(), "npx rabbithole bridge");
+    await page.waitForFunction((count) => (
+      window.__bridgeStub.requests.filter((request) => request.kind === "events").length > count
+    ), requestsBeforeKill);
+    await page.evaluate((state) => window.__bridgeStub.restart(state), readyState);
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model', { timeout: 3_000 });
+    assert.equal(await page.evaluate(() => performance.timeOrigin), loadTimeOrigin, "bridge restart must recover without reloading the page");
+    assert.equal(
+      await page.evaluate((token) => window.__bridgeStub.requests
+        .filter((request) => request.kind === "events")
+        .every((request) => request.url === "http://127.0.0.1:41414/bridge/events" && !request.url.includes(token)), "paired-token"),
+      true,
+      "the bearer token must never appear in a state-stream URL",
+    );
+
+    await page.evaluate(() => window.__bridgeStub.setHidden(true));
+    const hiddenRequestsBeforeKill = await page.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").length);
+    await page.evaluate(() => window.__bridgeStub.kill());
+    await page.waitForSelector('.bridge-surface[data-state="bridge_down"]');
+    await page.waitForTimeout(1_100);
+    assert.equal(
+      await page.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").length),
+      hiddenRequestsBeforeKill,
+      "reconnection must stay suspended while the document is hidden",
+    );
+    await page.evaluate((state) => window.__bridgeStub.restart(state), readyState);
+    await page.evaluate(() => window.__bridgeStub.setHidden(false));
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model', { timeout: 1_000 });
+    console.log(
+      `acceptance H bridge_down_ms=${bridgeDownLatencyMs.toFixed(1)} reconnect_without_reload=true `
+      + "agent_rows_changed=codex-only focus=bridge-model orphan_popups=0 hidden_resume=immediate",
+    );
+
+    await page.evaluate(() => window.__bridgeStub.denyNextConnection());
+    await page.click('[data-provider="openrouter"]');
+    await page.click('[data-provider="subscriptions"]');
+    await page.waitForSelector('.bridge-surface[data-state="re_pair"]');
+    assert.equal(await page.locator('.bridge-surface[data-state="re_pair"] [data-state-action]').count(), 1, "re-pair has one Pair action");
+    await page.fill("#bridge-pairing-token", "fresh-token");
+    await page.click("#bridge-pair");
+    await page.waitForFunction(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").at(-1)?.authorization === "Bearer fresh-token");
+    await pushBridgeState(page, readyState);
+    await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
+    stored = await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")));
+    assert.equal(stored.providers.subscriptions.token, "fresh-token", "manual re-pair updates only the provider token");
+
+    await page.click("#bridge-model");
+    await page.click('.model-option[data-value="claude/opus"]');
+    await page.evaluate((freshState) => window.__bridgeStub.queueChat(
+      { code: "model_unknown", message: "The model changed.", beforeState: freshState },
+      { text: "# Subscription root\n\nRetried with the fresh catalog." },
+    ), bridgeStateFixture("ready", "ready", { claude: { includeOpus: false } }));
+    await page.click("#complete-model-setup");
+    await page.waitForSelector("#web-settings-popover", { state: "detached" });
+    await page.click("#blank-start-new");
+    await page.waitForSelector("#composer-modal:not([hidden])");
+    await page.click("#composer-path-ask");
+    await page.fill("#composer-input", "Retry this original ask once");
+    await page.click("#composer-primary");
+    await waitForCanvasText(page, "Retried with the fresh catalog.");
+    const chatRequests = await page.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "chat"));
+    assert.equal(chatRequests.length, 2, "model_unknown retries the original ask exactly once");
+    assert.equal(chatRequests[0].body.model, "claude/opus");
+    assert.equal(chatRequests[1].body.model, "claude/sonnet", "the retry uses the fresh stream catalog");
+    assert.equal(chatRequests.every((request) => request.authorization === "Bearer fresh-token"), true, "every generation call carries the paired token");
+    console.log("ok web app: SSE states, transition-only repaint mutations=0, stream-close, re-pair, model_unknown retry=1");
+  } finally {
+    await context.close();
+  }
+}
+
 async function openFreshSettings(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.keyboard.press("Escape");
@@ -778,6 +1149,14 @@ async function openFreshSettings(page) {
   await page.waitForSelector("#web-settings-popover");
   assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "true", "settings trigger must expose the open popover state");
   assert.equal(await page.getAttribute("#t-settings", "aria-controls"), "web-settings-popover", "settings trigger must control only the live surface");
+}
+
+async function openFreshSetup(page) {
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.click("#blank-start-setup");
+  await page.waitForSelector("#web-settings-popover");
+  assert.equal(await page.getAttribute("#blank-start-setup", "aria-expanded"), "true", "setup trigger must expose the open first-run surface");
+  assert.equal(await page.getAttribute("#blank-start-setup", "aria-controls"), "web-settings-popover", "setup trigger must control only the live surface");
 }
 
 async function switchSettingsToLocal(page) {
@@ -962,7 +1341,7 @@ async function verifyAskKeyUxAndRail() {
   }, null, { timeout: 5000 });
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
   assert.equal(await page.locator(".settings-section").first().getAttribute("class"), "settings-section provider-section", "provider should be the first settings decision");
-  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Local", "Custom"]);
+  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Subscriptions", "Local"]);
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
   await page.click('[data-provider="local"]');
   assert.equal(await page.getAttribute('[data-provider="local"]', "aria-pressed"), "true");

@@ -96,6 +96,37 @@ async function waitForInitialize(child) {
   const outputLines = stdout.trim().split("\n").filter(Boolean);
   assert.equal(outputLines.length, 1, `unexpected extra stdout: ${stdout}`);
   for (const line of outputLines) assert.doesNotThrow(() => JSON.parse(line));
+  return response;
+}
+
+async function waitForBridge(child) {
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const details = await withTimeout(
+    new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => reject(new Error(
+        `bridge exited before listening (code=${code}, signal=${signal}, stderr=${stderr})`
+      )));
+      child.stderr.on("data", () => {
+        const portMatch = /Rabbithole bridge listening on http:\/\/127\.0\.0\.1:(\d+)/.exec(stderr);
+        const tokenMatch = /Pairing token: ([a-f0-9]{64})/.exec(stderr);
+        if (portMatch && tokenMatch) {
+          resolve({ port: Number(portMatch[1]), token: tokenMatch[1] });
+        }
+      });
+    }),
+    "bridge listen"
+  );
+  return { ...details, stdout: () => stdout, stderr: () => stderr };
 }
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-packaging-"));
@@ -135,6 +166,7 @@ try {
     "README.md",
     "LICENSE",
     "bin/mcp-server.js",
+    "bin/rabbithole.js",
     ...(await filesBelow("src/node")),
     ...(await filesBelow("src/core")),
     ...(await filesBelow("dist")),
@@ -155,7 +187,45 @@ try {
   );
 
   const binPath = path.join(projectDir, "node_modules", ".bin", "rabbithole-mcp");
+  const bridgeBinPath = path.join(projectDir, "node_modules", ".bin", "rabbithole");
   await fs.access(binPath, fs.constants.X_OK);
+  await fs.access(bridgeBinPath, fs.constants.X_OK);
+
+  const unknownResult = await execFileAsync(bridgeBinPath, ["unknown"], {
+    cwd: projectDir,
+  }).catch((error) => error);
+  assert.equal(unknownResult.code, 1, "an unknown rabbithole subcommand must fail");
+  assert.equal(unknownResult.stdout, "", "usage must not be written to stdout");
+  assert.match(unknownResult.stderr, /^Usage: rabbithole /);
+
+  child = spawn(bridgeBinPath, [], {
+    cwd: projectDir,
+    env: {
+      ...process.env,
+      RABBITHOLE_DIR: dataDir,
+      RABBITHOLE_NO_BROWSER: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "packaging-smoke-no-args", version: "1.0.0" },
+    },
+  })}\n`);
+  const noArgsInitialize = await waitForInitialize(child);
+  process.stdout.write(`acceptance G ${JSON.stringify({
+    jsonrpc: noArgsInitialize.jsonrpc,
+    id: noArgsInitialize.id,
+    protocolVersion: noArgsInitialize.result.protocolVersion,
+    serverName: noArgsInitialize.result.serverInfo.name,
+  })}\n`);
+  child = undefined;
+
   child = spawn(binPath, [], {
     cwd: projectDir,
     env: {
@@ -178,7 +248,59 @@ try {
   await waitForInitialize(child);
   child = undefined;
 
-  console.log(`ok packaging: asserted ${requiredPaths.length} paths and initialized installed rabbithole-mcp`);
+  child = spawn(bridgeBinPath, ["mcp"], {
+    cwd: projectDir,
+    env: {
+      ...process.env,
+      RABBITHOLE_DIR: dataDir,
+      RABBITHOLE_NO_BROWSER: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "packaging-smoke-dispatcher", version: "1.0.0" },
+    },
+  })}\n`);
+  await waitForInitialize(child);
+  child = undefined;
+
+  child = spawn(bridgeBinPath, ["bridge", "--port", "0"], {
+    cwd: projectDir,
+    env: {
+      ...process.env,
+      RABBITHOLE_DIR: dataDir,
+      RABBITHOLE_BRIDGE_CLAUDE_BIN: path.join(ROOT, "test/integration/fixtures/fake-claude.mjs"),
+      RABBITHOLE_BRIDGE_CODEX_BIN: path.join(ROOT, "test/integration/fixtures/fake-codex.mjs"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const bridgeOutput = await waitForBridge(child);
+  const modelsResponse = await withTimeout(
+    fetch(`http://127.0.0.1:${bridgeOutput.port}/v1/models`, {
+      headers: { Authorization: `Bearer ${bridgeOutput.token}` },
+    }),
+    "installed bridge models"
+  );
+  assert.equal(modelsResponse.status, 200);
+  const modelList = await modelsResponse.json();
+  assert.equal(modelList.object, "list");
+  assert.ok(modelList.data.some((model) => model.id === "claude/sonnet"));
+  assert.ok(modelList.data.some((model) => model.id === "codex/gpt-fake"));
+  assert.equal(bridgeOutput.stdout(), "", "bridge mode must not write to stdout");
+
+  child.kill("SIGTERM");
+  const bridgeExit = await withTimeout(waitForExit(child), "clean bridge shutdown");
+  assert.deepEqual(bridgeExit, { code: 0, signal: null });
+  assert.match(bridgeOutput.stderr(), /Received SIGTERM, shutting down bridge/);
+  child = undefined;
+
+  console.log(`ok packaging: asserted ${requiredPaths.length} paths, checked dispatcher default/usage/MCP, initialized rabbithole-mcp, and probed authenticated bridge models`);
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGTERM");

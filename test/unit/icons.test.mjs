@@ -14,9 +14,11 @@ assert.throws(() => iconSvg("missing"), /Unknown Rabbithole icon/);
 assert.throws(() => iconSvg("send", { size: 0 }), /positive number/);
 
 const roots = ["src", "website/about"];
+const inspectedFiles = [];
 const violations = [];
 for (const root of roots) {
   for (const file of await sourceFiles(root)) {
+    inspectedFiles.push(file);
     if (file === "src/core/html/icons.js") continue;
     let source = await fs.readFile(file, "utf8");
     if (file === "src/core/html/shell.js") {
@@ -25,6 +27,7 @@ for (const root of roots) {
     if (source.includes("<svg")) violations.push(file);
   }
 }
+assert(inspectedFiles.includes("src/core/html/icons.js"), "icon source scan must inspect the canonical icon file");
 assert.deepEqual(
   violations,
   [],

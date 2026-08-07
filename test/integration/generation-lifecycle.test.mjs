@@ -51,6 +51,22 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+try {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: {
+      code: "agent_signed_out",
+      message: "Claude Code is signed out.",
+    },
+  }), { status: 503, headers: { "Content-Type": "application/json" } });
+  const bridgeError = await collect(streamOpenAICompatible({
+    url: "http://127.0.0.1:41414/v1/chat/completions",
+    body: {},
+  })).catch((error) => error);
+  assert.equal(bridgeError.code, "agent_signed_out", "bridge recovery codes survive the OpenAI-compatible adapter");
+  assert.equal(bridgeError.message, "Claude Code is signed out.", "agent failures do not acquire generic provider copy");
+} finally {
+  globalThis.fetch = originalFetch;
+}
 assert.equal(parseOpenAISseEvent('data: {"choices":[{"message":{"content":"one"}}]}\ndata: {"choices":[{"delta":{"content":" two"}}]}'), "one two");
 assert.equal(parseOpenAISseEvent("data: [DONE]"), "");
 console.log("ok generation lifecycle: OpenAI SSE arbitrary fragmentation, multi-event chunks, CRLF, and DONE");
@@ -101,6 +117,58 @@ failureHost.handleAnswerError(failedHole.root_id, new TypeError("Failed to fetch
 assert.equal(providerFailure?.error?.code, "network");
 assert.equal(typeof providerFailure?.retry, "function");
 assert.equal(authFailure, null);
+const signedOutHole = createPendingHoleFromQuestion("Still there?");
+const signedOutHost = new DirectRabbitholeHost({
+  store: { saveHole: async () => {} },
+  hole: signedOutHole,
+  onProviderFailure: (failure) => { providerFailure = failure; },
+});
+signedOutHost.handleAnswerError(
+  signedOutHole.root_id,
+  new ProviderError("Codex is signed out.", { status: 503, code: "agent_signed_out" }),
+  new AbortController().signal,
+);
+assert.equal(providerFailure?.error?.code, "agent_signed_out");
+const modelFailureHole = createPendingHoleFromQuestion("Which model?");
+const modelFailureHost = new DirectRabbitholeHost({
+  store: { saveHole: async () => {} },
+  hole: modelFailureHole,
+  onProviderFailure: (failure) => { providerFailure = failure; },
+});
+modelFailureHost.handleAnswerError(
+  modelFailureHole.root_id,
+  new ProviderError("Unknown model.", { status: 400, code: "model_unknown" }),
+  new AbortController().signal,
+);
+assert.equal(providerFailure?.error?.code, "model_unknown");
+const unpairedHost = new DirectRabbitholeHost({
+  store: { saveHole: async () => {} },
+  hole: createPendingHoleFromQuestion("Use my plan"),
+  brainRequiredError: {
+    message: "Pair Rabbithole with your subscriptions to keep asking.",
+    code: "subscription_unpaired",
+  },
+});
+await assert.rejects(
+  () => unpairedHost.runRootAnswer(unpairedHost.state.root_id, "Use my plan", new AbortController()),
+  (error) => error.code === "subscription_unpaired"
+    && /Pair Rabbithole/.test(error.message)
+    && !/provider key/i.test(error.message),
+  "Subscriptions must never inherit the provider-key no-brain error",
+);
+let abortedFailure = false;
+let abortedEvent = false;
+const abortedHost = new DirectRabbitholeHost({
+  store: { saveHole: async () => {} },
+  hole: createPendingHoleFromQuestion("Cancel me"),
+  onProviderFailure: () => { abortedFailure = true; },
+});
+abortedHost.onEvent = () => { abortedEvent = true; };
+const abortedController = new AbortController();
+abortedController.abort();
+abortedHost.handleAnswerError(abortedHost.state.root_id, new DOMException("Aborted", "AbortError"), abortedController.signal);
+assert.equal(abortedFailure, false);
+assert.equal(abortedEvent, false, "abort routes to no product failure or node error");
 console.log("ok generation lifecycle: local network failures have a dedicated recover-and-retry hook");
 
 async function* fixtureChunks(parts) { yield* parts; }
@@ -236,6 +304,9 @@ assert.deepEqual(deliveredEvents, [{ type: "first" }], "closed browser subscript
 
 const disposalEvents = [];
 lifecycleHost.adapter().connect({ onMessage: (event) => disposalEvents.push(event) });
+lifecycleHost.emit({ type: "before-dispose" });
+assert.deepEqual(disposalEvents, [{ type: "before-dispose" }]);
+disposalEvents.length = 0;
 await lifecycleHost.dispose();
 await lifecycleHost.dispose();
 lifecycleHost.emit({ type: "after-dispose" });
@@ -301,7 +372,7 @@ const authorDocumentPromise = authoringHost.authorDocument({ markdown: "Original
 });
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(progressLengths, [9]);
-assert.equal(authoringSaves.length, 0);
+const savesWhileStreaming = authoringSaves.length;
 continueAuthoring();
 const authoredHole = await authorDocumentPromise;
 assert.deepEqual(progressLengths, [9, 13]);
@@ -310,11 +381,16 @@ assert.equal(authoredHole.nodes[0].markdown, "# Better\nBody");
 assert.equal(authoredHole.nodes[0].status, "answered");
 assert.equal(authoringSaves.length, 1);
 assert.equal(authoringSaves[0].nodes[0].markdown, "# Better\nBody");
+assert.equal(savesWhileStreaming, 0);
 assert.equal(authoringHost.abortByNode.size, 0);
 
 const failedAuthoringSaves = [];
+const captureFailedAuthoringSave = async (hole) => failedAuthoringSaves.push(structuredClone(hole));
+await captureFailedAuthoringSave(authoringHole);
+assert.equal(failedAuthoringSaves.length, 1);
+failedAuthoringSaves.length = 0;
 const failedAuthoringHost = new DirectRabbitholeHost({
-  store: { saveHole: async (hole) => failedAuthoringSaves.push(structuredClone(hole)) },
+  store: { saveHole: captureFailedAuthoringSave },
   hole: structuredClone(authoringHole),
   brain: { async *authorDocument() { yield { type: "text", delta: "Partial" }; throw new Error("provider failed"); } },
 });

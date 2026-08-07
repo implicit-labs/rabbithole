@@ -8,7 +8,11 @@ assert.equal(providerFor("custom_endpoint").id, "custom_endpoint");
 assert.equal(providerFor("nonsense").id, "openrouter", "unknown providers fall back to the recommended one");
 assert.equal(providerFor(undefined).id, "openrouter");
 
-assert.deepEqual(Object.values(PROVIDERS).map((provider) => provider.label), ["OpenRouter", "Local", "Custom"]);
+assert.deepEqual(Object.values(PROVIDERS).map((provider) => provider.label), ["OpenRouter", "Subscriptions", "Local", "Custom"]);
+assert.equal(providerFor("subscriptions").id, "subscriptions");
+assert.equal(PROVIDERS.subscriptions.requires_key, false, "subscriptions authenticate through the local helper, never a key");
+assert.equal(PROVIDERS.subscriptions.base_url, "http://127.0.0.1:41414/v1", "the helper owns a fixed loopback port");
+assert.equal(PROVIDERS.subscriptions.model, "", "no subscription model can be assumed before the helper reports one");
 assert.equal(PROVIDERS.custom_endpoint.requires_key, false, "a custom endpoint may have no auth at all");
 assert.equal(PROVIDERS.custom_endpoint.allows_key, true, "a custom endpoint must still be able to send a key");
 assert.equal(PROVIDERS.custom_endpoint.requires_base_url, true);
@@ -36,6 +40,31 @@ assert.equal(settings.base_url, "http://localhost:11434/v1");
 assert.equal(settings.model, "llama3.2");
 settings = settingsForProvider("custom_endpoint", settings);
 assert.equal(settings.base_url, "https://api.example.com/v1", "Local must not clobber the custom endpoint slot");
+
+/* Subscription agent picks are per-provider and per-agent state. */
+settings = settingsForProvider("subscriptions", settings);
+settings = {
+  ...settings,
+  agent: "claude",
+  model: "claude/sonnet",
+  reasoning: "xhigh",
+  agents: {
+    claude: { model: "claude/sonnet", reasoning: "xhigh", transcribe_model: "claude/sonnet" },
+    codex: { model: "codex/gpt-5.6-sol", reasoning: "low", transcribe_model: "" },
+  },
+};
+settings = settingsForProvider("openrouter", settings);
+assert.equal(settings.reasoning, "", "OpenRouter has no reasoning selection");
+assert.equal(settings.agent, "", "subscription-only state does not leak into another provider");
+settings = settingsForProvider("subscriptions", settings);
+assert.equal(settings.model, "claude/sonnet", "the chosen subscription model survives a provider round trip");
+assert.equal(settings.reasoning, "xhigh", "the chosen reasoning effort survives a provider round trip");
+assert.equal(settings.agent, "claude");
+assert.deepEqual(settings.agents.codex, {
+  model: "codex/gpt-5.6-sol",
+  reasoning: "low",
+  transcribe_model: "",
+}, "each agent keeps its own model and reasoning");
 
 /* A legacy slot keyed by the old id has to land in the Local slot, not vanish. */
 const legacy = settingsForProvider("local", {

@@ -15,15 +15,10 @@ export function loadSettings() {
     const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return defaults;
     const preset = providerFor(parsed.preset).id;
-    const providers = normalizeProviderSettings(parsed.providers);
-    const provider = providerFor(preset);
-    const active = providers[preset] || {
-      base_url: typeof parsed.base_url === "string" ? parsed.base_url : provider.base_url,
-      model: typeof parsed.model === "string" ? parsed.model : provider.model,
-      transcribe_model: typeof parsed.transcribe_model === "string" ? parsed.transcribe_model : provider.transcribe_model,
-    };
+    const providers = normalizeProviderSettings(parsed.providers, { [preset]: parsed });
+    const active = providers[preset] || normalizeProviderSettings({ [preset]: parsed })[preset];
     providers[preset] = active;
-    return { ...defaults, ...parsed, preset, ...active, providers };
+    return { ...defaults, ...parsed, agent: "", agents: {}, preset, ...active, providers };
   } catch {
     return defaults;
   }
@@ -32,11 +27,7 @@ export function loadSettings() {
 export function saveSettings(settings) {
   const preset = providerFor(settings.preset).id;
   const providers = normalizeProviderSettings(settings.providers);
-  providers[preset] = {
-    base_url: String(settings.base_url || ""),
-    model: String(settings.model || ""),
-    transcribe_model: String(settings.transcribe_model || ""),
-  };
+  providers[preset] = normalizeProviderSettings({ [preset]: settings })[preset];
   const { api_key, ...persistable } = { ...settings, preset, providers };
   if (persistable.fetch_proxy_url === DEFAULT_FETCH_PROXY_URL) delete persistable.fetch_proxy_url;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(persistable));

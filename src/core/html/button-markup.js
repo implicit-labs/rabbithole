@@ -44,7 +44,11 @@ function buttonAttributes(options, iconOnly) {
 
 /** @param {ButtonOptions} [options] */
 export function buttonMarkup(options = {}) {
-  const content = (options.svgIconHtml || "") + escapeHtml(String(options.label || "")) +
+  const rawLabel = String(options.label || "");
+  const label = options.labelClass && rawLabel
+    ? "<span" + attribute("class", options.labelClass) + ">" + escapeHtml(rawLabel) + "</span>"
+    : escapeHtml(rawLabel);
+  const content = (options.svgIconHtml || "") + label +
     (options.kbdHint ? "<kbd>" + escapeHtml(String(options.kbdHint)) + "</kbd>" : "");
   return "<button" + buttonAttributes(options, false) + ">" + content + "</button>";
 }

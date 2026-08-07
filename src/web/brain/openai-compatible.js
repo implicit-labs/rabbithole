@@ -15,17 +15,23 @@ export function createBrain(settings, apiKey) {
     apiKey,
     model,
     transcribeModel: settings?.transcribe_model || preset.transcribe_model || model,
+    reasoningEffort: settings?.reasoning || "",
   });
 }
 
 export class OpenAICompatibleBrain {
-  constructor({ baseUrl, apiKey, model, transcribeModel, extraHeaders = {}, title = "Rabbithole" } = {}) {
+  constructor({ baseUrl, apiKey, model, transcribeModel, reasoningEffort = "", extraHeaders = {}, title = "Rabbithole" } = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
     this.apiKey = apiKey || "";
     this.model = model || "anthropic/claude-sonnet-5";
     this.transcribeModel = transcribeModel || this.model;
+    this.reasoningEffort = reasoningEffort || "";
     this.extraHeaders = extraHeaders || {};
     this.title = title;
+  }
+
+  tuning() {
+    return this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {};
   }
 
   async *authorDocument(source, signal) {
@@ -34,6 +40,7 @@ export class OpenAICompatibleBrain {
       messages: buildAuthorMessages(source),
       stream: true,
       temperature: 0.2,
+      ...this.tuning(),
     };
     yield* adaptTextGeneration(streamOpenAICompatible({
       url: chatCompletionsUrl(this.baseUrl),
@@ -51,6 +58,7 @@ export class OpenAICompatibleBrain {
       messages: buildExplainerMessages({ question }),
       stream: true,
       temperature: 0.35,
+      ...this.tuning(),
     };
     yield* adaptTextGeneration(streamOpenAICompatible({
       url: chatCompletionsUrl(this.baseUrl),
@@ -68,6 +76,7 @@ export class OpenAICompatibleBrain {
       messages: buildAnswerMessages(context),
       stream: true,
       temperature: 0.4,
+      ...this.tuning(),
     };
     yield* adaptBranchGeneration(streamOpenAICompatible({
       url: chatCompletionsUrl(this.baseUrl),
@@ -82,7 +91,7 @@ export class OpenAICompatibleBrain {
   async *transcribePages(input, signal) {
     yield* adaptTextGeneration(streamOpenAICompatible({
       url: chatCompletionsUrl(this.baseUrl), apiKey: this.apiKey,
-      body: { model: this.transcribeModel, messages: buildTranscribeMessages(input), stream: true, temperature: 0.1 },
+      body: { model: this.transcribeModel, messages: buildTranscribeMessages(input), stream: true, temperature: 0.1, ...this.tuning() },
       signal, extraHeaders: this.extraHeaders, title: this.title,
     }));
   }
@@ -153,12 +162,14 @@ export function parseOpenAISseEvent(eventText) {
 
 async function responseError(response) {
   let detail = "";
+  let providerCode = "";
   try {
     const text = await response.text();
     if (text) {
       try {
         const json = JSON.parse(text);
         detail = json.error?.message || json.message || "";
+        providerCode = json.error?.code || json.code || "";
       } catch {
         detail = text.slice(0, 180);
       }
@@ -168,9 +179,18 @@ async function responseError(response) {
   const prefix = status === 401 ? "Bad or missing API key"
     : status === 429 ? "Rate limited by the provider"
       : `Provider returned HTTP ${status}`;
-  return new ProviderError(detail ? `${prefix}: ${detail}` : prefix, {
+  const bridgeFailure = [
+    "unauthorized",
+    "agent_signed_out",
+    "agent_missing",
+    "model_unknown",
+    "model_no_images",
+    "payload_too_large",
+    "turn_failed",
+  ].includes(providerCode);
+  return new ProviderError(bridgeFailure && detail ? detail : detail ? `${prefix}: ${detail}` : prefix, {
     status,
-    code: String(status),
+    code: providerCode || String(status),
     retryable: status !== 401 && status !== 403,
   });
 }

@@ -51,6 +51,7 @@ async function verifySelfContainedMcpPage() {
   await page.on("request", (request) => requests.push(request.url()));
   await page.goto(session.url, { waitUntil: "load" });
   await page.waitForFunction(() => !!document.querySelector(".viz-mermaid")?.shadowRoot?.querySelector("svg"));
+  assert(requests.some((url) => url.startsWith(session.url)), "MCP request capture must observe the canvas");
   assert.equal(requests.filter((url) => /\/mermaid\.js(?:\?|$)/.test(url)).length, 0, "MCP canvas must not fetch an external Mermaid asset");
   assert.equal(await page.locator('#rabbithole-mermaid-runtime[type="application/vnd.rabbithole+mermaid"]').count(), 1);
   const exported = await fetch(`${session.url}/export`);
@@ -69,6 +70,7 @@ async function verifyWebApp() {
     await route.continue();
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  assert(requests.some((url) => url.startsWith(baseUrl)), "web request capture must observe the app");
   assert.equal(requests.filter((url) => /\/mermaid\.js(?:\?|$)/.test(url)).length, 0, "blank web app must not load Mermaid");
 
   await page.setInputFiles("#file-md", fixturePath);
@@ -272,6 +274,10 @@ async function verifyOfflineSnapshot(snapshot) {
     requests.push(route.request().url());
     await route.abort();
   });
+  const captureProbe = "https://rabbithole-mermaid-capture-probe.invalid/";
+  await page.evaluate((url) => fetch(url).catch(() => null), captureProbe);
+  assert(requests.includes(captureProbe), "offline request capture must observe the probe");
+  requests.length = 0;
   await page.setContent(snapshot, { waitUntil: "load" });
   await page.waitForFunction(() => {
     const mounts = [...document.querySelectorAll(".viz-mermaid")];

@@ -20,6 +20,8 @@ const ICON_DEFINITIONS = Object.freeze({
   bunny: { size: null, attrs: 'viewBox="0 0 64 64" fill="currentColor"', body: BUNNY_SHAPES },
   rail: { size: 16, attrs: STROKE_16, body: '<rect x="2.5" y="2.75" width="11" height="10.5" rx="1.6"/><path d="M6.25 2.75v10.5"/>' },
   new: { size: 16, attrs: STROKE_16, body: '<path d="M9.75 3.25H4.5c-.7 0-1.25.55-1.25 1.25v7c0 .7.55 1.25 1.25 1.25h7c.7 0 1.25-.55 1.25-1.25V6.25"/><path d="m7.25 9.25.35-1.7 4.55-4.55a.85.85 0 0 1 1.2 1.2L8.8 8.75z"/>' },
+  reader: { size: 16, attrs: STROKE_16, body: '<path d="M8 4.35A4.35 4.35 0 0 0 4.8 3H2.75v8.5H4.8A4.35 4.35 0 0 1 8 12.85z"/><path d="M8 4.35A4.35 4.35 0 0 1 11.2 3h2.05v8.5H11.2A4.35 4.35 0 0 0 8 12.85z"/>' },
+  canvas: { size: 16, attrs: STROKE_16, body: '<rect x="2.5" y="2.75" width="4.25" height="3.5" rx=".8"/><rect x="9.25" y="9.75" width="4.25" height="3.5" rx=".8"/><path d="M6.75 4.5h1.1a3 3 0 0 1 3 3v2.25"/>' },
   "zoom-out": { size: 16, attrs: STROKE_16, body: '<path d="M4 8h8"/>' },
   "zoom-in": { size: 16, attrs: STROKE_16, body: '<path d="M8 4v8M4 8h8"/>' },
   frame: { size: 16, attrs: STROKE_16, body: '<path d="M5.8 3.25H3.25V5.8"/><path d="M10.2 3.25h2.55V5.8"/><path d="M12.75 10.2v2.55H10.2"/><path d="M5.8 12.75H3.25V10.2"/>' },

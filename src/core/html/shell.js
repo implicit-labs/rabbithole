@@ -9,18 +9,21 @@ import { iconSvg } from "./icons.js";
 export const CANVAS_SHELL = `
 <div id="taskbar">
   <div class="tb-pill" id="tb-tools">
-    ${iconButtonMarkup({ id: "t-rail", title: "Rabbitholes · S", ariaLabel: "Toggle rabbitholes", ariaExpanded: "false", ariaControls: "web-rail", svgIconHtml: iconSvg("rail") })}
-    ${iconButtonMarkup({ id: "t-new", title: "New Rabbithole · N", ariaLabel: "New Rabbithole", svgIconHtml: iconSvg("new") })}
-    <span class="sep" id="app-sep"></span>
+    <!-- The rail and New Rabbithole belong to the web app, which owns a library of
+         holes and can create one. Under MCP the agent opens the hole and there is no
+         library to browse, so the web shell injects those two itself (renderShell). -->
+    <span id="tb-app"></span>
+    <span class="sep" id="app-view-sep"></span>
+    <span id="tb-view" role="group" aria-label="View">
+      ${buttonMarkup({ id: "t-reader", title: "Reader view", ariaLabel: "Reader view", ariaPressed: "true", label: "Reader", labelClass: "view-label", svgIconHtml: iconSvg("reader") })}
+      ${buttonMarkup({ id: "t-canvas", title: "Canvas view", ariaLabel: "Canvas view", ariaPressed: "false", label: "Canvas", labelClass: "view-label", svgIconHtml: iconSvg("canvas") })}
+    </span>
+    <span class="sep"></span>
     <span class="tb-group" data-mode="reader">
-      ${buttonMarkup({ id: "t-canvas", title: "Open the spatial canvas", label: "Canvas" })}
-      <span class="sep"></span>
       ${buttonMarkup({ id: "r-textdown", title: "Smaller text", label: "A−" })}
       ${buttonMarkup({ id: "r-textup", title: "Larger text", label: "A+" })}
     </span>
     <span class="tb-group" data-mode="canvas">
-      ${buttonMarkup({ id: "t-reader", title: "Read this document", label: "Reader" })}
-      <span class="sep"></span>
       <span class="zoom-controls">
         ${iconButtonMarkup({ id: "t-zout", title: "Zoom out", ariaLabel: "Zoom out", svgIconHtml: iconSvg("zoom-out") })}
         ${buttonMarkup({ id: "zoom-label", title: "Zoom to 100%", ariaLabel: "Zoom to 100%", label: "100%" })}

@@ -109,9 +109,11 @@ try {
     return !!canvas && canvas.width > 0 && canvas.height > 0;
   });
 
+  assert(requests.some((url) => url.startsWith(baseUrl) || url.startsWith("blob:")),
+    "PDF request capture must observe the import");
   const externalDuringPdf = requests.filter((url) => !url.startsWith(baseUrl) && !url.startsWith("blob:") && !url.startsWith("http://localhost:11434/"));
   assert.deepEqual(externalDuringPdf, [], `PDF ingest made external request(s): ${externalDuringPdf.join(", ")}`);
-  assert.equal(answerBodies.length, 0, "PDF import may inspect local model capabilities but must not invoke model inference");
+  const answerCallsAfterImport = answerBodies.length;
 
   const pdfState = await page.evaluate(async () => {
     const holeId = window.__rabbitholeTest.currentHoleId();
@@ -169,6 +171,7 @@ try {
   await mark.waitFor();
   assert.equal(await page.locator(".node .rh-pdf-convert").count(), 0, "creating the first branch should immediately remove the text-version action");
   assert.equal(answerBodies.length, 2, "vision rejection should trigger exactly one text-only retry");
+  assert.equal(answerCallsAfterImport, 0, "PDF import may inspect local model capabilities but must not invoke model inference");
   assert(Array.isArray(answerBodies[0].messages.at(-1).content), "paper text selection should ship multimodal content parts");
   assert.equal(answerBodies[0].messages.at(-1).content[1].type, "image_url");
   assert.match(answerBodies[0].messages.at(-1).content[1].image_url.url, /^data:image\/png;base64,/);

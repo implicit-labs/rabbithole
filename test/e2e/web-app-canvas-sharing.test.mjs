@@ -60,7 +60,7 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
 
     const toolbar = await page.locator("#taskbar").evaluate((element) => {
       const rect = element.getBoundingClientRect();
-      const controls = ["t-zout", "zoom-label", "t-zin"].map((id) => {
+      const controls = ["t-reader", "t-canvas", "t-zout", "zoom-label", "t-zin"].map((id) => {
         const item = document.getElementById(id).getBoundingClientRect();
         return { id, width: item.width, height: item.height, right: item.right };
       });
@@ -1050,6 +1050,22 @@ async function verifyCanvasBranching() {
   });
   await page.click("#t-reader");
   await page.waitForSelector("body:not(.mode-canvas)");
+  assert.deepEqual(await page.locator("#tb-view").evaluate((group) => {
+    const reader = document.getElementById("t-reader");
+    const canvas = document.getElementById("t-canvas");
+    return {
+      label: group.getAttribute("aria-label"),
+      reader: reader.getAttribute("aria-pressed"),
+      canvas: canvas.getAttribute("aria-pressed"),
+      readerName: reader.getAttribute("aria-label"),
+      canvasName: canvas.getAttribute("aria-label"),
+      readerLabel: getComputedStyle(reader.querySelector(".view-label")).display,
+      canvasLabel: getComputedStyle(canvas.querySelector(".view-label")).display,
+      focus: document.activeElement?.id,
+    };
+  }), { label: "View", reader: "true", canvas: "false", readerName: "Reader view", canvasName: "Canvas view",
+    readerLabel: "none", canvasLabel: "block", focus: "t-reader" },
+  "Reader mode should collapse its label, expose Canvas as the labeled destination, and preserve focus");
   const readerReadingPosition = await page.locator("#reader-main").evaluate((scroller) => {
     const top = scroller.getBoundingClientRect().top;
     const blocks = Array.from(scroller.querySelector(".doc-content").children);
@@ -1076,6 +1092,18 @@ async function verifyCanvasBranching() {
   await page.focus("#t-canvas");
   await page.keyboard.press("Enter");
   await page.waitForSelector("body.mode-canvas");
+  assert.deepEqual(await page.locator("#tb-view").evaluate(() => {
+    const reader = document.getElementById("t-reader");
+    const canvas = document.getElementById("t-canvas");
+    return {
+      reader: reader.getAttribute("aria-pressed"),
+      canvas: canvas.getAttribute("aria-pressed"),
+      readerLabel: getComputedStyle(reader.querySelector(".view-label")).display,
+      canvasLabel: getComputedStyle(canvas.querySelector(".view-label")).display,
+      focus: document.activeElement?.id,
+    };
+  }), { reader: "false", canvas: "true", readerLabel: "block", canvasLabel: "none", focus: "t-canvas" },
+  "Canvas mode should collapse its label, expose Reader as the labeled destination, and preserve focus");
   await page.waitForTimeout(50);
   const canvasReturnPosition = await page.locator(".node.root .node-body").evaluate((scroller) => {
     const top = scroller.getBoundingClientRect().top;
@@ -1090,8 +1118,12 @@ async function verifyCanvasBranching() {
   await page.focus("#t-new");
   await page.keyboard.press("Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-reader");
-  const canvasFocusRing = await page.evaluate(() => getComputedStyle(document.getElementById("t-reader")).outlineStyle);
-  assert.notEqual(canvasFocusRing, "none", "keyboard focus should show the canvas-toolbar focus-visible ring");
+  const canvasFocusRing = await page.evaluate(() => {
+    const style = getComputedStyle(document.getElementById("t-reader"));
+    return { outline: style.outlineStyle, shadow: style.boxShadow };
+  });
+  assert.equal(canvasFocusRing.outline, "none", "the embedded view control should avoid a detached focus halo");
+  assert.notEqual(canvasFocusRing.shadow, "none", "keyboard focus should retain a visible inset indicator");
   await page.keyboard.press("Space");
   await page.waitForSelector("body:not(.mode-canvas)");
   await page.focus("#t-canvas");

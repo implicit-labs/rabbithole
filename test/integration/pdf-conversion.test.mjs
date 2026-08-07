@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import * as napiCanvas from "@napi-rs/canvas";
 import { DirectRabbitholeHost, createHoleFromMarkdown } from "../../src/web/transport/direct-host.js";
+import { ProviderError } from "../../src/web/brain/errors.js";
 import { readAttentionPdf } from "../support/attention-pdf.mjs";
 globalThis.FileReader ||= class { readAsDataURL(blob) { blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`; this.onload?.(); }); } };
 for (const name of ["DOMMatrix", "DOMPoint", "DOMRect", "Path2D", "ImageData"]) if (!globalThis[name] && napiCanvas[name]) globalThis[name] = napiCanvas[name];
@@ -72,6 +73,22 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   assert.match(toasts[0].message, /PDF conversion failed: model exploded/);
 }
 
+// ---- bridge payload cap: halve once and preserve page order -----------------
+{
+  const pageCounts = [];
+  const brain = { async *transcribePages({ pages }) {
+    pageCounts.push(pages.length);
+    if (pages.length === 5) throw new ProviderError("Too large.", { status: 413, code: "payload_too_large" });
+    yield { type: "text", delta: pages.map((page) => `page ${page.n}`).join(", ") };
+  } };
+  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 5 }), brain });
+  const rootId = host.state.root_id;
+  await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
+  await settle(() => host.state.nodes.get(rootId).extensions.pdf.converted);
+  assert.deepEqual(pageCounts, [5, 3, 2], "payload_too_large retries one halved 3+2 batch");
+  assert.equal(host.state.nodes.get(rootId).markdown, "page 1, page 2, page 3\n\npage 4, page 5");
+}
+
 // ---- cancel mid-run (after a committed batch): restore, no toast ------------
 {
   const brain = { async *transcribePages({ pages }, signal) {
@@ -79,7 +96,11 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
     await new Promise((_, reject) => { const fail = () => reject(new DOMException("Aborted", "AbortError")); if (signal.aborted) fail(); else signal.addEventListener("abort", fail, { once: true }); });
   } };
   const toasts = [];
-  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 6 }), brain, onToast: (toast) => toasts.push(toast) });
+  const captureToast = (toast) => toasts.push(toast);
+  captureToast({ message: "toast-capture-probe" });
+  assert.equal(toasts[0].message, "toast-capture-probe");
+  toasts.length = 0;
+  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 6 }), brain, onToast: captureToast });
   const rootId = host.state.root_id;
   await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
   await settle(() => host.state.nodes.get(rootId).markdown.includes("Batch one"));
@@ -106,4 +127,4 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   assert.equal(restored.extensions.pdf.pages.length, 2);
 }
 
-console.log("ok PDF conversion: streamed commit with stash preservation, failure toast + restore, cancel restore, and clean/dirty hydration restore");
+console.log("ok PDF conversion: streamed commit, one halved payload retry, failure/cancel restore, and clean/dirty hydration restore");

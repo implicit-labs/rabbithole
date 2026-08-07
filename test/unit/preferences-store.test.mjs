@@ -10,6 +10,7 @@ globalThis.localStorage = {
 const { getApiKey } = await import("../../src/web/settings/credential-store.js");
 const { loadSettings, saveSettings } = await import("../../src/web/settings/preferences-store.js");
 const { settingsForProvider } = await import("../../src/web/brain/provider-registry.js");
+const { takeBridgeTokenFromFragment } = await import("../../src/web/settings/bridge-pairing.js");
 
 const SETTINGS_KEY = "rh-web-settings";
 const LEGACY_KEY = "rh-web-api-key";
@@ -62,6 +63,71 @@ settings = loadSettings();
 assert.equal(settings.base_url, "http://localhost:11434/v1", "Local restores its own endpoint");
 saveSettings(settingsForProvider("custom_endpoint", loadSettings()));
 assert.equal(loadSettings().base_url, "https://api.example.com/v1", "Local must not overwrite the custom slot");
+
+/* The Subscriptions slot retains the selected agent and each agent's choices. */
+saveSettings({
+  ...settingsForProvider("subscriptions", loadSettings()),
+  agent: "codex",
+  token: "paired-token",
+  model: "codex/gpt-5.6-sol",
+  reasoning: "low",
+  agents: {
+    claude: { model: "claude/opus", reasoning: "high", transcribe_model: "claude/opus" },
+    codex: { model: "codex/gpt-5.6-sol", reasoning: "low", transcribe_model: "" },
+  },
+});
+settings = loadSettings();
+assert.equal(settings.agent, "codex");
+assert.equal(settings.token, "paired-token");
+assert.equal(settings.agents.claude.model, "claude/opus");
+assert.equal(settings.agents.codex.reasoning, "low");
+saveSettings(settingsForProvider("openrouter", settings));
+assert.equal(loadSettings().agent, "");
+saveSettings(settingsForProvider("subscriptions", loadSettings()));
+assert.equal(loadSettings().agent, "codex");
+assert.equal(loadSettings().agents.claude.reasoning, "high");
+assert.equal(loadSettings().token, "paired-token");
+
+/* An active provider slot falls back to legacy top-level values field by field. */
+store.set(SETTINGS_KEY, JSON.stringify({
+  preset: "subscriptions",
+  base_url: "http://127.0.0.1:41414/v1",
+  model: "claude/legacy-model",
+  transcribe_model: "claude/legacy-vision",
+  reasoning: "high",
+  token: "legacy-token",
+  agents: { claude: { model: "claude/top-level", reasoning: "xhigh" } },
+  providers: {
+    subscriptions: {
+      agent: "claude",
+      agents: { claude: { transcribe_model: "claude/slot-vision" } },
+    },
+  },
+}));
+settings = loadSettings();
+assert.equal(settings.model, "claude/legacy-model");
+assert.equal(settings.transcribe_model, "claude/legacy-vision");
+assert.equal(settings.reasoning, "high");
+assert.equal(settings.token, "legacy-token");
+assert.deepEqual(settings.agents.claude, {
+  model: "claude/top-level",
+  transcribe_model: "claude/slot-vision",
+  reasoning: "xhigh",
+});
+
+/* Fragment pairing removes only bridge and leaves the remaining hash route intact. */
+const pairingLocation = { pathname: "/h/example", search: "?view=canvas", hash: "#route=notes&bridge=fresh-token&tab=2" };
+let replacedUrl = "";
+const pairingHistory = {
+  state: { preserved: true },
+  replaceState(state, title, url) {
+    assert.deepEqual(state, { preserved: true });
+    assert.equal(title, "");
+    replacedUrl = url;
+  },
+};
+assert.equal(takeBridgeTokenFromFragment(pairingLocation, pairingHistory), "fresh-token");
+assert.equal(replacedUrl, "/h/example?view=canvas#route=notes&tab=2");
 
 /* Omitted keys preserve remembered credentials; only an explicit clear deletes them. */
 store.clear();

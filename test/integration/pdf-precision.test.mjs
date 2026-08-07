@@ -27,6 +27,9 @@ const page = await context.newPage();
 const pageErrors = [];
 const answerBodies = [];
 page.on("pageerror", (error) => pageErrors.push(error.stack || error.message));
+page.emit("pageerror", new Error("page-error-capture-probe"));
+assert.equal(pageErrors.some((message) => message.includes("page-error-capture-probe")), true);
+pageErrors.length = 0;
 await page.route("http://localhost:11434/v1/models", (route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [{ id: "llama3.2" }, { id: "llama3.2-vision" }] }) }));
 await page.route("http://localhost:11434/api/show", (route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ capabilities: ["completion", "vision"] }) }));
 await page.route("http://localhost:11434/v1/chat/completions", async (route) => {
@@ -243,12 +246,21 @@ try {
     };
     sample();
     const observer = new MutationObserver((records) => {
+      observerRecords += records.length;
       for (const record of records) for (const added of record.addedNodes) {
         if (added.nodeType === 1 && added.matches?.(".rh-pdf-canvas-generation") && added.dataset.ready !== "true") unreadyInsertions.push("blank overlay inserted");
       }
       sample();
     });
-    observer.observe(firstPage.querySelector(".rh-pdf-canvas-layer"), { childList: true });
+    let observerRecords = 0;
+    const canvasLayer = firstPage.querySelector(".rh-pdf-canvas-layer");
+    observer.observe(canvasLayer, { childList: true });
+    const captureProbe = document.createElement("span");
+    captureProbe.dataset.ready = "true";
+    captureProbe.className = "rh-pdf-canvas-generation";
+    canvasLayer.append(captureProbe);
+    captureProbe.remove();
+    await new Promise((resolve) => queueMicrotask(resolve));
     for (let index = 0; index < 8; index++) {
       pdfScroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -8, clientX: innerWidth / 2, clientY: innerHeight / 2 }));
       await new Promise((resolve) => requestAnimationFrame(() => { sample(); resolve(); }));
@@ -264,6 +276,7 @@ try {
     return {
       gaps,
       unreadyInsertions,
+      observerRecords,
       settled,
       label: document.querySelector(".node .rh-pdf-zoom-value").textContent,
       maxGenerations,
@@ -273,10 +286,11 @@ try {
       worldAfter: document.querySelector("#world").style.transform,
     };
   });
+  assert(zoomContinuity.observerRecords > 0, "PDF mutation capture must observe the ready sentinel");
+  assert.equal(zoomContinuity.maxGenerations, 1, "rapid zoom must keep exactly one paintable canvas generation connected");
   assert.deepEqual(zoomContinuity.gaps, [], `rapid zoom must keep readable pixels connected: ${JSON.stringify(zoomContinuity)}`);
   assert.deepEqual(zoomContinuity.unreadyInsertions, [], "a blank PDF canvas must never be inserted above the readable generation");
   assert.equal(zoomContinuity.settled, true, "the source-resolution replacement must finish after rapid zoom");
-  assert.equal(zoomContinuity.maxGenerations, 1, "rapid zoom must keep exactly one paintable canvas generation connected");
   assert.equal(zoomContinuity.titleSpanPreserved, true, "zoom must reproject existing PDF text spans instead of rebuilding the text DOM");
   assert(zoomContinuity.loadedTextPages <= 4, `initial rendering must stay lazy instead of parsing text layers for all ${ATTENTION_PDF_PAGE_COUNT} pages: ${zoomContinuity.loadedTextPages}`);
   assert.equal(zoomContinuity.label, "190%", "trackpad pinch events must change only the local PDF zoom");

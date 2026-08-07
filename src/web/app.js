@@ -1,12 +1,14 @@
 import { CANVAS_SHELL } from "../core/html/shell.js";
 import { createBrain } from "./brain/openai-compatible.js";
-import { providerFor } from "./brain/provider-registry.js";
+import { providerFor, settingsForProvider } from "./brain/provider-registry.js";
 import { detectPdfTranscriptionCapability, pdfTranscriptionCapability } from "./brain/pdf-transcription.js";
 import { isHttpUrl } from "./brain/model-endpoint.js";
 import { loadSettings, saveSettings } from "./settings/preferences-store.js";
 import { getApiKey } from "./settings/credential-store.js";
 import { createSettingsPopover } from "./settings/settings-popover.js";
 import { createOllamaRecoveryDialog } from "./settings/ollama-recovery.js";
+import { takeBridgeTokenFromFragment } from "./settings/bridge-pairing.js";
+import { BRIDGE_AGENT_LABELS, bridgeAgentOf } from "./brain/bridge-catalog.js";
 import { getGenerationSetupStatus, invalidateGenerationSetup } from "./settings/setup-readiness.js";
 import { installTestSeam } from "./test-seam.js";
 import { IdbStore } from "./store/idb-store.js";
@@ -52,14 +54,23 @@ let composerPath = "";
 let lastHoleCount = 0;
 let railSummaries = null;
 let toastNotice = null;
+consumeInitialBridgePairing();
 let currentPdfTranscriptionCapability = pdfTranscriptionCapability(loadSettings());
 let pdfTranscriptionCheckToken = 0;
+const subscriptionModelUnknownRetries = new Set();
 
 applyInitialWebTheme();
 
 boot().catch((err) => {
   document.body.innerHTML = `<main class="web-fatal"><h1>Rabbithole</h1><p>${escapeHtml(err?.message || String(err))}</p></main>`;
 });
+
+function consumeInitialBridgePairing() {
+  const token = takeBridgeTokenFromFragment();
+  if (token === null) return;
+  const paired = settingsForProvider("subscriptions", loadSettings());
+  saveSettings({ ...paired, token });
+}
 
 async function boot() {
   document.body.classList.add("web-app");
@@ -86,6 +97,14 @@ async function boot() {
       return buildRabbitholeExport(store, currentHoleId);
     },
   });
+}
+
+/* Web-only taskbar controls. The shared shell ships what every host can drive; these
+   two need a hole library and a way to create one, which only the web app has. A
+   function, not a const: renderShell runs before module-level bindings settle. */
+function webToolbarChrome() {
+  return `${iconButtonMarkup({ id: "t-rail", title: "Rabbitholes · S", ariaLabel: "Toggle rabbitholes", ariaExpanded: "false", ariaControls: "web-rail", svgIconHtml: iconSvg("rail") })}` +
+    `${iconButtonMarkup({ id: "t-new", title: "New Rabbithole · N", ariaLabel: "New Rabbithole", svgIconHtml: iconSvg("new") })}`;
 }
 
 function renderShell() {
@@ -156,8 +175,10 @@ function renderShell() {
     </nav>
     <div id="web-toast" class="web-toast"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Action", hidden: true, dataAttrs: { noticeAction: "" } })}</div>`;
   toastNotice = wireNotice(document.getElementById("web-toast"), { variant: "toast" });
-  document.getElementById("tb-tools")?.insertAdjacentHTML("afterbegin",
-    `${iconButtonMarkup({ className: "toolbar-brand", id: "t-project", title: "About Rabbithole and project links", ariaLabel: "Rabbithole project menu", ariaHaspopup: "menu", ariaControls: "project-menu", ariaExpanded: "false", svgIconHtml: TOOLBAR_BUNNY_MARK_SVG })}<span class="sep toolbar-brand-sep"></span>`);
+  document.getElementById("tb-app")?.insertAdjacentHTML("afterbegin",
+    `${iconButtonMarkup({ className: "toolbar-brand", id: "t-project", title: "About Rabbithole and project links", ariaLabel: "Rabbithole project menu", ariaHaspopup: "menu", ariaControls: "project-menu", ariaExpanded: "false", svgIconHtml: TOOLBAR_BUNNY_MARK_SVG })}<span class="sep toolbar-brand-sep"></span>${webToolbarChrome()}`);
+  document.getElementById("t-reader")?.setAttribute("aria-pressed", "false");
+  document.getElementById("t-canvas")?.setAttribute("aria-pressed", "true");
   railOpen = false;
   applyRailState();
   syncRailPosition();
@@ -222,6 +243,7 @@ function initAppChrome() {
     },
     openOllamaRecovery: ({ settings, trigger }) => ollamaRecoveryController.open({ settings, trigger }),
   });
+  settingsController.syncSubscriptionStream();
   // The gear toggles: the layer stack ignores pointerdown on its own trigger,
   // so a second click reaches us with the popover still open — close it.
   settingsTrigger?.addEventListener("click", () => {
@@ -766,8 +788,9 @@ async function mountHole(hole, { replace = false } = {}) {
   document.getElementById("blank-start").hidden = true;
   closeComposerSilently();
   safeLocalStorageSet(LAST_HOLE_KEY, hole.hole_id);
-  if (replace) history.replaceState(null, "", pathnameForHole(hole.hole_id));
-  else history.pushState(null, "", pathnameForHole(hole.hole_id));
+  const holePath = `${pathnameForHole(hole.hole_id)}${location.hash}`;
+  if (replace) history.replaceState(null, "", holePath);
+  else history.pushState(null, "", holePath);
 
   setSnapshotHooks({
     fetchAssetBinary: async (name) => store.getAsset(currentHoleId, name),
@@ -792,12 +815,13 @@ async function mountHole(hole, { replace = false } = {}) {
     store,
     hole,
     brain,
+    brainRequiredError: brainRequiredErrorForSettings(settings),
     registerAssetUrl: (name, blob) => currentAssetLease?.register(name, blob),
     onToast: (notice) => { if (currentHost === host) showToast(notice); },
     onDone: async () => {
       if (currentHost !== host) return;
       await host.flushSave();
-      history.replaceState(null, "", location.pathname);
+      history.replaceState(null, "", `${location.pathname}${location.hash}`);
       location.reload();
     },
     onRestore: () => { if (currentHost === host) location.reload(); },
@@ -880,7 +904,7 @@ function showBlankCanvas() {
   edges.id = "edges";
   document.getElementById("world").replaceChildren(edges);
   setBlankZoom(1);
-  history.replaceState(null, "", location.pathname);
+  history.replaceState(null, "", `${location.pathname}${location.search}${location.hash}`);
   document.getElementById("blank-start").hidden = false;
   syncGenerationSetupUi();
 }
@@ -1020,15 +1044,23 @@ function applyRailState() {
 function refreshCurrentBrain(settings = loadSettings()) {
   if (!currentHost) return;
   currentHost.brain = brainForSettings(settings);
+  currentHost.brainRequiredError = brainRequiredErrorForSettings(settings);
 }
 
 function brainForSettings(settings) {
   const preset = providerFor(settings.preset);
-  const key = getApiKey(settings);
+  const key = preset.id === "subscriptions" ? String(settings.token || "").trim() : getApiKey(settings);
   if (preset.requires_key && !key) return null;
+  if (preset.id === "subscriptions" && !key) return null;
   if (preset.requires_base_url && !isHttpUrl(settings.base_url)) return null;
   if (!String(settings.model || preset.model || "").trim()) return null;
   return createBrain(settings, key);
+}
+
+function brainRequiredErrorForSettings(settings) {
+  return providerFor(settings.preset).id === "subscriptions"
+    ? { message: "Pair Rabbithole with your subscriptions to keep asking.", code: "subscription_unpaired" }
+    : null;
 }
 
 function currentHoleNeedsPdfTranscription() {
@@ -1054,6 +1086,16 @@ async function refreshPdfTranscriptionCapability(settings = loadSettings()) {
 }
 
 function handleBranchAuthRequired({ node, error, retry }) {
+  const settings = loadSettings();
+  if (providerFor(settings.preset).id === "subscriptions") {
+    settingsController.open({
+      trigger: document.getElementById("t-settings"),
+      purpose: "recovery",
+      onReady: () => retryBranch(node, retry),
+    });
+    settingsController.showBridgeUnauthorized({ onReady: () => retryBranch(node, retry) });
+    return;
+  }
   invalidateGenerationSetup();
   syncGenerationSetupUi();
   settingsController.open({
@@ -1067,6 +1109,47 @@ function handleBranchAuthRequired({ node, error, retry }) {
 
 function handleBranchProviderFailure({ node, error, retry }) {
   const settings = loadSettings();
+  if (providerFor(settings.preset).id === "subscriptions") {
+    const agentId = settings.agent === "claude" || settings.agent === "codex"
+      ? settings.agent
+      : bridgeAgentOf(settings.model) || "claude";
+    const label = BRIDGE_AGENT_LABELS[agentId];
+    if (error?.code === "model_unknown") {
+      if (!subscriptionModelUnknownRetries.has(node.id) && settingsController.recoverUnknownModel(agentId)) {
+        subscriptionModelUnknownRetries.add(node.id);
+        retryBranch(node, retry);
+      }
+      return;
+    }
+    if (error?.code === "model_no_images") {
+      showToast({
+        message: `${label} cannot use this image with the selected model.`,
+        actionLabel: "Ask text-only",
+        timeoutMs: 10000,
+        onAction: () => retryBranch(node, () => retry?.({ withoutAttachment: true })),
+      });
+      return;
+    }
+    if (error?.code === "turn_failed") {
+      showToast({
+        message: `${label} could not finish the answer.`,
+        actionLabel: `Retry with ${label}`,
+        timeoutMs: 10000,
+        onAction: () => retryBranch(node, retry),
+      });
+      return;
+    }
+    if (error?.code === "payload_too_large") return;
+    if (error?.code === "agent_signed_out" || error?.code === "agent_missing") {
+      settingsController.recoverBridgeAgent(agentId, {
+        trigger: document.getElementById("t-settings"),
+        onReady: () => retryBranch(node, retry),
+      });
+      return;
+    }
+    showToast({ message: `${label} stopped responding.` });
+    return;
+  }
   if (providerFor(settings.preset).id !== "local") return;
   showToast({
     message: error?.message || "Couldn't reach the local model.",

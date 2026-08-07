@@ -34,9 +34,18 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
   const pageErrors = [];
+  const observedRequests = [];
   const externalRequests = [];
   page.on("pageerror", (error) => pageErrors.push(error.stack || error.message));
-  page.on("request", (request) => { if (!request.url().startsWith("file:") && !request.url().startsWith("blob:") && !request.url().startsWith("data:")) externalRequests.push(request.url()); });
+  page.on("request", (request) => {
+    observedRequests.push(request.url());
+    if (!request.url().startsWith("file:") && !request.url().startsWith("blob:") && !request.url().startsWith("data:")) {
+      externalRequests.push(request.url());
+    }
+  });
+  page.emit("pageerror", new Error("page-error-capture-probe"));
+  assert.equal(pageErrors.some((message) => message.includes("page-error-capture-probe")), true);
+  pageErrors.length = 0;
   await page.goto(`file://${snapshotPath}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('.rh-pdf-page[data-page="1"]');
   await page.waitForFunction(() => {
@@ -54,6 +63,7 @@ try {
   const after = await page.evaluate(() => ({ world: document.querySelector("#world")?.style.transform || "", width: document.querySelector(".rh-pdf-page").getBoundingClientRect().width }));
   assert.equal(after.world, before.world, "offline PDF zoom must stay local to the PDF");
   assert(after.width > before.width);
+  assert(observedRequests.some((url) => url.startsWith("file:")), "request capture must observe the offline snapshot");
   assert.deepEqual(externalRequests, [], `offline PDF snapshot made network requests: ${externalRequests.join(", ")}`);
   assert.deepEqual(pageErrors, [], `offline PDF snapshot emitted errors:\n${pageErrors.join("\n")}`);
   console.log(`ok PDF snapshot (${path.basename(ATTENTION_PDF_PATH)}): original source, embedded runtime, offline render/text, single generations, and local zoom`);

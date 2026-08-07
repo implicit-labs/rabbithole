@@ -7,6 +7,19 @@ import { loadModelCatalog, searchModels, formatModelPrice, prettyModelId, SUGGES
 import { discoverLocalModels } from "../brain/local-model-catalog.js";
 import { addressSpaceOf, fetchOpenAICompatibleModels, isHttpUrl } from "../brain/model-endpoint.js";
 import { PDF_TRANSCRIPTION_HELP, localVisionModels, pdfTranscriptionCapability } from "../brain/pdf-transcription.js";
+import {
+  BRIDGE_AGENT_LABELS,
+  BRIDGE_COMMAND,
+  BRIDGE_DOWN_HEADING,
+  bridgeAgent,
+  bridgeAgentOf,
+  bridgeModelsForAgent,
+  bridgeStateKey,
+  consumeBridgeEvents,
+  nextBridgeReconnectDelay,
+  planLabel,
+  reasoningLabel,
+} from "../brain/bridge-catalog.js";
 import { escapeHtml } from "../../core/utils.js";
 import { openPopover } from "../../ui/primitives/popover.js";
 import { fieldMarkup, wireField } from "../../ui/primitives/field.js";
@@ -48,6 +61,18 @@ export function createSettingsPopover({
   let endpointDiscovery = "idle";
   let endpointDiscoveryMessage = "";
   let endpointDiscoveryToken = 0;
+  let bridgeState = null;
+  let bridgeView = "idle";
+  let bridgeStream = null;
+  let bridgeStreamKey = "";
+  let bridgeReconnectTimer = 0;
+  let bridgeReconnectDelay = 0;
+  let bridgeReconnectPending = false;
+  let bridgeImmediateReconnectAvailable = true;
+  let lastBridgeFrameKey = "";
+  let lastBridgeRenderKey = "";
+  let bridgeRecoveryAgent = "";
+  let conditionalComboboxes = [];
 
   function applyPatch(patch) {
     const current = loadSettings();
@@ -74,12 +99,14 @@ export function createSettingsPopover({
     return "Looking for Ollama on this computer…";
   }
 
-  function transcriptionHelpMarkup(preset) {
+  function transcriptionHelpMarkup(preset, agentId = "") {
     const destination = preset.id === "local"
       ? " Page images stay on your local endpoint."
       : preset.id === "custom_endpoint"
         ? " Page images go to your custom endpoint."
-        : " Page images go to OpenRouter.";
+        : preset.id === "subscriptions"
+          ? ` Page images go through ${BRIDGE_AGENT_LABELS[agentId] || "your selected agent"} on this computer.`
+          : " Page images go to OpenRouter.";
     return `<span class="settings-label-with-info"><span class="settings-label" id="transcribe-model-label">PDF transcription</span><span class="settings-info"><button class="settings-info-trigger" type="button" aria-label="About PDF transcription" aria-describedby="transcribe-model-help">${infoIcon}</button><span class="settings-info-tooltip" id="transcribe-model-help" role="tooltip">${escapeHtml(PDF_TRANSCRIPTION_HELP + destination)}</span></span></span>`;
   }
 
@@ -113,12 +140,119 @@ export function createSettingsPopover({
     if (typed.start !== null) el.setSelectionRange(typed.start, typed.end);
   }
 
+  function focusedControlKey(host) {
+    let element = document.activeElement;
+    if (!host.contains(element)) {
+      element = conditionalComboboxes.find((controller) => controller.trigger?.getAttribute("aria-expanded") === "true")?.trigger;
+    }
+    if (!element) return null;
+    if (element.id) return { kind: "id", value: element.id };
+    for (const name of ["bridgeAgent", "reasoning"]) {
+      if (element.dataset?.[name]) return { kind: name, value: element.dataset[name] };
+    }
+    return null;
+  }
+
+  function disposeConditionalComboboxes() {
+    for (const controller of conditionalComboboxes.splice(0)) controller.close({ restoreFocus: false });
+  }
+
+  function restoreTransitionFocus(host, key) {
+    let target = null;
+    if (key?.kind === "id") target = host.querySelector(`#${key.value}`);
+    if (key?.kind === "bridgeAgent") {
+      target = [...host.querySelectorAll("[data-bridge-agent]")].find((element) => element.dataset.bridgeAgent === key.value);
+    }
+    if (key?.kind === "reasoning") {
+      target = [...host.querySelectorAll("[data-reasoning]")].find((element) => element.dataset.reasoning === key.value);
+    }
+    target ||= host.querySelector("[data-state-action]");
+    target?.focus({ preventScroll: true });
+  }
+
+  function setConditionalHtml(host, html, { morph = false } = {}) {
+    const focused = focusedControlKey(host);
+    const previousHeight = morph ? host.offsetHeight : 0;
+    disposeConditionalComboboxes();
+    host.innerHTML = html;
+    if (previousHeight > 0 && typeof host.animate === "function" && !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+      const nextHeight = host.offsetHeight;
+      if (nextHeight > 0 && nextHeight !== previousHeight) {
+        host.animate(
+          [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }],
+          { duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" },
+        );
+      }
+    }
+    return focused;
+  }
+
+  function setSubscriptionHtml(host, html) {
+    const focused = setConditionalHtml(host, html, { morph: true });
+    wireConditionalSections(host);
+    restoreTransitionFocus(host, focused);
+    popover?.update();
+  }
+
+  function renderSubscriptionsSections(host, settings) {
+    const recovery = recoveryStatus
+      ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>`
+      : "";
+    const agentId = selectedBridgeAgent(settings);
+    const agent = bridgeAgent(bridgeState, agentId);
+    const state = bridgeView === "stream" ? agent?.state || "error" : bridgeView;
+    const renderKey = JSON.stringify([
+      bridgeView,
+      bridgeStateKey(bridgeState),
+      agentId,
+      settings.model,
+      settings.transcribe_model,
+      settings.reasoning,
+      settings.token,
+      purpose,
+      recoveryStatus,
+    ]);
+    if (renderKey === lastBridgeRenderKey) return;
+    lastBridgeRenderKey = renderKey;
+
+    if (bridgeView === "re_pair") {
+      setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="re_pair">${bridgePairingMarkup()}</div>`);
+      return;
+    }
+    if (bridgeView === "bridge_down" || bridgeView === "idle") {
+      setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="bridge_down">${bridgeSetupMarkup()}</div>`);
+      return;
+    }
+    if (bridgeView === "starting" || !agent) {
+      setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="starting">${bridgeStartingMarkup()}</div>`);
+      return;
+    }
+
+    const models = bridgeModelsFor(agentId);
+    const body = state === "ready"
+      ? bridgeReadyMarkup(settings, agentId)
+      : state === "starting"
+        ? bridgeStartingMarkup(agentId)
+        : bridgeAgentStateMarkup(agent);
+    const ready = state === "ready" && models.some((model) => model.id === settings.model);
+    const finish = ready && (purpose !== "settings" || !getGenerationSetupStatus(settings).ready)
+      ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button">Finish setup</button></div>`
+      : "";
+    setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="${escapeHtml(state)}">
+      ${bridgeAgentChoiceMarkup(settings)}<div class="bridge-agent-body">${body}</div>
+    </div>${finish}`);
+  }
+
   function renderConditionalSections() {
     const host = surface?.querySelector("#settings-conditional-sections");
     if (!host) return;
     const settings = loadSettings();
     const preset = providerFor(settings.preset);
     surface.querySelector("#settings-panel").dataset.preset = preset.id;
+    if (preset.id === "subscriptions") {
+      renderSubscriptionsSections(host, settings);
+      return;
+    }
     const currentModel = settings.model || preset.model;
     const transcribeModel = settings.transcribe_model || preset.transcribe_model || currentModel;
     const localCapability = preset.id === "local"
@@ -144,20 +278,355 @@ export function createSettingsPopover({
       : preset.id === "custom_endpoint"
         ? `<div class="settings-section endpoint-section">${fieldMarkup({ id: "provider-base", label: "Endpoint", value: settings.base_url || "", placeholder: "https://api.example.com/v1", autocomplete: "off", autocapitalize: "none", autocorrect: "off", inputmode: "url", enterkeyhint: "done", spellcheck: "false", status: { id: "endpoint-status", className: `key-status ${endpointStatusTone()} visible`, text: endpointStatusCopy() || ENDPOINT_HINT } })}</div>`
         : "";
+    const localModeSection = preset.id === "local" || preset.id === "custom_endpoint"
+      ? `<div class="settings-section local-mode-section"><div class="local-mode-choice" role="group" aria-label="Local connection"><button type="button" data-local-mode="local" aria-pressed="${preset.id === "local"}">Ollama</button><button type="button" data-local-mode="custom_endpoint" aria-pressed="${preset.id === "custom_endpoint"}">Custom endpoint</button></div></div>`
+      : "";
+    const transcriptionSection = purpose === "setup"
+      ? ""
+      : `<div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(preset)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: preset.id === "local" ? "transcribe-model-status" : "", value: transcribeDisabled ? "" : transcribeModel, label: transcribeLabel, title: transcribeDisabled ? localCapability.reason : transcribeModel, iconHtml: chevron, disabled: transcribeDisabled })}</div>${preset.id === "local" ? `<small id="transcribe-model-status" class="field-hint transcription-status ${escapeHtml(localCapability.status)}">${escapeHtml(transcriptionStatusCopy(localCapability))}${localDiscovery === "success" && !localCapability.available && localCapability.status !== "checking" ? ` <button id="local-vision-retry" class="settings-text-action" type="button">Recheck</button>` : ""}</small>` : ""}</div>`;
     const typed = textBeingTyped(host);
-    host.innerHTML = `${recoveryStatus ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>` : ""}
+    setConditionalHtml(host, `${recoveryStatus ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>` : ""}
+      ${localModeSection}
       ${preset.id === "custom_endpoint" ? `${endpointSection}${keySection}${modelSection}` : `${modelSection}${keySection}${endpointSection}`}
-      <div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(preset)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: preset.id === "local" ? "transcribe-model-status" : "", value: transcribeDisabled ? "" : transcribeModel, label: transcribeLabel, title: transcribeDisabled ? localCapability.reason : transcribeModel, iconHtml: chevron, disabled: transcribeDisabled })}</div>${preset.id === "local" ? `<small id="transcribe-model-status" class="field-hint transcription-status ${escapeHtml(localCapability.status)}">${escapeHtml(transcriptionStatusCopy(localCapability))}${localDiscovery === "success" && !localCapability.available && localCapability.status !== "checking" ? ` <button id="local-vision-retry" class="settings-text-action" type="button">Check again</button>` : ""}</small>` : ""}</div>
-      ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`;
+      ${transcriptionSection}
+      ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`);
     restoreTextBeingTyped(host, typed);
     wireConditionalSections(host);
     popover?.update();
+  }
+
+  function bridgeModelsFor(agentId) {
+    return bridgeModelsForAgent(bridgeState, agentId);
+  }
+
+  function bridgeModelName(id) {
+    return bridgeState?.agents?.flatMap((agent) => agent.models || []).find((model) => model.id === id)?.name || "";
+  }
+
+  function selectedBridgeAgent(settings = loadSettings()) {
+    if (settings.agent === "claude" || settings.agent === "codex") return settings.agent;
+    return bridgeAgentOf(settings.model) || "claude";
+  }
+
+  function chooseInitialBridgeAgent(status) {
+    for (const id of ["claude", "codex"]) {
+      if (bridgeAgent(status, id)?.state === "ready") return id;
+    }
+    for (const id of ["claude", "codex"]) {
+      if (bridgeAgent(status, id)?.state !== "missing") return id;
+    }
+    return "claude";
+  }
+
+  function bridgeAgentSnapshot(settings, agentId, agents = settings.agents || {}) {
+    const saved = agents[agentId] || {};
+    const ownsModel = bridgeAgentOf(settings.model) === agentId;
+    const ownsTranscription = bridgeAgentOf(settings.transcribe_model) === agentId;
+    return {
+      model: ownsModel ? settings.model : String(saved.model || ""),
+      reasoning: ownsModel ? String(settings.reasoning || "") : String(saved.reasoning || ""),
+      transcribe_model: ownsTranscription ? settings.transcribe_model : String(saved.transcribe_model || ""),
+    };
+  }
+
+  function bridgeSelection(settings, agentId, sourceAgents = settings.agents || {}) {
+    const agents = { ...sourceAgents };
+    const saved = bridgeAgentSnapshot(settings, agentId, agents);
+    const models = bridgeModelsFor(agentId);
+    if (!models.length) {
+      agents[agentId] = saved;
+      return { agent: agentId, agents, model: "", reasoning: "", transcribe_model: "" };
+    }
+    const model = models.find((entry) => entry.id === saved.model) || models[0];
+    const reasoning = model.reasoning.options.includes(saved.reasoning)
+      ? saved.reasoning
+      : model.reasoning.default;
+    const imageModels = models.filter((entry) => entry.images);
+    const transcribeModel = imageModels.find((entry) => entry.id === saved.transcribe_model)?.id
+      || imageModels[0]?.id
+      || "";
+    agents[agentId] = {
+      model: model.id,
+      reasoning,
+      transcribe_model: transcribeModel,
+    };
+    return {
+      agent: agentId,
+      agents,
+      model: model.id,
+      reasoning,
+      transcribe_model: transcribeModel,
+    };
+  }
+
+  function applyBridgeSelection(settings, agentId, agents = settings.agents || {}) {
+    const next = bridgeSelection(settings, agentId, agents);
+    if (JSON.stringify(canonicalBridgeSelection(settings)) !== JSON.stringify(canonicalBridgeSelection(next))) applyPatch(next);
+    return next;
+  }
+
+  function canonicalBridgeSelection(value) {
+    return [
+      value.agent || "",
+      value.model || "",
+      value.reasoning || "",
+      value.transcribe_model || "",
+      ...["claude", "codex"].flatMap((agentId) => {
+        const entry = value.agents?.[agentId] || {};
+        return [entry.model || "", entry.reasoning || "", entry.transcribe_model || ""];
+      }),
+    ];
+  }
+
+  function patchSelectedBridgeAgent(patch) {
+    const settings = loadSettings();
+    const agentId = selectedBridgeAgent(settings);
+    const agents = { ...(settings.agents || {}) };
+    agents[agentId] = {
+      ...bridgeAgentSnapshot(settings, agentId, agents),
+      ...(Object.hasOwn(patch, "model") ? { model: patch.model } : {}),
+      ...(Object.hasOwn(patch, "reasoning") ? { reasoning: patch.reasoning } : {}),
+      ...(Object.hasOwn(patch, "transcribe_model") ? { transcribe_model: patch.transcribe_model } : {}),
+    };
+    applyPatch({ ...patch, agent: agentId, agents });
+  }
+
+  function switchBridgeAgent(agentId) {
+    const settings = loadSettings();
+    if (agentId !== "claude" && agentId !== "codex") return;
+    const currentAgent = selectedBridgeAgent(settings);
+    if (agentId === currentAgent) return;
+    const agents = { ...(settings.agents || {}) };
+    agents[currentAgent] = bridgeAgentSnapshot(settings, currentAgent, agents);
+    applyBridgeSelection(settings, agentId, agents);
+    renderConditionalSections();
+  }
+
+  function bridgeSetupMarkup() {
+    return `<div class="settings-section bridge-setup-section"><h3>${escapeHtml(BRIDGE_DOWN_HEADING)}</h3>${bridgeCommandMarkup(BRIDGE_COMMAND)}<small class="field-hint">The bridge stream is closed. Run the command, then pair again if needed.</small></div>`;
+  }
+
+  function bridgePairingMarkup() {
+    return `<div class="settings-section bridge-agent-state"><p>Paste the pairing token printed by the bridge.</p>${fieldMarkup({ id: "bridge-pairing-token", label: "Pairing token", value: "", autocomplete: "off", autocapitalize: "none", autocorrect: "off", spellcheck: "false" })}<button id="bridge-pair" class="web-primary" data-state-action type="button">Pair</button></div>`;
+  }
+
+  function bridgeStartingMarkup(agentId = "") {
+    const label = agentId ? BRIDGE_AGENT_LABELS[agentId] : "your subscriptions";
+    return `<div class="settings-section bridge-agent-state bridge-starting" role="status"><span class="ollama-spinner" aria-hidden="true"></span><p>Connecting to ${escapeHtml(label)}…</p></div>`;
+  }
+
+  function bridgeCommandMarkup(command) {
+    return `<div class="bridge-command"><code>${escapeHtml(command)}</code><button data-copy-command="${escapeHtml(command)}" data-state-action class="settings-text-action" type="button">Copy</button></div>`;
+  }
+
+  function bridgeAgentChoiceMarkup(settings) {
+    const selected = selectedBridgeAgent(settings);
+    return `<div class="settings-section bridge-agent-section"><div class="bridge-agent-choice" role="group" aria-label="Subscription agent">${["claude", "codex"].map((agentId) => {
+      const agent = bridgeAgent(bridgeState, agentId);
+      const plan = agent?.state === "ready" ? planLabel(agent.plan) : "";
+      return `<button type="button" data-bridge-agent="${escapeHtml(agentId)}" aria-pressed="${agentId === selected}"><span>${escapeHtml(BRIDGE_AGENT_LABELS[agentId])}</span>${plan ? `<span class="bridge-plan-badge">· ${escapeHtml(plan)}</span>` : ""}</button>`;
+    }).join("")}</div></div>`;
+  }
+
+  function bridgeAgentStateMarkup(agent) {
+    const label = BRIDGE_AGENT_LABELS[agent?.id] || "Subscription agent";
+    const copy = agent?.state === "missing"
+      ? `${label} is not installed.`
+      : agent?.state === "signed_out"
+        ? `Sign in to ${label}.`
+        : `${label} needs attention.`;
+    return `<div class="settings-section bridge-agent-state"><p>${escapeHtml(copy)}</p>${agent?.detail ? `<small class="field-hint">${escapeHtml(agent.detail)}</small>` : ""}${bridgeCommandMarkup(agent?.fix || BRIDGE_COMMAND)}</div>`;
+  }
+
+  function bridgeReadyMarkup(settings, agentId) {
+    const model = bridgeModelName(settings.model) || settings.model;
+    const modelSection = `<div class="settings-section model-section local-model-section"><div class="settings-row"><span class="settings-label" id="bridge-model-label">Model</span>${comboboxMarkup({ id: "bridge-model", labelledBy: "bridge-model-label", value: settings.model, label: model, title: settings.model, iconHtml: chevron })}</div></div>`;
+    const transcriptionSection = purpose === "setup" ? "" : bridgeTranscriptionMarkup(settings, agentId);
+    return `${modelSection}${reasoningSectionMarkup(settings)}${transcriptionSection}`;
+  }
+
+  function bridgeTranscriptionMarkup(settings, agentId) {
+    const models = bridgeModelsFor(agentId).filter((model) => model.images);
+    const unavailable = !models.length;
+    const reason = `${BRIDGE_AGENT_LABELS[agentId]} doesn’t offer a vision-capable model for PDF transcription.`;
+    const model = unavailable ? "" : settings.transcribe_model;
+    return `<div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(PROVIDERS.subscriptions, agentId)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: unavailable ? "bridge-transcribe-status" : "", value: model, label: unavailable ? "Unavailable" : bridgeModelName(model), title: unavailable ? reason : model, iconHtml: chevron, disabled: unavailable })}</div>${unavailable ? `<small id="bridge-transcribe-status" class="field-hint transcription-status no_vision">${escapeHtml(reason)}</small>` : ""}</div>`;
+  }
+
+  function reasoningSectionMarkup(settings) {
+    const model = bridgeState?.agents?.flatMap((agent) => agent.models || []).find((entry) => entry.id === settings.model);
+    const options = model?.reasoning?.options || [];
+    if (!options.length) return "";
+    const active = options.includes(settings.reasoning) ? settings.reasoning : model.reasoning.default;
+    return `<div class="settings-section reasoning-section"><span class="settings-label" id="reasoning-label">Reasoning</span><div class="reasoning-choice" role="group" aria-labelledby="reasoning-label">${options.map((option) => `<button type="button" data-reasoning="${escapeHtml(option)}" aria-pressed="${option === active}">${escapeHtml(reasoningLabel(option))}</button>`).join("")}</div></div>`;
+  }
+
+  function stopBridgeStream() {
+    document.removeEventListener("visibilitychange", handleBridgeVisibilityChange);
+    clearTimeout(bridgeReconnectTimer);
+    bridgeReconnectTimer = 0;
+    bridgeReconnectDelay = 0;
+    bridgeReconnectPending = false;
+    bridgeImmediateReconnectAvailable = true;
+    bridgeStream?.abort();
+    bridgeStream = null;
+    bridgeStreamKey = "";
+  }
+
+  function handleBridgeVisibilityChange() {
+    if (document.hidden) {
+      if (bridgeReconnectTimer) {
+        clearTimeout(bridgeReconnectTimer);
+        bridgeReconnectTimer = 0;
+        bridgeReconnectPending = true;
+      }
+      return;
+    }
+    if (!bridgeReconnectPending || bridgeStream || !bridgeStreamKey) return;
+    bridgeReconnectPending = false;
+    connectBridgeStream(bridgeStreamKey);
+  }
+
+  function requestBridgeReconnect(connectionKey, delay) {
+    if (bridgeStreamKey !== connectionKey) return;
+    bridgeReconnectPending = true;
+    if (document.hidden) return;
+    if (delay === 0) {
+      queueMicrotask(() => {
+        if (!bridgeReconnectPending || bridgeStream || bridgeStreamKey !== connectionKey || document.hidden) return;
+        bridgeReconnectPending = false;
+        connectBridgeStream(connectionKey);
+      });
+      return;
+    }
+    bridgeReconnectTimer = setTimeout(() => {
+      bridgeReconnectTimer = 0;
+      if (!bridgeReconnectPending || bridgeStream || bridgeStreamKey !== connectionKey || document.hidden) return;
+      bridgeReconnectPending = false;
+      connectBridgeStream(connectionKey);
+    }, delay);
+  }
+
+  function bridgeStreamEnded(connectionKey, reason = "closed") {
+    if (bridgeStreamKey !== connectionKey) return;
+    bridgeState = null;
+    lastBridgeFrameKey = "";
+    if (reason === "unauthorized") {
+      stopBridgeStream();
+      setBridgeView("re_pair");
+      return;
+    }
+    setBridgeView("bridge_down");
+    if (bridgeImmediateReconnectAvailable) {
+      bridgeImmediateReconnectAvailable = false;
+      requestBridgeReconnect(connectionKey, 0);
+      return;
+    }
+    bridgeReconnectDelay = nextBridgeReconnectDelay(bridgeReconnectDelay);
+    requestBridgeReconnect(connectionKey, bridgeReconnectDelay);
+  }
+
+  function connectBridgeStream(connectionKey) {
+    if (bridgeStream || bridgeStreamKey !== connectionKey) return;
+    const settings = loadSettings();
+    const token = String(settings.token || "").trim();
+    if (
+      providerFor(settings.preset).id !== "subscriptions"
+      || `${settings.base_url}\n${token}` !== connectionKey
+    ) {
+      stopBridgeStream();
+      return;
+    }
+    const controller = new AbortController();
+    bridgeStream = controller;
+    void consumeBridgeEvents(settings.base_url, token, {
+      signal: controller.signal,
+      onState: (state) => {
+        if (bridgeStream !== controller || controller.signal.aborted) return;
+        bridgeReconnectDelay = 0;
+        bridgeImmediateReconnectAvailable = true;
+        acceptBridgeState(state);
+      },
+    }).then((result) => {
+      if (bridgeStream !== controller || controller.signal.aborted) return;
+      bridgeStream = null;
+      bridgeStreamEnded(connectionKey, result.reason);
+    }).catch((error) => {
+      if (bridgeStream !== controller || controller.signal.aborted || error?.name === "AbortError") return;
+      bridgeStream = null;
+      bridgeStreamEnded(connectionKey);
+    });
+  }
+
+  function setBridgeView(view) {
+    if (bridgeView === view) return;
+    bridgeView = view;
+    lastBridgeRenderKey = "";
+    renderConditionalSections();
+  }
+
+  function acceptBridgeState(nextState) {
+    const frameKey = bridgeStateKey(nextState);
+    if (frameKey === lastBridgeFrameKey) return;
+    lastBridgeFrameKey = frameKey;
+    bridgeState = nextState;
+    bridgeView = "stream";
+    const current = loadSettings();
+    if (providerFor(current.preset).id === "subscriptions") {
+      const legacyAgent = bridgeAgentOf(current.model);
+      const agentId = current.agent === "claude" || current.agent === "codex"
+        ? current.agent
+        : legacyAgent || chooseInitialBridgeAgent(nextState);
+      const agents = { ...(current.agents || {}) };
+      if (legacyAgent) agents[legacyAgent] = bridgeAgentSnapshot(current, legacyAgent, agents);
+      applyBridgeSelection(current, agentId, agents);
+    }
+    lastBridgeRenderKey = "";
+    renderConditionalSections();
+    completeBridgeRecoveryIfReady();
+  }
+
+  function startBridgeStream() {
+    const settings = loadSettings();
+    if (providerFor(settings.preset).id !== "subscriptions") {
+      stopBridgeStream();
+      return;
+    }
+    const token = String(settings.token || "").trim();
+    if (!token) {
+      stopBridgeStream();
+      bridgeState = null;
+      lastBridgeFrameKey = "";
+      setBridgeView("re_pair");
+      return;
+    }
+    const connectionKey = `${settings.base_url}\n${token}`;
+    if (bridgeStreamKey === connectionKey) return;
+    stopBridgeStream();
+    bridgeState = null;
+    lastBridgeFrameKey = "";
+    bridgeStreamKey = connectionKey;
+    document.addEventListener("visibilitychange", handleBridgeVisibilityChange);
+    setBridgeView("starting");
+    connectBridgeStream(connectionKey);
+  }
+
+  function completeBridgeRecoveryIfReady() {
+    if (!bridgeRecoveryAgent || bridgeAgent(bridgeState, bridgeRecoveryAgent)?.state !== "ready" || !readyCallback) return;
+    const callback = readyCallback;
+    readyCallback = null;
+    bridgeRecoveryAgent = "";
+    markGenerationSetupComplete();
+    onSettingsChange();
+    close();
+    void callback();
   }
 
   function wireConditionalSections(host) {
     wireModelComboboxes(host);
     wireField(host, { id: "provider-base" });
     wireField(host, { id: "api-key", toggleId: "api-key-toggle", renderToggle: eyeSvg });
+    wireField(host, { id: "bridge-pairing-token" });
     const keyInput = host.querySelector("#api-key");
     let timer = 0;
     if (keyInput) {
@@ -179,22 +648,64 @@ export function createSettingsPopover({
     host.querySelector("#local-model-setup")?.addEventListener("click", launchOllamaRecovery);
     host.querySelector("#local-vision-retry")?.addEventListener("click", () => void runLocalDiscovery());
     host.querySelector("#complete-model-setup")?.addEventListener("click", () => void completeSetup());
+    const pair = () => {
+      const token = host.querySelector("#bridge-pairing-token")?.value.trim() || "";
+      if (!token) return;
+      applyPatch({ token });
+      startBridgeStream();
+    };
+    host.querySelector("#bridge-pair")?.addEventListener("click", pair);
+    host.querySelector("#bridge-pairing-token")?.addEventListener("keydown", (event) => {
+      if (!isCommandEnter(event)) return;
+      event.preventDefault();
+      pair();
+    });
+    host.querySelectorAll("[data-copy-command]").forEach((button) => button.addEventListener("click", () => {
+      void navigator.clipboard?.writeText(button.dataset.copyCommand).then(() => {
+        button.textContent = "Copied";
+        setTimeout(() => { if (button.isConnected) button.textContent = "Copy"; }, 1400);
+      }).catch(() => {});
+    }));
+    host.querySelectorAll("[data-bridge-agent]").forEach((button) => button.addEventListener("click", () => switchBridgeAgent(button.dataset.bridgeAgent)));
+    host.querySelectorAll("[data-reasoning]").forEach((button) => button.addEventListener("click", () => {
+      if (button.getAttribute("aria-pressed") === "true") return;
+      if (providerFor(loadSettings().preset).id === "subscriptions") patchSelectedBridgeAgent({ reasoning: button.dataset.reasoning });
+      else applyPatch({ reasoning: button.dataset.reasoning });
+      button.closest(".reasoning-choice")?.querySelectorAll("button").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
+    }));
+    host.querySelectorAll("[data-local-mode]").forEach((button) => button.addEventListener("click", () => {
+      const id = button.dataset.localMode;
+      if (providerFor(loadSettings().preset).id !== id) switchProvider(id);
+    }));
+  }
+
+  function pressedProviderId(presetId) {
+    return presetId === "custom_endpoint" ? "local" : presetId;
+  }
+
+  function switchProvider(id) {
+    const current = loadSettings();
+    if (!id || id === providerFor(current.preset).id) return;
+    localDiscoveryToken += 1; endpointDiscoveryToken += 1;
+    if (id !== "subscriptions") stopBridgeStream();
+    saveSettings({ ...current, api_key: getApiKey(current) });
+    applyPatch(settingsForProvider(id, current));
+    const pressed = pressedProviderId(id);
+    surface.querySelectorAll("[data-provider]").forEach((choice) => choice.setAttribute("aria-pressed", choice.dataset.provider === pressed ? "true" : "false"));
+    recoveryStatus = ""; localModels = null; localDiscovery = "idle";
+    endpointModels = null; endpointDiscovery = "idle"; endpointDiscoveryMessage = "";
+    bridgeState = null; bridgeView = "idle"; lastBridgeFrameKey = ""; lastBridgeRenderKey = "";
+    renderConditionalSections();
+    if (id === "local") void runLocalDiscovery();
+    if (id === "custom_endpoint") void runEndpointDiscovery();
+    if (id === "subscriptions") startBridgeStream();
   }
 
   function wireProviderControl() {
     surface.querySelectorAll("[data-provider]").forEach((button) => button.addEventListener("click", () => {
       const id = button.dataset.provider;
-      const current = loadSettings();
-      if (!id || id === current.preset) return;
-      localDiscoveryToken += 1; endpointDiscoveryToken += 1;
-      saveSettings({ ...current, api_key: getApiKey(current) });
-      applyPatch(settingsForProvider(id, current));
-      surface.querySelectorAll("[data-provider]").forEach((choice) => choice.setAttribute("aria-pressed", choice.dataset.provider === id ? "true" : "false"));
-      recoveryStatus = ""; localModels = null; localDiscovery = "idle";
-      endpointModels = null; endpointDiscovery = "idle"; endpointDiscoveryMessage = "";
-      renderConditionalSections();
-      if (id === "local") void runLocalDiscovery();
-      if (id === "custom_endpoint") void runEndpointDiscovery();
+      if (!id || id === pressedProviderId(providerFor(loadSettings().preset).id)) return;
+      switchProvider(id);
     }));
   }
 
@@ -321,6 +832,8 @@ export function createSettingsPopover({
     } else if (preset.id === "custom_endpoint") {
       if (surface?.querySelector("#api-key")?.value.trim()) await commitSettingsKey();
       if (!endpointConnected(loadSettings())) return;
+    } else if (preset.id === "subscriptions") {
+      if (bridgeView !== "stream" || !bridgeModelsFor(selectedBridgeAgent(settings)).some((model) => model.id === settings.model)) return;
     } else if (localDiscovery !== "success" || !localModels?.some((model) => model.id === settings.model)) return;
     markGenerationSetupComplete();
     onSettingsChange();
@@ -332,6 +845,17 @@ export function createSettingsPopover({
   function renderCatalogModelRow(model, { current, recommended = false, group = "", itemIndex = -1 } = {}) {
     const selected = model.id === current;
     return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<button type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span>${recommended ? `<span class="model-chip">Recommended</span>` : ""}<span class="model-option-price">${escapeHtml(formatModelPrice(model))}</span></button>`;
+  }
+
+  function renderBridgeModelRow(model, { current, group = "", itemIndex = -1 } = {}) {
+    const selected = model.id === current;
+    return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<button type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span><span class="model-option-price">${escapeHtml(model.images ? "vision" : "")}</span></button>`;
+  }
+
+  function filterBridgeModels(models, query) {
+    const needle = String(query || "").trim().toLowerCase();
+    const list = models.filter((model) => !needle || model.name.toLowerCase().includes(needle) || model.id.toLowerCase().includes(needle));
+    return list.map((model, index) => ({ model, itemIndex: index }));
   }
 
   function renderExactModelRow(query) {
@@ -354,6 +878,7 @@ export function createSettingsPopover({
     error,
     onChange,
     filter = (models, query) => searchModels(models, query).map((model, itemIndex) => ({ model, itemIndex })),
+    renderOption = null,
     catalog = false,
     allowExact = false,
     escapeHint = false
@@ -371,7 +896,7 @@ export function createSettingsPopover({
       source: {
         load,
         filter,
-        renderOption: (entry) => renderCatalogModelRow(entry.model, { current: current(), ...entry }),
+        renderOption: renderOption || ((entry) => renderCatalogModelRow(entry.model, { current: current(), ...entry })),
         loading: () => modelNote("loading", loading),
         empty: (query) => modelNote("empty", typeof empty === "function" ? empty(query) : empty),
         error: (retry) => modelNote("error", `${error} ${retry}`)
@@ -387,9 +912,18 @@ export function createSettingsPopover({
   }
 
   function wireModelComboboxes(root) {
+    const wire = (options) => {
+      const controller = wireCombobox(root, options);
+      conditionalComboboxes.push(controller);
+      return controller;
+    };
     const commit = (id) => { if (!id) return; applyPatch({ model: id }); };
-    const commitTranscription = (id) => { if (id) applyPatch({ transcribe_model: id }); };
-    wireCombobox(root, modelComboboxOptions({
+    const commitTranscription = (id) => {
+      if (!id) return;
+      if (providerFor(loadSettings().preset).id === "subscriptions") patchSelectedBridgeAgent({ transcribe_model: id });
+      else applyPatch({ transcribe_model: id });
+    };
+    wire(modelComboboxOptions({
       id: "model-select",
       valueId: "model-select-name",
       labelledBy: "model-select-label",
@@ -407,22 +941,32 @@ export function createSettingsPopover({
     }));
     const preset = providerFor(loadSettings().preset);
     if (preset.id === "local") {
-      wireCombobox(root, modelComboboxOptions({
+      wire(modelComboboxOptions({
         id: "transcribe-model", labelledBy: "transcribe-model-label", placeholder: "Search installed vision models…",
         load: async () => localVisionModels(localModels || await discoverLocalModels(loadSettings().base_url)),
         current: () => loadSettings().transcribe_model,
         loading: "Checking installed vision models…", empty: "No installed vision models.",
         error: "Couldn't verify local vision models.", onChange: commitTranscription
       }));
+    } else if (preset.id === "subscriptions") {
+      wire(modelComboboxOptions({
+        id: "transcribe-model", labelledBy: "transcribe-model-label", placeholder: "Choose a vision model…",
+        load: async () => bridgeModelsFor(selectedBridgeAgent()).filter((model) => model.images),
+        filter: filterBridgeModels,
+        renderOption: (entry) => renderBridgeModelRow(entry.model, { current: loadSettings().transcribe_model, ...entry }),
+        current: () => loadSettings().transcribe_model,
+        loading: "Checking vision support…", empty: "No vision-capable subscription models.",
+        error: `Couldn't load models from ${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]}.`, onChange: commitTranscription
+      }));
     } else if (preset.id === "custom_endpoint") {
-      wireCombobox(root, modelComboboxOptions({
+      wire(modelComboboxOptions({
         id: "transcribe-model", labelledBy: "transcribe-model-label", placeholder: "Choose a PDF transcription model…",
         load: loadEndpointModels, current: () => loadSettings().transcribe_model,
         loading: "Loading models…", empty: (query) => query ? "No matching models." : "This endpoint listed no models.",
         error: "Couldn't load models from this endpoint.", onChange: commitTranscription, allowExact: true
       }));
     } else {
-      wireCombobox(root, modelComboboxOptions({
+      wire(modelComboboxOptions({
         id: "transcribe-model", labelledBy: "transcribe-model-label", placeholder: "Choose a PDF transcription model…",
         load: loadCatalog,
         current: () => loadSettings().transcribe_model,
@@ -431,15 +975,36 @@ export function createSettingsPopover({
       }));
     }
     if (root.querySelector("#endpoint-model")) {
-      wireCombobox(root, modelComboboxOptions({
+      wire(modelComboboxOptions({
         id: "endpoint-model", labelledBy: "endpoint-model-label", placeholder: "Search models on this endpoint…",
         load: loadEndpointModels, current: () => loadSettings().model,
         loading: "Loading models…", empty: (query) => query ? "No matching models." : "This endpoint listed no models.",
         error: "Couldn't load models from this endpoint.", onChange: commit, allowExact: true, escapeHint: true
       }));
     }
+    if (root.querySelector("#bridge-model")) {
+      wire(modelComboboxOptions({
+        id: "bridge-model", labelledBy: "bridge-model-label", placeholder: `Search ${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]} models…`,
+        load: async () => bridgeModelsFor(selectedBridgeAgent()),
+        filter: filterBridgeModels,
+        renderOption: (entry) => renderBridgeModelRow(entry.model, { current: loadSettings().model, ...entry }),
+        current: () => loadSettings().model,
+        loading: "Loading subscription models…",
+        empty: `${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]} returned no models.`,
+        error: `Couldn't load models from ${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]}.`,
+        onChange: (id) => {
+          if (!id) return;
+          const model = bridgeState?.agents?.flatMap((agent) => agent.models || []).find((entry) => entry.id === id);
+          const options = model?.reasoning?.options || [];
+          const settings = loadSettings();
+          patchSelectedBridgeAgent({ model: id, reasoning: options.includes(settings.reasoning) ? settings.reasoning : (model?.reasoning?.default || "") });
+          renderConditionalSections();
+        },
+        escapeHint: true
+      }));
+    }
     if (!root.querySelector("#local-model")) return;
-    wireCombobox(root, modelComboboxOptions({
+    wire(modelComboboxOptions({
       id: "local-model", labelledBy: "local-model-label", placeholder: "Search installed Ollama models…",
       load: () => localModels || discoverLocalModels(loadSettings().base_url),
       current: () => loadSettings().model,
@@ -469,21 +1034,28 @@ export function createSettingsPopover({
   }
 
   function open({ focusKey = false, focusSelector = "", trigger = defaultTrigger, purpose: nextPurpose = "settings", status = "", onReady = null } = {}) {
-    if (surface) { const target = focusSelector ? surface.querySelector(focusSelector) : null; target?.focus({ preventScroll: true }); return; }
+    if (surface) {
+      purpose = nextPurpose;
+      recoveryStatus = status;
+      readyCallback = onReady;
+      lastBridgeRenderKey = "";
+      renderConditionalSections();
+      const target = focusSelector ? surface.querySelector(focusSelector) : null;
+      target?.focus({ preventScroll: true });
+      return;
+    }
     activeTrigger = trigger || defaultTrigger; purpose = nextPurpose; readyCallback = onReady; recoveryStatus = status;
-    let settings = loadSettings();
+    const settings = loadSettings();
     if (purpose === "setup" && !getGenerationSetupStatus(settings).ready) {
       localDiscoveryToken += 1;
       localModels = null; localDiscovery = "idle"; localDiscoveryMessage = "";
-      if (providerFor(settings.preset).id !== "openrouter") {
-        applyPatch(settingsForProvider("openrouter", settings));
-        settings = loadSettings();
-      }
     }
     const preset = providerFor(settings.preset);
     surface = document.createElement("div"); surface.id = "web-settings-popover"; surface.className = "web-settings-dialog popover-surface"; surface.tabIndex = -1; surface.setAttribute("aria-label", "Model settings");
     const title = purpose === "recovery" ? "Reconnect AI" : purpose === "setup" ? "Set up AI" : "Model settings";
-    surface.innerHTML = `<section id="settings-panel" class="settings-panel" aria-labelledby="settings-title"><header class="settings-header"><h2 id="settings-title">${title}</h2></header><div class="settings-inner"><div class="settings-section provider-section"><span class="settings-label" id="provider-choice-label">Provider</span><div class="provider-choice" role="group" aria-labelledby="provider-choice-label">${Object.values(PROVIDERS).map((provider) => `<button type="button" data-provider="${provider.id}" aria-pressed="${provider.id === preset.id}">${escapeHtml(provider.label)}</button>`).join("")}</div></div><div id="settings-conditional-sections"></div></div></section>`;
+    const providerChoices = [PROVIDERS.openrouter, PROVIDERS.subscriptions, PROVIDERS.local];
+    const pressed = pressedProviderId(preset.id);
+    surface.innerHTML = `<section id="settings-panel" class="settings-panel" aria-labelledby="settings-title"><header class="settings-header"><h2 id="settings-title">${title}</h2></header><div class="settings-inner"><div class="settings-section provider-section"><span class="settings-label" id="provider-choice-label">Provider</span><div class="provider-choice" role="group" aria-labelledby="provider-choice-label">${providerChoices.map((provider) => `<button type="button" data-provider="${provider.id}" aria-pressed="${provider.id === pressed}">${escapeHtml(provider.label)}</button>`).join("")}</div></div><div id="settings-conditional-sections"></div></div></section>`;
     document.body.append(surface); activeTrigger.setAttribute("aria-controls", surface.id); wireProviderControl(); renderConditionalSections();
     if (activeTrigger?.id === "blank-start-setup") {
       surface.classList.add("settings-setup-surface");
@@ -500,15 +1072,19 @@ export function createSettingsPopover({
     // from the explicit Set up Local action rendered for error/empty states.
     if (preset.id === "local") void runLocalDiscovery();
     if (preset.id === "custom_endpoint") void runEndpointDiscovery();
+    if (preset.id === "subscriptions") startBridgeStream();
   }
 
   function close() {
     if (!surface) return;
+    disposeConditionalComboboxes();
+    lastBridgeRenderKey = "";
     const old = surface; surface = null;
     scrim?.remove(); scrim = null;
     const activePopover = popover; popover = null; activePopover?.close(); old.remove();
     activeTrigger?.removeAttribute("aria-controls"); activeTrigger?.setAttribute("aria-expanded", "false");
     readyCallback = null;
+    bridgeRecoveryAgent = "";
   }
 
   function completeLocalSetup() {
@@ -519,7 +1095,57 @@ export function createSettingsPopover({
     void callback?.();
   }
 
-  return { open, close, completeLocalSetup, isOpen: () => !!surface };
+  function showBridgeUnauthorized({ onReady = null } = {}) {
+    bridgeRecoveryAgent = selectedBridgeAgent();
+    readyCallback = onReady;
+    stopBridgeStream();
+    bridgeState = null;
+    lastBridgeFrameKey = "";
+    bridgeView = "re_pair";
+    lastBridgeRenderKey = "";
+    if (surface) renderConditionalSections();
+  }
+
+  function recoverUnknownModel(agentId = selectedBridgeAgent()) {
+    if (bridgeView !== "stream" || bridgeAgent(bridgeState, agentId)?.state !== "ready") return false;
+    const current = loadSettings();
+    const next = bridgeSelection(current, agentId, current.agents || {});
+    if (!next.model) return false;
+    applyPatch(next);
+    lastBridgeRenderKey = "";
+    renderConditionalSections();
+    return true;
+  }
+
+  function recoverBridgeAgent(agentId, { trigger = defaultTrigger, status = "", onReady = null } = {}) {
+    const current = loadSettings();
+    if (providerFor(current.preset).id !== "subscriptions") return;
+    if (agentId === "claude" || agentId === "codex") {
+      const agents = { ...(current.agents || {}) };
+      const currentAgent = selectedBridgeAgent(current);
+      agents[currentAgent] = bridgeAgentSnapshot(current, currentAgent, agents);
+      applyBridgeSelection(current, agentId, agents);
+    }
+    bridgeRecoveryAgent = agentId;
+    open({ trigger, purpose: "recovery", status, onReady });
+    startBridgeStream();
+  }
+
+  function syncSubscriptionStream() {
+    if (providerFor(loadSettings().preset).id === "subscriptions") startBridgeStream();
+    else stopBridgeStream();
+  }
+
+  return {
+    open,
+    close,
+    completeLocalSetup,
+    isOpen: () => !!surface,
+    recoverBridgeAgent,
+    recoverUnknownModel,
+    showBridgeUnauthorized,
+    syncSubscriptionStream,
+  };
 }
 
 function keyIdleWhisper(preset) {

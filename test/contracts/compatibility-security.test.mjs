@@ -75,9 +75,11 @@ function verifySetupReadinessFingerprint() {
 async function verifyLiveAndBuildSnapshot() {
   const context = await browser.newContext();
   const page = await context.newPage();
+  const routedRequests = [];
   const external = [];
   await page.route("**/*", async (route) => {
     const url = route.request().url();
+    routedRequests.push(url);
     if (url.startsWith(baseUrl)) return route.continue();
     external.push(url);
     return route.abort();
@@ -87,6 +89,7 @@ async function verifyLiveAndBuildSnapshot() {
   await page.waitForSelector(".doc-content #safe-show", { state: "attached" });
   await page.waitForFunction(() => document.querySelector(".doc-content img[alt='offline asset']")?.complete);
   await assertSafeRender(page, "live");
+  assert(routedRequests.some((url) => url.startsWith(baseUrl)), "live request capture must observe the app");
   assert.deepEqual(external, [], "live hostile content must not initiate external requests");
   const importedAssetType = await page.evaluate((name) => window.__rabbitholeTest.inspectAssetType(name), ASSET);
   assert.equal(importedAssetType, "image/gif", "portable import derives asset MIME metadata from its validated filename");
@@ -112,11 +115,16 @@ async function verifyFrozen(snapshot) {
     requests.push(route.request().url());
     await route.abort();
   });
+  const captureProbe = "https://rabbithole-capture-probe.invalid/";
+  await page.evaluate((url) => fetch(url).catch(() => null), captureProbe);
+  assert(requests.includes(captureProbe), "frozen request capture must observe the probe");
+  requests.length = 0;
   await page.setContent(snapshot, { waitUntil: "load" });
   await page.waitForSelector(".doc-content #safe-show", { state: "attached" });
   await page.waitForTimeout(250);
-  assert.equal(await page.locator("#taskbar button").count(), 15, "frozen snapshots should render the shared taskbar buttons");
+  assert.equal(await page.locator("#taskbar button").count(), 13, "frozen snapshots should render the shared taskbar buttons");
   assert.equal(await page.locator("#tb-done").isVisible(), false, "frozen snapshots should suppress Done");
+  assert.equal(await page.locator("#t-new, #t-rail").count(), 0, "only the web app can create or browse holes, so its chrome must not ship in the shared shell");
   const frozenAssets = await page.evaluate(() => [...document.querySelectorAll(".doc-content img[alt='offline asset']")].map((img) => ({ src: img.getAttribute("src"), complete: img.complete, width: img.naturalWidth })));
   assert(frozenAssets.some((img) => img.complete && img.width > 0), `frozen: embedded asset must render (${JSON.stringify(frozenAssets)})`);
   await assertSafeRender(page, "frozen");

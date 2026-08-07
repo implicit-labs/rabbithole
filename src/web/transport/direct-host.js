@@ -15,9 +15,10 @@ const SAVE_DEBOUNCE_MS = 400;
 const WEB_ROOT_QUESTION = "web_root_question";
 
 export class DirectRabbitholeHost {
-  constructor({ store, hole, brain = null, registerAssetUrl = null, onToast = null, onDone = null, onRestore = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
+  constructor({ store, hole, brain = null, brainRequiredError = null, registerAssetUrl = null, onToast = null, onDone = null, onRestore = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
     this.store = store;
     this.brain = brain;
+    this.brainRequiredError = brainRequiredError;
     this.onEvent = null;
     this.onToast = onToast;
     this.onDone = onDone;
@@ -184,13 +185,37 @@ export class DirectRabbitholeHost {
   }
 
   async transcribePdfBatch(batch, tail, signal) {
+    try {
+      return await this.transcribePdfBatchOnce(batch, tail, signal);
+    } catch (error) {
+      const normalized = normalizeProviderError(error);
+      if (normalized.code !== "payload_too_large" || batch.length < 2) throw error;
+      const halfway = Math.ceil(batch.length / 2);
+      const first = await this.transcribePdfBatchOnce(batch.slice(0, halfway), tail, signal);
+      const secondTail = `${tail}${tail && first ? "\n\n" : ""}${first}`.slice(-500);
+      const second = await this.transcribePdfBatchOnce(batch.slice(halfway), secondTail, signal);
+      return `${first}${first && second ? "\n\n" : ""}${second}`;
+    }
+  }
+
+  async transcribePdfBatchOnce(batch, tail, signal) {
     const node = this.state.nodes.get(this.state.root_id);
     const pdf = normalizePdfExtension(node);
     const source = await this.store.getAsset(this.holeId, pdf.source.asset);
-    const pages = await Promise.all(batch.map(async (page) => ({ n: page.n, data_url: await cropPdfSourceToDataUrl(source, {
-      sourceKey: pdf.source.sha256, pageNumber: page.n, normalizedRect: { x: 0, y: 0, w: 1, h: 1 }, padding: 0, maxLongEdge: 2400,
-    }) })));
-    let output = ""; for await (const event of this.brain.transcribePages({ pages, tail }, signal)) if (event.type === "text") output += event.delta;
+    const pages = await Promise.all(batch.map(async (page) => ({
+      n: page.n,
+      data_url: await cropPdfSourceToDataUrl(source, {
+        sourceKey: pdf.source.sha256,
+        pageNumber: page.n,
+        normalizedRect: { x: 0, y: 0, w: 1, h: 1 },
+        padding: 0,
+        maxLongEdge: 2400,
+      }),
+    })));
+    let output = "";
+    for await (const event of this.brain.transcribePages({ pages, tail }, signal)) {
+      if (event.type === "text") output += event.delta;
+    }
     return output.trim();
   }
 
@@ -232,7 +257,7 @@ export class DirectRabbitholeHost {
       this.startRootAnswer({ reset: true });
       return { ok: true };
     }
-    this.startAnswer(node.id, { reset: true });
+    this.startAnswer(node.id, { reset: true, withoutAttachment: payload.without_attachment === true });
     return { ok: true };
   }
 
@@ -319,7 +344,7 @@ export class DirectRabbitholeHost {
     });
   }
 
-  startAnswer(nodeId, { reset = false } = {}) {
+  startAnswer(nodeId, { reset = false, withoutAttachment = false } = {}) {
     if (this.disposed) return;
     const node = this.state.nodes.get(nodeId);
     if (!node || node.status !== "pending") return;
@@ -333,7 +358,7 @@ export class DirectRabbitholeHost {
       this.dispatchProgress(nodeId, "", { emit: true });
     }
 
-    queueMicrotask(() => this.runAnswer(nodeId, controller).catch((err) => {
+    queueMicrotask(() => this.runAnswer(nodeId, controller, { withoutAttachment }).catch((err) => {
       this.handleAnswerError(nodeId, err, controller.signal);
     }));
   }
@@ -363,9 +388,9 @@ export class DirectRabbitholeHost {
     const node = this.state.nodes.get(nodeId);
     if (!node || node.status !== "pending") return;
     if (!this.brain) {
-      throw new ProviderError("Add your provider key to keep asking.", {
+      throw new ProviderError(this.brainRequiredError?.message || "Add your provider key to keep asking.", {
         status: 401,
-        code: "missing_key",
+        code: this.brainRequiredError?.code || "missing_key",
         retryable: true,
       });
     }
@@ -405,20 +430,20 @@ export class DirectRabbitholeHost {
     await this.onRootAnswered?.(finalNode);
   }
 
-  async runAnswer(nodeId, controller) {
+  async runAnswer(nodeId, controller, { withoutAttachment = false } = {}) {
     const node = this.state.nodes.get(nodeId);
     if (!node || node.status !== "pending") return;
     if (!this.brain) {
-      throw new ProviderError("Add your provider key to keep asking.", {
+      throw new ProviderError(this.brainRequiredError?.message || "Add your provider key to keep asking.", {
         status: 401,
-        code: "missing_key",
+        code: this.brainRequiredError?.code || "missing_key",
         retryable: true,
       });
     }
 
     const brain = this.brain;
     const context = this.buildBranchContext(node);
-    await this.attachBranchImage(node, context);
+    if (!withoutAttachment) await this.attachBranchImage(node, context);
     const fallbackTitle = fallbackTitleForNode(node);
     context.fallbackTitle = fallbackTitle;
     // Each attempt, including a retry, gets a fresh run id. The reducer can
@@ -444,6 +469,7 @@ export class DirectRabbitholeHost {
       }
     } catch (error) {
       if (!context.attachment || controller.signal.aborted) throw error;
+      if (normalizeProviderError(error).code === "model_no_images") throw error;
       delete context.attachment;
       this.dispatchProgress(nodeId, "", { emit: true });
       const retryRun = this.createGenerationRun(this.state.nodes.get(nodeId), fallbackTitle);
@@ -536,14 +562,19 @@ export class DirectRabbitholeHost {
 
   handleAnswerError(nodeId, err, signal) {
     this.abortByNode.delete(nodeId);
-    if (signal?.aborted && !this.state.nodes.has(nodeId)) return;
+    if (signal?.aborted) return;
     const node = this.state.nodes.get(nodeId);
     if (!node || node.status !== "pending") return;
     const normalized = normalizeProviderError(err);
+    if (normalized.code === "abort") return;
     if (isAuthError(normalized)) {
       this.onAuthRequired?.({ node, error: normalized, retry: () => this.handleRetry({ node_id: nodeId }) });
-    } else if (normalized.code === "network") {
-      this.onProviderFailure?.({ node, error: normalized, retry: () => this.handleRetry({ node_id: nodeId }) });
+    } else if (["network", "agent_signed_out", "agent_missing", "model_unknown", "model_no_images", "payload_too_large", "turn_failed"].includes(normalized.code)) {
+      this.onProviderFailure?.({
+        node,
+        error: normalized,
+        retry: ({ withoutAttachment = false } = {}) => this.handleRetry({ node_id: nodeId, without_attachment: withoutAttachment }),
+      });
     }
     this.emit({
       type: "node_error",

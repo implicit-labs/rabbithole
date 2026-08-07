@@ -403,13 +403,14 @@ body.mode-canvas #viewport { display: block; }
 .rh-origin-crop-reader img { max-height: 260px; }
 
 /* ---------- taskbar — the one persistent chrome row shared by both modes ----
-   Floating pills on a pass-through row: tools on the left; share · theme ·
-   settings and a separate Done pill pinned top right. Each mode's group leads
-   with the button that takes you to the other mode, so the switch reads as an
-   action ("Canvas" / "Reader"), never as state. */
+   Floating pills on a pass-through row: app navigation, a stable Reader/Canvas
+   selector, and mode-local tools on the left; session controls on the right. */
 :root { --taskbar-clear: 62px; }
 #taskbar { position: fixed; top: 14px; left: 14px; right: 14px; z-index: 50; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; pointer-events: none; }
 #taskbar > #tb-tools, #taskbar > #tb-session { flex: 0 0 auto; }
+#tb-tools { gap: 4px; }
+#tb-app { display: inline-flex; align-items: center; gap: var(--space-3); }
+#tb-app:empty, #tb-app:empty + #app-view-sep { display: none; }
 #tb-document { position: fixed; top: 14px; left: var(--rh-pdf-reader-center, 50%); display: flex; width: max-content; max-width: calc(100vw - 28px); min-width: 0; justify-content: center; transform: translateX(-50%); pointer-events: none; }
 #tb-document:empty, body.mode-canvas #tb-document { display: none; }
 #tb-session { display: flex; align-items: flex-start; gap: 10px; }
@@ -418,13 +419,31 @@ body.mode-canvas #viewport { display: block; }
    sits on the same 24px line, so the pills all read as one height. */
 .tb-pill .tool-btn { height: var(--control-h-xs); padding-block: 0; font-size: var(--text-ui); }
 .tb-pill .tool-icon { width: var(--control-h-xs); padding: 0; }
+/* The view control belongs to the toolbar rather than sitting inside it as a
+   second pill. The current view collapses to a quiet icon; the available
+   destination keeps its icon and label, so the one useful action reads first. */
+#tb-view { display: inline-flex; align-items: center; gap: 1px; }
+#tb-view .tool-btn { min-width: 0; padding-inline: 6px; gap: var(--space-2); color: var(--fg-bold); font-weight: var(--weight-medium); }
+#tb-view .view-label { display: inline-block; min-width: 42px; text-align: left; }
+#tb-view .tool-btn[aria-pressed="true"] { width: var(--control-h-xs); min-width: var(--control-h-xs); padding-inline: 0; gap: 0;
+  color: var(--fg-dim); background: none; cursor: default; }
+#tb-view .tool-btn[aria-pressed="true"] .view-label { display: none; }
+#tb-view .tool-btn[aria-pressed="true"]:hover { color: var(--fg-dim); background: none; }
+/* Keep keyboard focus unambiguous without the detached 2px accent halo used by
+   free-standing controls: a one-pixel inset edge stays inside the toolbar. */
+#tb-view .tool-btn:focus-visible { outline: none; background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent); }
+#tb-view .tool-btn[aria-pressed="true"]:focus-visible { color: var(--fg-bold); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+@media (forced-colors: active) {
+  #tb-view .tool-btn:focus-visible { outline: 2px solid CanvasText; outline-offset: -2px; box-shadow: none; }
+}
 /* Done sits alone in its pill, so the pill is the button: hover reads on the
    pill edge, never as a highlight box inside a box. */
 #tb-done-pill { transition: border-color var(--duration-fast) var(--ease-standard); }
 #tb-done-pill:hover { border-color: var(--border-focus); }
 #tb-done-pill .tool-btn:hover { background: none; }
 .tb-pill .sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
-.tb-group { display: contents; }
+.tb-group { display: inline-flex; align-items: center; gap: var(--space-3); }
 body.mode-canvas .tb-group[data-mode="reader"] { display: none; }
 body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .zoom-controls { display: inline-flex; align-items: center; gap: 1px; margin-inline: -2px; }
@@ -442,11 +461,15 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
     box-shadow: var(--shadow); padding: 5px 6px; overflow-x: auto; overscroll-behavior-x: contain;
     touch-action: pan-x; scrollbar-width: none; }
   #taskbar::-webkit-scrollbar { display: none; }
+  #app-view-sep { display: none; }
+  #tb-tools, #tb-app, .tb-group { gap: 2px; }
   #tb-document { position: static; top: auto; left: auto; flex: 0 0 auto; transform: none; }
   .tb-pill { background: none; border: none; box-shadow: none; padding: 0; border-radius: 0; gap: 2px; flex: 0 0 auto; }
   #tb-session { position: sticky; right: 0; margin-left: auto; align-items: center; gap: 2px; background: var(--bar-bg); padding-left: 4px; }
   .tb-pill .tool-icon, .zoom-controls .tool-icon { width: 44px; height: 44px; }
   .tb-pill .tool-btn { min-width: 44px; min-height: 44px; flex: 0 0 auto; }
+  #tb-view .tool-btn[aria-pressed="false"] { min-width: 76px; }
+  #tb-view .tool-btn[aria-pressed="true"] { width: 44px; min-width: 44px; }
   #zoom-label { height: 44px; min-width: 52px; padding-inline: 6px; font-size: 12px; }
   .tb-pill .sep { height: 24px; flex: 0 0 1px; }
 }
@@ -464,18 +487,33 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   transform: scale(0.97) translateY(-4px); transform-origin: top center;
   transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 160ms; }
 #ask.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); transition-delay: 0s; }
-#ask:focus-within { border-color: var(--accent); box-shadow: var(--focus-field-shadow), var(--shadow); }
+/* Accent on the hairline only — the 3px glow around the whole surface was the harsh
+   part. Pitched to sit at the weight of the lens hover wash: --hl itself is right for
+   a filled pill but vanishes as a 1px line, so the same presence needs more of the
+   accent mixed into the border. */
+#ask:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ask-input { display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; }
 .ask-input textarea { flex: 1; border: none; outline: none; resize: none; background: transparent; color: var(--fg);
   font-family: var(--font-ui); font-size: 13px; line-height: 1.5; padding: 3px 0; min-height: 20px; max-height: 110px; }
 .ask-input textarea::placeholder { color: var(--fg-faint); }
 .ask-input .send-btn { width: 26px; height: 26px; }
-.ask-lenses { display: flex; gap: 2px; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
-.lens { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
-  color: var(--fg-dim); background: none; border: none; border-radius: 8px; padding: 5.5px 2px; cursor: pointer; white-space: nowrap;
+/* The four labels are wildly different lengths ("ELI5" vs "Go Deeper"), so equal
+   flex columns produce unequal gaps between the words — the short label floats in
+   a pool of space while the long one nearly touches its neighbour. Size each pill
+   to its own text with identical padding and let space-between hand out the slack:
+   every word-to-word distance is then the same, and the row still runs edge to edge. */
+.ask-lenses { display: flex; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
+.lens { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
+  color: var(--fg-dim); background: none; border: none; border-radius: 8px; padding: 5.5px 9px; cursor: pointer; white-space: nowrap;
   transition: color 0.12s, background 0.12s; }
 .lens:hover { color: var(--fg-bold); background: var(--hl); }
 .lens:active { background: var(--hl-strong); }
+/* A 2px ring floating outside a bare pill collides with the popover's own hairline
+   in a 5px gutter. Draw the keyboard state inside the pill instead: the hover fill
+   plus a tinted edge on the exact same 8px radius — unmistakable, never loud. */
+.lens:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
+#ask .send-btn:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .lens kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
   background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 4px; padding: 1px 4.5px; line-height: 1.6; }
 .lens:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }

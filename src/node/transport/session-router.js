@@ -99,12 +99,11 @@ export async function handleSessionRequest(session, req, res) {
 
   if (req.method === "POST" && url.pathname === "/events") {
     try {
-      const payload = await parseRequestBody(req, res);
+      const payload = await parseRequestBody(req);
       const result = await session.handleBrowserEvent(payload);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {
-      if (err?.statusCode === 413) return;
       const status = err?.statusCode || 500;
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));

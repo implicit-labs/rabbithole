@@ -31,8 +31,8 @@ body.web-blank-canvas #palette,
 body.web-blank-canvas #sharemenu,
 body.web-blank-canvas #confirm,
 body.web-blank-canvas #banner,
-body.web-blank-canvas #t-reader,
-body.web-blank-canvas #t-canvas,
+body.web-blank-canvas #tb-view,
+body.web-blank-canvas #tb-view + .sep,
 body.web-blank-canvas .tb-group > .sep,
 body.web-blank-canvas #t-tidy,
 body.web-blank-canvas #t-share {
@@ -906,7 +906,10 @@ body.blank-dragging .composer-card {
   visibility: visible;
 }
 
-.provider-choice {
+.provider-choice,
+.local-mode-choice,
+.bridge-agent-choice,
+.reasoning-choice {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
@@ -920,7 +923,10 @@ body.blank-dragging .composer-card {
   background: color-mix(in srgb, var(--fg) 5%, transparent);
 }
 
-.provider-choice button {
+.provider-choice button,
+.local-mode-choice button,
+.bridge-agent-choice button,
+.reasoning-choice button {
   display: inline-flex;
   box-sizing: border-box;
   align-items: center;
@@ -937,15 +943,110 @@ body.blank-dragging .composer-card {
   transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.provider-choice button[aria-pressed="true"] {
+.provider-choice button[aria-pressed="true"],
+.local-mode-choice button[aria-pressed="true"],
+.bridge-agent-choice button[aria-pressed="true"],
+.reasoning-choice button[aria-pressed="true"] {
   background: color-mix(in srgb, var(--fg) 11%, var(--node-bg));
   color: var(--fg-bold);
   box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
 }
 
-.provider-choice button:not([aria-pressed="true"]):hover {
+.provider-choice button:not([aria-pressed="true"]):hover,
+.local-mode-choice button:not([aria-pressed="true"]):hover,
+.bridge-agent-choice button:not([aria-pressed="true"]):hover,
+.reasoning-choice button:not([aria-pressed="true"]):hover {
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   color: var(--fg);
+}
+
+.local-mode-section {
+  margin-top: -4px;
+}
+
+.local-mode-choice button,
+.bridge-agent-choice button,
+.reasoning-choice button {
+  min-height: 26px;
+  padding: 4px 6px;
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
+}
+
+.reasoning-choice {
+  margin-top: 8px;
+}
+
+.bridge-surface {
+  overflow: hidden;
+}
+
+.bridge-agent-section {
+  margin-top: -4px;
+}
+
+.bridge-agent-choice {
+  margin-top: 0;
+}
+
+.bridge-agent-choice button {
+  gap: 4px;
+}
+
+.bridge-agent-choice button:not([aria-pressed="true"]) {
+  color: var(--fg);
+}
+
+.bridge-plan-badge {
+  color: var(--fg-faint);
+  font-weight: var(--weight-medium);
+}
+
+.bridge-agent-choice button:not([aria-pressed="true"]) .bridge-plan-badge {
+  color: inherit;
+}
+
+.bridge-agent-choice button[aria-pressed="true"] .bridge-plan-badge {
+  color: var(--fg-dim);
+}
+
+.bridge-agent-choice button:not([aria-pressed="true"]):focus-visible {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg-bold);
+}
+
+.bridge-setup-section h3,
+.bridge-agent-state p {
+  margin: 0 0 10px;
+  color: var(--fg);
+  font: var(--weight-semibold) var(--text-body)/1.45 var(--font-ui);
+}
+
+.bridge-agent-body {
+  min-height: 118px;
+}
+
+.bridge-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--fg) 9%, var(--border));
+  border-radius: var(--radius-control-lg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+
+.bridge-command code {
+  flex: 1;
+  overflow-x: auto;
+  color: var(--fg-bold);
+  font: var(--text-sm)/1.4 var(--font-mono);
+  white-space: nowrap;
+}
+
+.bridge-setup-section .field-hint,
+.bridge-agent-state .field-hint {
+  display: block;
+  margin-top: 8px;
 }
 
 .settings-recovery {
@@ -1869,6 +1970,7 @@ body.blank-dragging .composer-card {
 
 .ollama-recovery-success { align-content: center; justify-items: center; min-height: 124px; text-align: center; }
 .ollama-recovery-success p { margin-top: 6px; }
+
 .ollama-success-check {
   display: grid;
   width: 32px;
@@ -1899,6 +2001,9 @@ body.blank-dragging .composer-card {
 .toolbar-brand:focus-visible,
 .project-menu-item:focus-visible,
 .provider-choice button:focus-visible,
+.local-mode-choice button:focus-visible,
+.bridge-agent-choice button:focus-visible,
+.reasoning-choice button:focus-visible,
 .settings-text-action:focus-visible,
 .settings-select:focus-visible,
 .model-option:focus-visible,
@@ -1969,6 +2074,9 @@ body.blank-dragging .composer-card {
   }
 
   .provider-choice button,
+  .local-mode-choice button,
+  .bridge-agent-choice button,
+  .reasoning-choice button,
   .settings-select,
   .settings-complete-section .web-primary {
     min-height: var(--control-h-lg);
