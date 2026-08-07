@@ -206,13 +206,14 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
 body.mode-canvas #reader { display: none; }
 #reader-workspace { display: flex; flex: 1; min-height: 0; border-top: 1px solid var(--border); }
 #reader-document { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
-/* The way back mirrors the way in: the card's expand button lives at its
-   top-right corner, so the restore control floats at the same corner of the
-   maximized document — same spot, opposite arrow. */
-#reader-restore { position: absolute; top: 10px; right: 14px; z-index: 7; width: 32px; height: 32px; padding: 0;
-  background: var(--bar-bg); border: 1px solid var(--border); border-radius: var(--radius-control-lg);
-  color: var(--fg-dim); box-shadow: var(--shadow); }
-#reader-restore:hover { color: var(--fg-bold); border-color: var(--border-focus); }
+/* The way back lives in the taskbar's session cluster (left of share/theme/
+   settings) and only exists while a document is maximized. The button IS the
+   capsule — no pill padding around it — so there is no dead zone and hover
+   lights the whole control wall to wall, never an inset around the label. */
+body.mode-canvas #tb-restore-pill { display: none; }
+#tb-restore-pill { padding: 0; transition: border-color var(--duration-fast) var(--ease-standard); }
+#tb-restore-pill .tool-btn { height: auto; padding: 7px 12px; border-radius: 9px; }
+#tb-restore-pill:hover { border-color: var(--border-focus); }
 /* The lineage trail lives at the top of the document column and scrolls with it. */
 #breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: 12.5px; margin-bottom: 22px; }
 /* At the root there is no lineage to walk — the restore control is the way

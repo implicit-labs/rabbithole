@@ -195,9 +195,9 @@ export function initReader(){
     readerScope.listen(notes, "mouseout", function(e){ syncNoteHover(e, false); });
     readerScope.listen(document.getElementById("r-textdown"), "click", function(){ setReaderFontScale(-0.1); });
     readerScope.listen(document.getElementById("r-textup"), "click", function(){ setReaderFontScale(0.1); });
-    // The restore control is the card's expand button, mirrored: same corner,
-    // opposite arrow. It collapses the reader back into its card and hands
-    // focus to its twin, so keyboard travel round-trips cleanly.
+    // Back to canvas lives in the taskbar's session cluster. It collapses the
+    // reader back into its card and hands focus to the card's expand button,
+    // so keyboard travel round-trips cleanly.
     readerScope.listen(document.getElementById("reader-restore"), "click", function(){
       if (mode === "canvas") return;
       readerLifecycle.hooks.setMode("canvas");

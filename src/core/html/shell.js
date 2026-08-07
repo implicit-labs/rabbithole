@@ -16,7 +16,7 @@ export const CANVAS_SHELL = `
     <span class="sep" id="app-view-sep"></span>
     <!-- There is no Reader/Canvas toggle: the canvas is the place and the
          reader is the current card maximized. You enter by expanding a card
-         and leave through the mirrored restore control (or Esc). -->
+         and leave through Back to canvas in the session cluster (or Esc). -->
     <span class="tb-group" data-mode="reader">
       ${buttonMarkup({ id: "r-textdown", title: "Smaller text", label: "A−" })}
       ${buttonMarkup({ id: "r-textup", title: "Larger text", label: "A+" })}
@@ -33,6 +33,11 @@ export const CANVAS_SHELL = `
   </div>
   <div id="tb-document" aria-label="Document controls"></div>
   <div id="tb-session">
+    <!-- The way back from a maximized document: sits left of the shared
+         session controls and only exists while the reader is up. -->
+    <div class="tb-pill" id="tb-restore-pill">
+      ${buttonMarkup({ id: "reader-restore", title: "Back to canvas · Esc", ariaLabel: "Back to canvas", label: "Back to canvas", svgIconHtml: iconSvg("contract") })}
+    </div>
     <div class="tb-pill">
     ${iconButtonMarkup({ id: "t-share", title: "Share and export", ariaLabel: "Share and export", ariaHaspopup: "menu", ariaControls: "sharemenu", ariaExpanded: "false", svgIconHtml: iconSvg("share") })}
     ${iconButtonMarkup({ id: "t-theme", title: "Toggle theme", ariaLabel: "Toggle theme", svgIconHtml: iconSvg("theme") })}
@@ -47,7 +52,6 @@ export const CANVAS_SHELL = `
 <div id="reader">
   <div id="reader-workspace">
     <div id="reader-document">
-      ${iconButtonMarkup({ id: "reader-restore", title: "Back to canvas · Esc", ariaLabel: "Back to canvas", svgIconHtml: iconSvg("contract") })}
       <div id="reader-main"></div>
       <div id="composer">
         <div class="composer-inner" id="composer-inner">

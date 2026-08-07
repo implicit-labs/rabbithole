@@ -1083,8 +1083,8 @@ async function verifyCanvasBranching() {
   await assertCodeCopy(page, { scope: "#reader-main .doc-content", rawCode: smokeCode, hover: false, label: "web Reader" });
   await page.focus("#r-textup");
   await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "t-share", "reader tools should tab straight into the session cluster");
-  const readerFocusRing = await page.evaluate(() => getComputedStyle(document.getElementById("t-share")).outlineStyle);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "reader-restore", "reader tools should tab straight into the session cluster, Back to canvas first");
+  const readerFocusRing = await page.evaluate(() => getComputedStyle(document.getElementById("reader-restore")).outlineStyle);
   assert.notEqual(readerFocusRing, "none", "keyboard focus should show the taskbar focus-visible ring");
   const readerReturnPosition = await page.locator("#reader-main").evaluate((scroller) => {
     scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * 0.35;
