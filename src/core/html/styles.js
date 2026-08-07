@@ -320,13 +320,14 @@ body.mode-canvas #reader { display: none; }
 #viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; display: none; touch-action: pan-x pan-y;
   background-color: var(--bg); background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 26px 26px; }
 body.mode-canvas #viewport { display: block; }
-/* Mode flights: while the reader inflates out of (or deflates back into) its
-   card, both surfaces stay up — the canvas underneath, the reader in costume
-   as a card above it. The classes flip first; the flight is decoration. */
+/* Mode flights: while the reader sheet rises out of (or settles back toward)
+   its card — an anchored zoom-fade, never a geometric morph — both surfaces
+   stay up: the canvas underneath, the fading sheet above it. The classes flip
+   first; the flight is decoration. transform-origin (the card's center) is
+   set inline by mode-transition.js. */
 body.mode-flight #reader { display: flex; }
 body.mode-flight #viewport { display: block; }
-#reader.reader-flying { transform-origin: 0 0; overflow: hidden; pointer-events: none; will-change: transform;
-  border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+#reader.reader-flying { pointer-events: none; will-change: transform, opacity; }
 #viewport.panning { cursor: grabbing; }
 #viewport.pinching { cursor: zoom-in; }
 #canvas-gesture-plane { position: absolute; inset: 0; touch-action: none; }

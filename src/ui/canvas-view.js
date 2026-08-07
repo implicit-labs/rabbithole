@@ -983,22 +983,30 @@ export function setMode(m){
     if (m === "canvas"){
       ensureCanvasBuilt();
       document.body.classList.add("mode-canvas");
-      // Collapse the reader back into the card it is. If the card still sits
+      // Settle the reader back toward the card it is. If the card still sits
       // in view, the camera stays put (macOS restore: the window returns to
       // its spot). If the human panned away — or dove into a different branch
-      // while reading — the camera glides home alongside the shrinking reader,
-      // and the two meet on the card.
+      // while reading — the camera jumps home NOW, while the opaque reader
+      // still covers the canvas: the jump is invisible, the card is already
+      // seated when the fade reveals it, and there is nothing to keep in sync.
       if (fromReader){
         var target = nodes[currentNodeId];
+        var rect = null;
         if (target && isVisible(target)){
-          var rect = cardScreenRect(target);
+          rect = cardScreenRect(target);
           if (!rectMostlyVisible(rect)){
             var pose = diveTargetView(target);
-            animateView(pose.x, pose.y, pose.scale, { source: "pointer", duration: 270, ease: "inOut" });
-            rect = cardScreenRect(target, pose);
+            animateView(pose.x, pose.y, pose.scale, { source: "flight" });
+            rect = cardScreenRect(target);
           }
-          flyReaderToRect(rect);
-          if (target.el) playLandingCue(target.el, "flash");
+        }
+        var flew = flyReaderToRect(rect);
+        if (target && target.el){
+          // The flash confirms the landing, so it waits for the fade to
+          // finish; under the fading sheet it reads as a glitch.
+          var cueEl = target.el;
+          if (flew) document.addEventListener("rh-reader-flight-end", function(){ playLandingCue(cueEl, "flash"); }, { once: true });
+          else playLandingCue(cueEl, "flash");
         }
       }
       requestAnimationFrame(function(){

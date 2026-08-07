@@ -80,8 +80,8 @@ export function openNode(id){
     var transferredPosition = fromCanvas
       ? captureContentPosition(nodes[id].bodyEl)
       : null;
-    // The reader inflates out of the card it came from — capture the card's
-    // on-screen rect while the canvas is still up so the flight can start there.
+    // The reader rises out of the card it came from — capture the card's
+    // on-screen rect while the canvas is still up so the flight anchors there.
     var cardRect = null;
     if (fromCanvas && nodes[id].el){
       var r = nodes[id].el.getBoundingClientRect();
@@ -107,7 +107,7 @@ export function openNode(id){
     renderMarginNotes();
     readerLifecycle.hooks.updateComposerState();
     readerLifecycle.hooks.scheduleViewSave();
-    if (cardRect) flyReaderFromRect(cardRect);
+    if (fromCanvas) flyReaderFromRect(cardRect);
   }
 
 export function renderBreadcrumb(){
