@@ -36,27 +36,31 @@ async function verifyBranchContentSizing() {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => !!window.__rabbitholeTest);
   await createDocument(page, "# Sizing root\n\nAsk two follow-ups from here.");
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("#composer-text:visible");
 
   await page.fill("#composer-text", "Give me a brief answer");
   await page.click("#composer-send");
   const shortCard = page.locator(".node:not(.root)", { hasText: "Brief answer" });
   await shortCard.waitFor({ state: "attached" });
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await shortCard.waitFor();
   const shortSize = await shortCard.evaluate((el) => ({ height: el.offsetHeight, cap: parseFloat(el.style.maxHeight), bodyClient: el.querySelector(".node-body").clientHeight, bodyScroll: el.querySelector(".node-body").scrollHeight }));
   assert.equal(shortSize.cap, 460, "a branch should retain the saved/default height as its cap");
   assert(shortSize.height < shortSize.cap, `short branch should hug its content (${shortSize.height}px < ${shortSize.cap}px)`);
   assert(shortSize.bodyScroll <= shortSize.bodyClient + 1, "a short branch should not create an empty scrolling viewport");
 
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("#composer-text:visible");
   await page.fill("#composer-text", "Give me a long answer");
   await page.click("#composer-send");
   const longCard = page.locator(".node:not(.root)", { hasText: "Long answer" });
   await longCard.waitFor({ state: "attached" });
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await longCard.waitFor();
   await page.waitForFunction(() => {
     const cards = Array.from(document.querySelectorAll(".node:not(.root)"));
@@ -205,7 +209,7 @@ async function verifySharedCanvasDialogs() {
   await page.waitForSelector("#palette.visible");
   await page.keyboard.press("Escape");
   await page.waitForSelector("#palette:not(.visible)", { state: "attached" });
-  assert.equal(await page.locator("body").evaluate((body) => body.classList.contains("mode-canvas")), true, "palette Escape must not leak into the canvas reader shortcut");
+  assert.equal(await page.locator("body").evaluate((body) => body.classList.contains("mode-canvas")), true, "palette Escape must stay inside the palette");
 
   const sourceImage = page.locator('.doc-content img[alt="Dialog probe"]:visible').first();
   await sourceImage.click();

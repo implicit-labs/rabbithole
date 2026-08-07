@@ -120,7 +120,8 @@ try {
   assert.equal(trackpadResult.world, scrollContract.world, "reading the PDF must never pan or zoom the canvas");
   await page.evaluate(() => { document.querySelector(".node .rh-pdf-scroll").scrollTop = 0; });
 
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #tb-document .rh-pdf-reader-toolbar");
   await page.waitForFunction(() => document.querySelector("#reader-main .rh-pdf-canvas-generation[data-ready='true'] canvas"));
   const readerContract = await page.evaluate(() => {
@@ -222,7 +223,8 @@ try {
   assert(readerOverflowWidth.scrollWidth > readerOverflowWidth.clientWidth, "Reader must expose horizontal scrolling once the enlarged paper exceeds the window");
   assert.equal(await page.locator(".node .rh-pdf-zoom-value").textContent(), "100%", "Reader zoom must remain local to the Reader PDF instance");
   await page.click("#tb-document .rh-pdf-zoom-value");
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body.mode-canvas");
   const restoredCanvas = await page.evaluate(() => ({
     documentChrome: getComputedStyle(document.querySelector("#tb-document")).display,
@@ -482,7 +484,8 @@ try {
   assert(Math.abs(dimensions.width / dimensions.height - 420 / 273) < 0.003, `crop dimensions must preserve the exact paper-space box plus 12-point padding: ${JSON.stringify(dimensions)}`);
 
   const expectedReaderBranches = regionState.hole.nodes.filter((node) => node.parent_id === root.id).length;
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
   await page.waitForFunction((count) => document.querySelectorAll("#margin-notes .side-item").length === count, expectedReaderBranches);
   const pdfRail = await page.evaluate((pointerId) => {
@@ -509,12 +512,12 @@ try {
   await pointerReaderMark.focus();
   await page.keyboard.press("Enter");
   await page.locator("#reader-main", { hasText: "Coordinate-safe response." }).waitFor();
-  await page.locator('#breadcrumb .crumb[role="link"]').click();
+  await page.locator('#breadcrumb .crumb[role="link"]:not(.crumb-canvas)').click();
   const multiReaderMark = page.locator(`#reader-main .rh-pdf-mark[data-child="${multi.id}"]`);
   await multiReaderMark.waitFor();
   await multiReaderMark.locator("polygon").first().click();
   await page.locator("#reader-main", { hasText: "Coordinate-safe response." }).waitFor();
-  await page.locator('#breadcrumb .crumb[role="link"]').click();
+  await page.locator('#breadcrumb .crumb[role="link"]:not(.crumb-canvas)').click();
   await page.waitForSelector(`#margin-notes .side-item[data-child="${region.id}"]`);
   await page.click(`#margin-notes .side-item[data-child="${region.id}"]`);
   await page.locator("#reader-main", { hasText: "Coordinate-safe response." }).waitFor();

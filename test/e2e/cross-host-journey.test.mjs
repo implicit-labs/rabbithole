@@ -63,7 +63,6 @@ async function modernJourney() {
     assert.equal(branch.status, "branch_request", `modern MCP open result: ${JSON.stringify(branch)}`);
     assert.equal(branch.selected_text, "Select this exact phrase");
     await streamAnswer(mcp.client, branch, "Modern branch");
-    await page.click("#t-canvas");
     await page.locator(".doc-content", { hasText: "Second final paragraph" }).waitFor();
 
     const snapshotPath = await downloadShare(page, "#sm-export", "modern-snapshot.html");

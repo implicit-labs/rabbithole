@@ -14,7 +14,6 @@ import {
   view
 } from "./core.js";
 import { DEFAULT_CHILD, DEFAULT_ROOT } from "../core/layout.js";
-import { openNode } from "./reader.js";
 import { setMode } from "./canvas-view.js";
 import { setRendererAssetData } from "./renderer.js";
 
@@ -37,8 +36,8 @@ export function hydrateInitialState({ connectSse = null, refreshStatus = null } 
     });
   });
   Object.keys(nodes).forEach(function(id){ nodes[id]._order = nextOrder(); });
-  // Land exactly where the human left off: same document, same scroll, same
-  // canvas framing, same mode. A first open starts at the root like always.
+  // Land exactly where the human left off: same current document, same scroll,
+  // same canvas framing. A first open starts at the root like always.
   var vs = hydration.view_state;
   if (vs && vs.node_id && nodes[vs.node_id]){
     setCurrentNodeId(vs.node_id);
@@ -50,8 +49,10 @@ export function hydrateInitialState({ connectSse = null, refreshStatus = null } 
     setCanvasFramed(true); // the saved framing wins; don't re-frame on first entry
     setViewAdjusted(true); // keep an existing user view in later state saves
   }
-  openNode(currentNodeId); // READER is the default; canvas DOM is built lazily
-  if (vs && vs.mode === "canvas") setMode("canvas");
+  // Canvas is home: every entry lands on the map, whatever mode was up when
+  // the hole closed. The reader is a focus state — you re-enter it by
+  // expanding the current card, which still remembers its scroll position.
+  setMode("canvas");
   if (typeof refreshStatus === "function") refreshStatus();
   if (!frozen && typeof connectSse === "function") connectSse();
 }

@@ -177,8 +177,6 @@ function renderShell() {
   toastNotice = wireNotice(document.getElementById("web-toast"), { variant: "toast" });
   document.getElementById("tb-app")?.insertAdjacentHTML("afterbegin",
     `${iconButtonMarkup({ className: "toolbar-brand", id: "t-project", title: "About Rabbithole and project links", ariaLabel: "Rabbithole project menu", ariaHaspopup: "menu", ariaControls: "project-menu", ariaExpanded: "false", svgIconHtml: TOOLBAR_BUNNY_MARK_SVG })}<span class="sep toolbar-brand-sep"></span>${webToolbarChrome()}`);
-  document.getElementById("t-reader")?.setAttribute("aria-pressed", "false");
-  document.getElementById("t-canvas")?.setAttribute("aria-pressed", "true");
   railOpen = false;
   applyRailState();
   syncRailPosition();
@@ -842,7 +840,6 @@ async function mountHole(hole, { replace = false } = {}) {
       loadMermaid: loadMermaidRuntime,
       getPdfTranscriptionCapability: () => currentPdfTranscriptionCapability,
     });
-    document.getElementById("t-canvas")?.click();
     const isNewRailItem = !railSummaries?.some((summary) => summary.hole_id === hole.hole_id);
     await renderRail({ refresh: isNewRailItem, firstHoleId: isNewRailItem ? hole.hole_id : null });
     host.startRootAnswer();

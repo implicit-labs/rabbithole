@@ -27,7 +27,9 @@ import {
   truncate
 } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
+import { iconSvg } from "../core/html/icons.js";
 import { createModuleLifecycle } from "./lifecycle.js";
+import { flyReaderFromRect } from "./mode-transition.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
 import { mountVisuals } from "./visuals.js";
 import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
@@ -74,9 +76,17 @@ function marginNotesLayer(){ return document.getElementById("margin-notes"); }
   // ===========================================================================
 export function openNode(id){
     if (!nodes[id]) return;
-    var transferredPosition = document.body.classList.contains("mode-canvas")
+    var fromCanvas = document.body.classList.contains("mode-canvas");
+    var transferredPosition = fromCanvas
       ? captureContentPosition(nodes[id].bodyEl)
       : null;
+    // The reader inflates out of the card it came from — capture the card's
+    // on-screen rect while the canvas is still up so the flight can start there.
+    var cardRect = null;
+    if (fromCanvas && nodes[id].el){
+      var r = nodes[id].el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) cardRect = r;
+    }
     // Snapshot the outgoing document's position (belt & braces alongside the
     // scroll listener) so every window keeps its place when you come back.
     // Only while the reader is actually visible — hidden (canvas mode) it
@@ -97,11 +107,30 @@ export function openNode(id){
     renderMarginNotes();
     readerLifecycle.hooks.updateComposerState();
     readerLifecycle.hooks.scheduleViewSave();
+    if (cardRect) flyReaderFromRect(cardRect);
   }
 
 export function renderBreadcrumb(){
     var path = lineageNodesFromMap(nodes, currentNodeId);
     var fragment = document.createDocumentFragment();
+    // The trail starts one level above every document: the canvas itself.
+    // Spatially the reader sits *on* the map, so "up" from any lineage is out.
+    var home = breadcrumbNodes.__canvas;
+    if (!home){
+      home = document.createElement("span");
+      home.className = "crumb crumb-canvas";
+      home.innerHTML = iconSvg("canvas", { size: 13 }) + "Canvas";
+      home.title = "Back to canvas";
+      home.setAttribute("role", "link");
+      home.setAttribute("aria-label", "Back to canvas");
+      home.tabIndex = 0;
+      home._sep = document.createElement("span");
+      home._sep.className = "crumb-sep";
+      home._sep.textContent = "›";
+      breadcrumbNodes.__canvas = home;
+    }
+    fragment.appendChild(home);
+    fragment.appendChild(home._sep);
     path.forEach(function(n, i){
       var crumb = breadcrumbNodes[n.id];
       if (!crumb){
@@ -137,6 +166,7 @@ export function initReader(){
     readerScope.listen(breadcrumbEl, "click", function(e){
       var c = e.target.closest(".crumb");
       if (!c || c.classList.contains("current")) return;
+      if (c.classList.contains("crumb-canvas")) return readerLifecycle.hooks.setMode("canvas");
       openNode(c.dataset.id);
     });
     readerScope.listen(breadcrumbEl, "keydown", function(e){
@@ -144,6 +174,7 @@ export function initReader(){
       var c = e.target.closest && e.target.closest('.crumb[role="link"]');
       if (!c) return;
       e.preventDefault();
+      if (c.classList.contains("crumb-canvas")) return readerLifecycle.hooks.setMode("canvas");
       openNode(c.dataset.id);
     });
     readerScope.listen(readerMain, "scroll", onReaderScroll, { passive: true });
@@ -164,7 +195,16 @@ export function initReader(){
     readerScope.listen(notes, "mouseout", function(e){ syncNoteHover(e, false); });
     readerScope.listen(document.getElementById("r-textdown"), "click", function(){ setReaderFontScale(-0.1); });
     readerScope.listen(document.getElementById("r-textup"), "click", function(){ setReaderFontScale(0.1); });
-    readerScope.listen(document.getElementById("t-canvas"), "click", function(){ if (mode === "canvas") return; readerLifecycle.hooks.setMode("canvas"); });
+    // The restore control is the card's expand button, mirrored: same corner,
+    // opposite arrow. It collapses the reader back into its card and hands
+    // focus to its twin, so keyboard travel round-trips cleanly.
+    readerScope.listen(document.getElementById("reader-restore"), "click", function(){
+      if (mode === "canvas") return;
+      readerLifecycle.hooks.setMode("canvas");
+      var card = nodes[currentNodeId] && nodes[currentNodeId].el;
+      var expand = card && card.querySelector('[aria-label="Expand document"]');
+      if (expand){ try { expand.focus({ preventScroll: true }); } catch(e){ expand.focus(); } }
+    });
     return disposeReader;
     } catch (error) {
       disposeReader();

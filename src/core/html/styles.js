@@ -205,11 +205,23 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
 #reader { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 5; padding-top: var(--taskbar-clear); }
 body.mode-canvas #reader { display: none; }
 #reader-workspace { display: flex; flex: 1; min-height: 0; border-top: 1px solid var(--border); }
-#reader-document { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+#reader-document { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+/* The way back mirrors the way in: the card's expand button lives at its
+   top-right corner, so the restore control floats at the same corner of the
+   maximized document — same spot, opposite arrow. */
+#reader-restore { position: absolute; top: 10px; right: 14px; z-index: 7; width: 32px; height: 32px; padding: 0;
+  background: var(--bar-bg); border: 1px solid var(--border); border-radius: var(--radius-control-lg);
+  color: var(--fg-dim); box-shadow: var(--shadow); }
+#reader-restore:hover { color: var(--fg-bold); border-color: var(--border-focus); }
 /* The lineage trail lives at the top of the document column and scrolls with it. */
 #breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: 12.5px; margin-bottom: 22px; }
-#breadcrumb:has(.crumb:only-child) { display: none; }
+/* At the root there is no lineage to walk — the restore control is the way
+   out, so the trail only appears once an ancestor document exists. */
+#breadcrumb:not(:has(.crumb[role="link"]:not(.crumb-canvas))) { display: none; }
 .crumb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; color: var(--fg-dim); cursor: pointer; }
+/* The trail's first stop is the canvas itself — "up" from any document is out. */
+.crumb-canvas { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.crumb-canvas svg { display: block; opacity: 0.75; }
 .crumb:hover { color: var(--fg-bold); }
 .crumb.current { color: var(--fg-bold); font-weight: 600; cursor: default; }
 .crumb-sep { color: var(--fg-faint); flex-shrink: 0; }
@@ -308,6 +320,13 @@ body.mode-canvas #reader { display: none; }
 #viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; display: none; touch-action: pan-x pan-y;
   background-color: var(--bg); background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 26px 26px; }
 body.mode-canvas #viewport { display: block; }
+/* Mode flights: while the reader inflates out of (or deflates back into) its
+   card, both surfaces stay up — the canvas underneath, the reader in costume
+   as a card above it. The classes flip first; the flight is decoration. */
+body.mode-flight #reader { display: flex; }
+body.mode-flight #viewport { display: block; }
+#reader.reader-flying { transform-origin: 0 0; overflow: hidden; pointer-events: none; will-change: transform;
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
 #viewport.panning { cursor: grabbing; }
 #viewport.pinching { cursor: zoom-in; }
 #canvas-gesture-plane { position: absolute; inset: 0; touch-action: none; }
@@ -326,6 +345,8 @@ body.mode-canvas #viewport { display: block; }
 .node.node-enter { opacity: 0; transform: translateY(8px); transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .node.node-enter.entered { opacity: 1; transform: translateY(0); }
 .node.root { border-color: var(--border-focus); }
+/* The document you're "in" (last read, Space's target) keeps a quiet identity. */
+.node.current { border-color: var(--border-focus); }
 /* The head stays minimal — just the title — so the card reads like a document.
    Controls sit in a right-edge overlay with secondary text sizing de-emphasized. */
 .node-head { position: relative; display: flex; align-items: center; padding: var(--space-4) var(--space-6); background: var(--node-head); border-bottom: var(--border-default); border-radius: var(--radius-card) var(--radius-card) 0 0; cursor: grab; user-select: none; flex-shrink: 0; }
@@ -403,8 +424,9 @@ body.mode-canvas #viewport { display: block; }
 .rh-origin-crop-reader img { max-height: 260px; }
 
 /* ---------- taskbar — the one persistent chrome row shared by both modes ----
-   Floating pills on a pass-through row: app navigation, a stable Reader/Canvas
-   selector, and mode-local tools on the left; session controls on the right. */
+   Floating pills on a pass-through row: app navigation and mode-local tools on
+   the left; session controls on the right. There is no view selector: the
+   canvas is the place, and the reader is entered and left through the cards. */
 :root { --taskbar-clear: 62px; }
 #taskbar { position: fixed; top: 14px; left: 14px; right: 14px; z-index: 50; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; pointer-events: none; }
 #taskbar > #tb-tools, #taskbar > #tb-session { flex: 0 0 auto; }
@@ -419,24 +441,6 @@ body.mode-canvas #viewport { display: block; }
    sits on the same 24px line, so the pills all read as one height. */
 .tb-pill .tool-btn { height: var(--control-h-xs); padding-block: 0; font-size: var(--text-ui); }
 .tb-pill .tool-icon { width: var(--control-h-xs); padding: 0; }
-/* The view control belongs to the toolbar rather than sitting inside it as a
-   second pill. The current view collapses to a quiet icon; the available
-   destination keeps its icon and label, so the one useful action reads first. */
-#tb-view { display: inline-flex; align-items: center; gap: 1px; }
-#tb-view .tool-btn { min-width: 0; padding-inline: 6px; gap: var(--space-2); color: var(--fg-bold); font-weight: var(--weight-medium); }
-#tb-view .view-label { display: inline-block; min-width: 42px; text-align: left; }
-#tb-view .tool-btn[aria-pressed="true"] { width: var(--control-h-xs); min-width: var(--control-h-xs); padding-inline: 0; gap: 0;
-  color: var(--fg-dim); background: none; cursor: default; }
-#tb-view .tool-btn[aria-pressed="true"] .view-label { display: none; }
-#tb-view .tool-btn[aria-pressed="true"]:hover { color: var(--fg-dim); background: none; }
-/* Keep keyboard focus unambiguous without the detached 2px accent halo used by
-   free-standing controls: a one-pixel inset edge stays inside the toolbar. */
-#tb-view .tool-btn:focus-visible { outline: none; background: color-mix(in srgb, var(--accent) 9%, transparent);
-  box-shadow: inset 0 0 0 2px var(--accent); }
-#tb-view .tool-btn[aria-pressed="true"]:focus-visible { color: var(--fg-bold); background: color-mix(in srgb, var(--accent) 9%, transparent); }
-@media (forced-colors: active) {
-  #tb-view .tool-btn:focus-visible { outline: 2px solid CanvasText; outline-offset: -2px; box-shadow: none; }
-}
 /* Done sits alone in its pill, so the pill is the button: hover reads on the
    pill edge, never as a highlight box inside a box. */
 #tb-done-pill { transition: border-color var(--duration-fast) var(--ease-standard); }
@@ -468,8 +472,6 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   #tb-session { position: sticky; right: 0; margin-left: auto; align-items: center; gap: 2px; background: var(--bar-bg); padding-left: 4px; }
   .tb-pill .tool-icon, .zoom-controls .tool-icon { width: 44px; height: 44px; }
   .tb-pill .tool-btn { min-width: 44px; min-height: 44px; flex: 0 0 auto; }
-  #tb-view .tool-btn[aria-pressed="false"] { min-width: 76px; }
-  #tb-view .tool-btn[aria-pressed="true"] { width: 44px; min-width: 44px; }
   #zoom-label { height: 44px; min-width: 52px; padding-inline: 6px; font-size: 12px; }
   .tb-pill .sep { height: 24px; flex: 0 0 1px; }
 }

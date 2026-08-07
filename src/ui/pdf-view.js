@@ -64,6 +64,12 @@ export function mountPdfView(container, node, options = {}) {
 
   function alignReaderToolbar() {
     if (!readerToolbarHost || !scroll.isConnected) return;
+    if (document.body.classList.contains("mode-flight")) {
+      // Mid-flight the reader is transformed, so every rect is skewed —
+      // measure once it lands.
+      document.addEventListener("rh-reader-flight-end", alignReaderToolbar, { once: true });
+      return;
+    }
     const rect = scroll.getBoundingClientRect();
     const desired = rect.left + scroll.clientWidth / 2;
     const toolbarWidth = toolbar.element.getBoundingClientRect().width;
@@ -658,6 +664,7 @@ export function mountPdfView(container, node, options = {}) {
     document.removeEventListener("pointerup", finishTextSelection);
     document.removeEventListener("pointercancel", finishTextSelection);
     document.removeEventListener("keydown", onKeyDown, true);
+    document.removeEventListener("rh-reader-flight-end", alignReaderToolbar);
     touchCleanup();
     for (const state of pageStates) {
       state.textTask?.cancel?.(); cancelRenderTasks(state); state.page?.cleanup?.();

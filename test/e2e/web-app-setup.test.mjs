@@ -357,14 +357,8 @@ async function verifyLandingAndComposer() {
   assert.equal(await page.locator("body").evaluate((body) => body.classList.contains("rail-open")), false, "the sidebar should start closed");
   assert.equal(await page.locator(".web-home").count(), 0, "form-based home page must be gone");
   assert.equal(await page.locator("#tb-tools .toolbar-brand").count(), 1, "browser toolbar should carry the Rabbithole mark");
-  assert.deepEqual(await page.locator("#tb-view").evaluate((group) => ({
-    role: group.getAttribute("role"),
-    label: group.getAttribute("aria-label"),
-    display: getComputedStyle(group).display,
-    reader: document.getElementById("t-reader").getAttribute("aria-pressed"),
-    canvas: document.getElementById("t-canvas").getAttribute("aria-pressed"),
-  })), { role: "group", label: "View", display: "none", reader: "false", canvas: "true" },
-  "blank canvas should hide the unavailable view selector while retaining correct initial state");
+  assert.equal(await page.locator("#tb-view, #t-reader, #t-canvas").count(), 0,
+    "there is no view selector: canvas is home and the reader opens from a card");
   const toolbarConformance = await page.locator("#taskbar button").evaluateAll((buttons) => buttons.map((button) => ({
     id: button.id,
     type: button.getAttribute("type"),
@@ -1273,10 +1267,10 @@ async function verifyAskKeyUxAndRail() {
   assert.equal(
     await page.evaluate(() => document.body.classList.contains("mode-canvas")),
     true,
-    "Escape with the rail focused must close only the rail, not fall through to the canvas client's open-the-reader shortcut"
+    "Escape with the rail focused must close only the rail, never disturb the canvas"
   );
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-api-keys") || "{}").openrouter), MOCK_KEY, "remembered key should stay in this browser's provider-key map");
-  await page.click('.node-btn[aria-label="Collapse document"]');
+  await page.click('.node-btn[aria-label="Collapse card"]');
   assert.equal(await page.locator(".node").first().evaluate((node) => node.classList.contains("collapsed")), true, "real UI mutation should collapse the document immediately");
   const mutationSnapshot = JSON.parse(extractSnapshotPayload(await page.evaluate(() => window.__rabbitholeTest.exportSnapshot())));
   assert.equal(mutationSnapshot.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.collapsed, true,
@@ -1331,7 +1325,8 @@ async function verifyAskKeyUxAndRail() {
   const rawJson = JSON.stringify(hole);
   assert(!rawJson.includes(MOCK_KEY), "IndexedDB hole record must not contain provider key");
 
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
   await page.click("#t-settings");
   await page.waitForSelector("#web-settings-popover");

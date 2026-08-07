@@ -60,7 +60,7 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
 
     const toolbar = await page.locator("#taskbar").evaluate((element) => {
       const rect = element.getBoundingClientRect();
-      const controls = ["t-reader", "t-canvas", "t-zout", "zoom-label", "t-zin"].map((id) => {
+      const controls = ["t-zout", "zoom-label", "t-zin"].map((id) => {
         const item = document.getElementById(id).getBoundingClientRect();
         return { id, width: item.width, height: item.height, right: item.right };
       });
@@ -195,8 +195,12 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
     assert.equal(pinch.pinching, false, `${engineName}: pinch state must clean up after both fingers lift`);
     assert.equal(pinch.panning, false, `${engineName}: pinch-to-pan continuation must clean up after the last finger lifts`);
 
-    await page.click("#t-reader");
+    // Touch gestures arm the canvas ghost-click suppressor for up to 450ms —
+    // let it lapse before driving the expand control.
+    await page.waitForTimeout(600);
+    await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
     await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
+    await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     const mobileReader = await page.evaluate(() => {
       const rect = (selector) => {
         const value = document.querySelector(selector).getBoundingClientRect();
@@ -276,7 +280,8 @@ async function verifyDesktopReaderLayout(browserEngine) {
     await routeProvider(page);
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await createDocument(page, "# Desktop reader invariant\n\nThe established desktop layout must remain unchanged.");
-    await page.click("#t-reader");
+    await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+    await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     const desktop = await page.evaluate(() => {
       const notes = document.getElementById("margin-notes");
       const main = document.getElementById("reader-main");
@@ -506,7 +511,8 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
     });
     await readerPage.goto(baseUrl, { waitUntil: "networkidle" });
     await createDocument(readerPage, "# Mobile reader selection\n\nTouch selection should open a **reliable action sheet**.");
-    await readerPage.click("#t-reader");
+    await readerPage.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+    await readerPage.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     await readerPage.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
     await readerPage.evaluate(() => {
       const node = document.querySelector("#reader-main strong")?.firstChild;
@@ -607,7 +613,8 @@ async function verifyLogicalMarkGrouping() {
     await exerciseOverlappingMarkHover(page, groupedId, overlappingId, unrelatedId);
     await exerciseGroupedMarkHover(page, ".node.root .doc-content", groupedId, unrelatedId, true);
 
-    await page.click("#t-reader");
+    await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+    await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     await page.waitForSelector("body:not(.mode-canvas) #reader-main");
     await exerciseGroupedMarkHover(page, "#reader-main .doc-content", groupedId, unrelatedId, false);
     const readerMarks = page.locator(`#reader-main mark[data-child="${groupedId}"]`);
@@ -619,7 +626,8 @@ async function verifyLogicalMarkGrouping() {
     assert.notEqual(await readerMarks.nth(1).evaluate((mark) => getComputedStyle(mark).outlineStyle), "none",
       "the actually focused Reader fragment must retain its visible focus ring");
 
-    await page.click("#t-canvas");
+    await page.evaluate(() => document.getElementById("reader-restore").click());
+    await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     await page.waitForSelector("body.mode-canvas");
     await verifyNonFirstFragmentCanvasNavigation(page, groupedId);
 
@@ -627,10 +635,11 @@ async function verifyLogicalMarkGrouping() {
     const frozenPage = await context.newPage();
     await frozenPage.setContent(frozenHtml, { waitUntil: "load" });
     await frozenPage.waitForSelector(".node.root .doc-content");
-    if (!await frozenPage.evaluate(() => document.body.classList.contains("mode-canvas"))) await frozenPage.click("#t-canvas");
+    await frozenPage.waitForSelector("body.mode-canvas");
     await exerciseGroupedMarkHover(frozenPage, ".node.root .doc-content", groupedId, unrelatedId, true);
     await verifyNonFirstFragmentCanvasNavigation(frozenPage, groupedId);
-    await frozenPage.click("#t-reader");
+    await frozenPage.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+    await frozenPage.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     await frozenPage.waitForSelector("body:not(.mode-canvas) #reader-main");
     await exerciseGroupedMarkHover(frozenPage, "#reader-main .doc-content", groupedId, unrelatedId, false);
     const frozenReaderMarks = frozenPage.locator(`#reader-main mark[data-child="${groupedId}"]`);
@@ -1001,7 +1010,7 @@ async function verifyCanvasBranching() {
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.matches(".node.root .nc-inner textarea"));
   await page.evaluate(() => document.querySelector(".node.root").matches = () => false);
-  await page.focus("#t-reader");
+  await page.focus("#t-frame");
   await page.waitForFunction(() => !document.querySelector(".node.root .node-composer").classList.contains("open"));
   await page.evaluate(() => delete document.querySelector(".node.root").matches);
   assert.equal(await rootDrawer.getAttribute("aria-expanded"), "false", "empty-draft blur should close an unhovered card drawer");
@@ -1024,7 +1033,7 @@ async function verifyCanvasBranching() {
     { type: "button", name: "Remove this branch" },
     { type: "button", name: "Smaller text" },
     { type: "button", name: "Larger text" },
-    { type: "button", name: "Collapse document" },
+    { type: "button", name: "Collapse card" },
     { type: "button", name: "Expand document" },
   ], "all five card controls should use Button kit semantics and accessible names");
   const childPosition = await childCard.evaluate((card) => ({ left: card.style.left, top: card.style.top }));
@@ -1048,24 +1057,20 @@ async function verifyCanvasBranching() {
     const rect = blocks[block].getBoundingClientRect();
     return { block, offset: (top - rect.top) / rect.height };
   });
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas)");
-  assert.deepEqual(await page.locator("#tb-view").evaluate((group) => {
-    const reader = document.getElementById("t-reader");
-    const canvas = document.getElementById("t-canvas");
+  assert.deepEqual(await page.evaluate(() => {
+    const restore = document.getElementById("reader-restore");
+    const home = document.querySelector("#breadcrumb .crumb-canvas");
     return {
-      label: group.getAttribute("aria-label"),
-      reader: reader.getAttribute("aria-pressed"),
-      canvas: canvas.getAttribute("aria-pressed"),
-      readerName: reader.getAttribute("aria-label"),
-      canvasName: canvas.getAttribute("aria-label"),
-      readerLabel: getComputedStyle(reader.querySelector(".view-label")).display,
-      canvasLabel: getComputedStyle(canvas.querySelector(".view-label")).display,
-      focus: document.activeElement?.id,
+      restoreName: restore.getAttribute("aria-label"),
+      restoreShown: getComputedStyle(restore).display !== "none",
+      homeRole: home.getAttribute("role"),
+      homeText: home.textContent.trim(),
     };
-  }), { label: "View", reader: "true", canvas: "false", readerName: "Reader view", canvasName: "Canvas view",
-    readerLabel: "none", canvasLabel: "block", focus: "t-reader" },
-  "Reader mode should collapse its label, expose Canvas as the labeled destination, and preserve focus");
+  }), { restoreName: "Back to canvas", restoreShown: true, homeRole: "link", homeText: "Canvas" },
+  "the reader should expose the mirrored restore control and lead its trail with the canvas");
   const readerReadingPosition = await page.locator("#reader-main").evaluate((scroller) => {
     const top = scroller.getBoundingClientRect().top;
     const blocks = Array.from(scroller.querySelector(".doc-content").children);
@@ -1089,21 +1094,11 @@ async function verifyCanvasBranching() {
     const rect = blocks[block].getBoundingClientRect();
     return { block, offset: (top - rect.top) / rect.height };
   });
-  await page.focus("#t-canvas");
+  await page.focus("#reader-restore");
   await page.keyboard.press("Enter");
   await page.waitForSelector("body.mode-canvas");
-  assert.deepEqual(await page.locator("#tb-view").evaluate(() => {
-    const reader = document.getElementById("t-reader");
-    const canvas = document.getElementById("t-canvas");
-    return {
-      reader: reader.getAttribute("aria-pressed"),
-      canvas: canvas.getAttribute("aria-pressed"),
-      readerLabel: getComputedStyle(reader.querySelector(".view-label")).display,
-      canvasLabel: getComputedStyle(canvas.querySelector(".view-label")).display,
-      focus: document.activeElement?.id,
-    };
-  }), { reader: "false", canvas: "true", readerLabel: "block", canvasLabel: "none", focus: "t-canvas" },
-  "Canvas mode should collapse its label, expose Reader as the labeled destination, and preserve focus");
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Expand document",
+    "keyboard restore should hand focus to the mirrored expand control on the current card");
   await page.waitForTimeout(50);
   const canvasReturnPosition = await page.locator(".node.root .node-body").evaluate((scroller) => {
     const top = scroller.getBoundingClientRect().top;
@@ -1115,19 +1110,11 @@ async function verifyCanvasBranching() {
   assert.equal(canvasReturnPosition.block, readerReturnPosition.block, "reader-to-canvas should preserve the visible content block");
   assert(Math.abs(canvasReturnPosition.offset - readerReturnPosition.offset) < 0.2, `reader-to-canvas should preserve the position within the visible block: ${JSON.stringify({ readerReturnPosition, canvasReturnPosition })}`);
   await assertCodeCopy(page, { scope: ".node.root .doc-content", rawCode: smokeCode, hover: false, label: "web Canvas after Reader" });
-  await page.focus("#t-new");
-  await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "t-reader");
-  const canvasFocusRing = await page.evaluate(() => {
-    const style = getComputedStyle(document.getElementById("t-reader"));
-    return { outline: style.outlineStyle, shadow: style.boxShadow };
-  });
-  assert.equal(canvasFocusRing.outline, "none", "the embedded view control should avoid a detached focus halo");
-  assert.notEqual(canvasFocusRing.shadow, "none", "keyboard focus should retain a visible inset indicator");
+  // Quick Look: Space expands the current card, Escape collapses it back.
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press("Space");
   await page.waitForSelector("body:not(.mode-canvas)");
-  await page.focus("#t-canvas");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
   await page.waitForSelector("body.mode-canvas");
 
   await page.focus("#t-share");
@@ -1258,7 +1245,7 @@ async function verifyCanvasBranching() {
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
   await page.waitForFunction(() => document.activeElement?.matches(".node.root"));
   assert.equal(await page.evaluate(() => window.getSelection().toString()), "Euler identity", "selection-bar Escape should preserve the live text selection");
-  assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "selection-bar Escape must not leak to the canvas reader shortcut");
+  assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "selection-bar Escape must stay inside the selection bar");
 
   await selectText(page, "Euler identity");
   await page.waitForSelector("#ask.visible");
@@ -1266,7 +1253,9 @@ async function verifyCanvasBranching() {
     .catch(() => { throw new Error("the selection bar must focus its input on open"); });
   await page.keyboard.type("Why does this matter?");
   await page.keyboard.press("Enter");
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+  // No flight wait here: the .pending state is transient and the tile must be
+  // caught before the mock provider finishes streaming.
   await page.waitForSelector('.side-item.pending[role="link"]');
   const pendingSidebarContract = await page.locator('.side-item.pending[role="link"]').evaluate((tile) => {
     tile.__s9Identity = "pending-stream-tile";
@@ -1298,7 +1287,7 @@ async function verifyCanvasBranching() {
   await page.waitForFunction(() => document.querySelector('.crumb[aria-current="page"]')?.textContent === "Euler branch");
 
   const breadcrumbContract = await page.locator("#breadcrumb").evaluate((nav) => {
-    const crumbs = [...nav.querySelectorAll(".crumb")];
+    const crumbs = [...nav.querySelectorAll(".crumb:not(.crumb-canvas)")];
     crumbs[0].__s9Identity = "root-crumb";
     crumbs[1].__s9Identity = "child-crumb";
     return {
@@ -1311,7 +1300,7 @@ async function verifyCanvasBranching() {
   assert.deepEqual(breadcrumbContract, {
     tag: "NAV", label: "Breadcrumb", prior: { role: "link", tabIndex: 0 }, current: { current: "page", tabIndex: null },
   }, "breadcrumbs should expose a landmark, linked ancestors, and a non-focusable current page");
-  await page.locator('.crumb[role="link"]').focus();
+  await page.locator('.crumb[role="link"]:not(.crumb-canvas)').focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector('.crumb[aria-current="page"]')?.textContent === "Web Smoke");
   assert.equal(await page.locator('.crumb[aria-current="page"]').evaluate((crumb) => crumb.__s9Identity), "root-crumb", "breadcrumb nodes should be reused when their state changes");
@@ -1338,7 +1327,8 @@ async function verifyCanvasBranching() {
   await page.waitForFunction(() => window.__s9OriginFlashed === true);
   assert.equal(await page.evaluate(() => { window.__s9OriginFlashObserver.disconnect(); return window.__s9OriginFlashed; }), true,
     "reader-context Enter should jump to and flash the origin");
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await waitForCanvasText(page, "Euler identity connects rotation");
 
   const branchMark = page.locator('.node mark[data-child].mark-ready').first();
@@ -1391,7 +1381,7 @@ async function verifyCanvasBranching() {
   await page.waitForFunction(() => window.__markDiveFlashed === true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "clicking a canvas mark must stay in canvas and dive to the card");
 
-  if (!await page.evaluate(() => document.body.classList.contains("mode-canvas"))) await page.click("#t-canvas");
+  await page.waitForSelector("body.mode-canvas");
   await page.click("#t-frame"); // leave the mark-dive zoom behind so popover geometry is measured from a neutral view
   await page.waitForTimeout(400);
   const childDelete = page.locator('.node:not(.root)', { hasText: "Euler identity connects rotation" }).locator('.node-btn.danger');
@@ -1421,29 +1411,33 @@ async function verifyCanvasBranching() {
 
   // Export while the child is the current node so the frozen reader opens with
   // a parent crumb (mark clicks no longer change the current node).
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.locator('.side-item[role="link"]').first().click();
   await page.locator("#reader-main", { hasText: "Euler identity connects rotation" }).waitFor();
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   const branchFrozenHtml = await page.evaluate(() => window.__rabbitholeTest.exportSnapshot());
   const branchFrozenPage = await context.newPage();
   await branchFrozenPage.setContent(branchFrozenHtml, { waitUntil: "load" });
-  await branchFrozenPage.click("#t-reader");
+  await branchFrozenPage.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+  await branchFrozenPage.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   assert.deepEqual(await branchFrozenPage.locator("#breadcrumb").evaluate((nav) => ({ tag: nav.tagName, label: nav.getAttribute("aria-label") })),
     { tag: "NAV", label: "Breadcrumb" }, "frozen reader should preserve breadcrumb landmark semantics");
-  await branchFrozenPage.locator('.crumb[role="link"]').focus();
+  await branchFrozenPage.locator('.crumb[role="link"]:not(.crumb-canvas)').focus();
   await branchFrozenPage.keyboard.press("Enter");
-  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb").length === 1);
+  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb:not(.crumb-canvas)").length === 1);
   const frozenSidebar = branchFrozenPage.locator('.side-item[role="link"]').first();
   assert.equal(await frozenSidebar.evaluate((tile) => tile.tabIndex), 0,
     "frozen margin notes should remain keyboard navigable");
   await frozenSidebar.focus();
   await branchFrozenPage.keyboard.press("Enter");
-  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb").length > 1);
-  await branchFrozenPage.locator('.crumb[role="link"]').focus();
+  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb:not(.crumb-canvas)").length > 1);
+  await branchFrozenPage.locator('.crumb[role="link"]:not(.crumb-canvas)').focus();
   await branchFrozenPage.keyboard.press("Enter");
-  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb").length === 1);
-  await branchFrozenPage.click("#t-canvas");
+  await branchFrozenPage.waitForFunction(() => document.querySelectorAll("#breadcrumb .crumb:not(.crumb-canvas)").length === 1);
+  await branchFrozenPage.evaluate(() => document.getElementById("reader-restore").click());
+  await branchFrozenPage.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   const frozenMark = branchFrozenPage.locator('.node mark[data-child].mark-ready').first();
   await frozenMark.focus();
   await branchFrozenPage.evaluate(() => {
@@ -1459,7 +1453,8 @@ async function verifyCanvasBranching() {
     "Enter on a frozen canvas mark should dive to the card in place");
   await branchFrozenPage.close();
 
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.fill("#composer-text", "Go one layer deeper.");
   await page.click("#composer-send");
   const followupRailCard = page.locator("#margin-notes .side-item", { hasText: "Go one layer deeper." });
@@ -1477,7 +1472,7 @@ async function verifyCanvasBranching() {
   assert(!reloadedRaw.includes(MOCK_KEY), "IndexedDB hole record must not contain provider key");
   assert(!page.url().includes(MOCK_KEY), "URL must not contain provider key");
 
-  if (!await page.evaluate(() => document.body.classList.contains("mode-canvas"))) await page.click("#t-canvas");
+  await page.waitForSelector("body.mode-canvas");
   const removeTrigger = page.locator('.node:not(.root) .node-btn.danger').first();
   await removeTrigger.focus();
   await page.keyboard.press("Enter");

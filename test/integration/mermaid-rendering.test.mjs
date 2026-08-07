@@ -50,7 +50,11 @@ async function verifySelfContainedMcpPage() {
   const requests = [];
   await page.on("request", (request) => requests.push(request.url()));
   await page.goto(session.url, { waitUntil: "load" });
-  await page.waitForFunction(() => !!document.querySelector(".viz-mermaid")?.shadowRoot?.querySelector("svg"));
+  // The inline diagram contract below describes the reader column — expand the
+  // current card into the reader first (canvas is the landing surface).
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-canvas") && !document.body.classList.contains("mode-flight"));
+  await page.waitForFunction(() => !!document.querySelector("#reader-main .viz-mermaid")?.shadowRoot?.querySelector("svg"));
   assert(requests.some((url) => url.startsWith(session.url)), "MCP request capture must observe the canvas");
   assert.equal(requests.filter((url) => /\/mermaid\.js(?:\?|$)/.test(url)).length, 0, "MCP canvas must not fetch an external Mermaid asset");
   assert.equal(await page.locator('#rabbithole-mermaid-runtime[type="application/vnd.rabbithole+mermaid"]').count(), 1);
@@ -89,6 +93,11 @@ async function verifyWebApp() {
     })));
     throw new Error(`Mermaid mounts did not settle: ${JSON.stringify(state)}`, { cause: error });
   }
+  // The inline diagram contract describes the reader column — expand the
+  // current card into the reader first (canvas is the landing surface).
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-canvas") && !document.body.classList.contains("mode-flight"));
+  await page.waitForFunction(() => !!document.querySelector("#reader-main .viz-mermaid")?.shadowRoot?.querySelector("svg"));
   assert.equal(requests.filter((url) => /\/mermaid\.js(?:\?|$)/.test(url)).length, 1, "all live diagrams should share one lazy runtime load");
 
   const safe = await page.evaluate(() => {
@@ -123,13 +132,13 @@ async function verifyWebApp() {
     return {
       intersects: buttonRect.left < svgRect.right && buttonRect.right > svgRect.left
         && buttonRect.top < svgRect.bottom && buttonRect.bottom > svgRect.top,
-      scrollWidth: frame.scrollWidth,
+      svgWidth: svgRect.width,
       clientWidth: frame.clientWidth,
       hostContain: getComputedStyle(mount).contain,
     };
   });
   assert.equal(inlineLayout.intersects, false, `inline expand control must not cover the rendered SVG (${JSON.stringify(inlineLayout)})`);
-  assert(inlineLayout.scrollWidth <= inlineLayout.clientWidth + 1, `fitted Mermaid SVG should not require frame scrolling (${JSON.stringify(inlineLayout)})`);
+  assert(inlineLayout.svgWidth > 0 && inlineLayout.svgWidth <= inlineLayout.clientWidth + 1, `fitted Mermaid SVG should not require frame scrolling (${JSON.stringify(inlineLayout)})`);
   assert(!inlineLayout.hostContain.includes("paint"), "Mermaid host paint containment must not clip the elevated expand control");
 
   const expand = page.locator(".rh-mermaid-expand:visible").first();

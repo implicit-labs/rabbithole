@@ -14,7 +14,9 @@ export var frozen = false; // read-only exported snapshot
 export var nodes = {};
 var childrenByParent = Object.create(null);
 export var currentNodeId = null;
-export var mode = "reader";
+// Canvas is home. The reader is not a sibling mode — it is the current card,
+// maximized — so "canvas" is the resting state everywhere.
+export var mode = "canvas";
 export var view = { x: 0, y: 0, scale: 1 };
 export var closed = false;
 export var closedReason = null;
@@ -80,7 +82,7 @@ export function initCore(inputHydration) {
   nodes = {};
   childrenByParent = Object.create(null);
   currentNodeId = rootId;
-  setModeValue("reader");
+  setModeValue("canvas");
   view = { x: 0, y: 0, scale: 1 };
   closed = frozen;
   closedReason = frozen ? "frozen" : null;
@@ -151,7 +153,7 @@ function resetCoreState(){
   nodes = {};
   childrenByParent = Object.create(null);
   currentNodeId = null;
-  mode = "reader";
+  mode = "canvas";
   view = { x: 0, y: 0, scale: 1 };
   closed = false;
   closedReason = null;
@@ -175,14 +177,16 @@ function resetCoreState(){
   coreHooks = defaultCoreHooks();
 }
 
-export function setCurrentNodeId(id){ currentNodeId = id; }
-export function setModeValue(value){
-  mode = value;
-  var readerButton = document.getElementById("t-reader");
-  var canvasButton = document.getElementById("t-canvas");
-  if (readerButton) readerButton.setAttribute("aria-pressed", String(value === "reader"));
-  if (canvasButton) canvasButton.setAttribute("aria-pressed", String(value === "canvas"));
+// The current node keeps one visible identity on the canvas: its card carries
+// .current, so "the document I'm in" survives collapsing out of the reader.
+export function setCurrentNodeId(id){
+  var prev = nodes[currentNodeId];
+  if (prev && prev.el) prev.el.classList.remove("current");
+  currentNodeId = id;
+  var next = nodes[id];
+  if (next && next.el) next.el.classList.add("current");
 }
+export function setModeValue(value){ mode = value; }
 export function setClosedState(value, reason){ closed = !!value; closedReason = reason || null; }
 export function setAgentAttached(value){ agentAttached = !!value; }
 export function setAgentReason(value){ agentReason = value || null; }

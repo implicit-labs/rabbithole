@@ -19,6 +19,7 @@ import {
   mode,
   motionSourceFromEvent,
   nodes,
+  playLandingCue,
   readerMain,
   registerCoreHooks,
   rootId,
@@ -49,6 +50,7 @@ import {
   lensLabel
 } from "../core/model.js";
 import { openNode } from "./reader.js";
+import { flyReaderToRect } from "./mode-transition.js";
 import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { easeInOutMotion, easeOutMotion } from "./easing.js";
 import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
@@ -100,7 +102,6 @@ export function initCanvasView(){
   initViewportPan();
   canvasScope.listen(viewport, "wheel", onViewportWheel, { passive: false });
   canvasScope.listen(viewport, "dblclick", onViewportDblClick);
-  canvasScope.listen(document.getElementById("t-reader"), "click", function(){ if (mode !== "canvas") return; openNode(currentNodeId); });
   canvasScope.listen(document.getElementById("t-frame"), "click", function(e){ frameAll(true, motionSourceFromEvent(e)); });
   canvasScope.listen(document.getElementById("t-tidy"), "click", function(e){ tidy(motionSourceFromEvent(e)); });
   canvasScope.listen(document.getElementById("t-zin"), "click", function(){ zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, 1.15); });
@@ -191,7 +192,9 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
   var NODE_RESTORE_ICON = iconSvg("restore");
 
   function syncCollapseButton(node, btn){
-    var action = node.collapsed ? "Expand document" : "Collapse document";
+    // "card", not "document": expanding a *document* is the reader button's
+    // name, and the two actions must never share an accessible name.
+    var action = node.collapsed ? "Expand card" : "Collapse card";
     btn.innerHTML = node.collapsed ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
     btn.setAttribute("aria-label", action); btn.title = action;
   }
@@ -199,6 +202,7 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
 export function createNodeEl(node, enter){
     var el = document.createElement("div");
     el.className = "node" + (node.id === rootId ? " root" : "");
+    if (node.id === currentNodeId) el.className += " current";
     if (enter && !document.hidden && !shouldReduceMotion()) el.className += " node-enter";
     el.dataset.id = node.id;
 
@@ -213,7 +217,7 @@ export function createNodeEl(node, enter){
     titleEl.title = node.title || "";
     var aDown = cardButton(buttonMarkup({ bare: true, className: "node-btn node-font-btn", label: "A−", ariaLabel: "Smaller text", title: "Smaller text" }));
     var aUp = cardButton(buttonMarkup({ bare: true, className: "node-btn node-font-btn", label: "A+", ariaLabel: "Larger text", title: "Larger text" }));
-    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse document", title: "Collapse document" }));
+    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card" }));
     syncCollapseButton(node, collapseBtn);
     var openBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_EXPAND_ICON, ariaLabel: "Expand document", title: "Expand document" }));
     var divider = document.createElement("span"); divider.className = "node-act-divider"; divider.setAttribute("aria-hidden", "true");
@@ -264,13 +268,28 @@ export function createNodeEl(node, enter){
     return node;
   }
 
-  // Glide the canvas view into a card at reading scale.
-function diveToNode(node, source){
+  // The camera pose that frames a card at reading scale.
+function diveTargetView(node){
     var vw = viewport.clientWidth, vh = viewport.clientHeight;
     var ts = Math.min(1, Math.max(0.75, Math.min((vw - 120) / node.w, (vh - 120) / effH(node))));
-    var tx = vw / 2 - (node.x + node.w / 2) * ts;
-    var ty = vh / 2 - (node.y + effH(node) / 2) * ts;
-    animateView(tx, ty, ts, { source: source, duration: 270, ease: "inOut" });
+    return { x: vw / 2 - (node.x + node.w / 2) * ts, y: vh / 2 - (node.y + effH(node) / 2) * ts, scale: ts };
+  }
+  // Glide the canvas view into a card at reading scale.
+function diveToNode(node, source){
+    var t = diveTargetView(node);
+    animateView(t.x, t.y, t.scale, { source: source, duration: 270, ease: "inOut" });
+  }
+  // A card's on-screen rect under a given camera pose (defaults to the live one).
+function cardScreenRect(node, v){
+    v = v || view;
+    return { left: node.x * v.scale + v.x, top: node.y * v.scale + v.y, width: node.w * v.scale, height: effH(node) * v.scale };
+  }
+function rectMostlyVisible(rect){
+    var vw = viewport.clientWidth, vh = viewport.clientHeight;
+    var w = Math.min(rect.left + rect.width, vw) - Math.max(rect.left, 0);
+    var h = Math.min(rect.top + rect.height, vh) - Math.max(rect.top, 0);
+    if (w <= 0 || h <= 0) return false;
+    return (w * h) / (rect.width * rect.height) >= 0.3;
   }
   function cardButton(markup){
     var template = document.createElement("template");
@@ -938,9 +957,9 @@ export function tidy(source){
     rebuildEdges(); frameAll(true, source);
   }
 
-  // Canvas cards (DOM + rendered markdown for every node) are only built the first
-  // time the user actually opens the canvas — Reader is the default, so a large
-  // hole pays no canvas cost until/unless it's wanted.
+  // Canvas cards (DOM + rendered markdown for every node) are built on first
+  // canvas entry — with canvas as the landing surface that is effectively at
+  // hydrate, but the guard keeps re-entry and programmatic callers cheap.
 function ensureCanvasBuilt(){
     if (canvasBuilt) return;
     setCanvasBuilt(true);
@@ -950,9 +969,10 @@ function ensureCanvasBuilt(){
   }
 export function setMode(m){
     var transferredPosition = null;
-    if (m === "canvas" && mode === "reader"){
+    var fromReader = m === "canvas" && mode === "reader";
+    if (fromReader){
       // display:none resets the reader's scrollTop — remember it first so
-      // toggling out to the canvas and back lands exactly where you were.
+      // collapsing out to the canvas and diving back lands exactly where you were.
       var cur = nodes[currentNodeId];
       if (cur) {
         cur._scrollTop = readerMain.scrollTop;
@@ -963,6 +983,24 @@ export function setMode(m){
     if (m === "canvas"){
       ensureCanvasBuilt();
       document.body.classList.add("mode-canvas");
+      // Collapse the reader back into the card it is. If the card still sits
+      // in view, the camera stays put (macOS restore: the window returns to
+      // its spot). If the human panned away — or dove into a different branch
+      // while reading — the camera glides home alongside the shrinking reader,
+      // and the two meet on the card.
+      if (fromReader){
+        var target = nodes[currentNodeId];
+        if (target && isVisible(target)){
+          var rect = cardScreenRect(target);
+          if (!rectMostlyVisible(rect)){
+            var pose = diveTargetView(target);
+            animateView(pose.x, pose.y, pose.scale, { source: "pointer", duration: 270, ease: "inOut" });
+            rect = cardScreenRect(target, pose);
+          }
+          flyReaderToRect(rect);
+          if (target.el) playLandingCue(target.el, "flash");
+        }
+      }
       requestAnimationFrame(function(){
         var active = nodes[currentNodeId];
         if (transferredPosition && active?.bodyEl) restoreContentPosition(active.bodyEl, transferredPosition);

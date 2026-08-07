@@ -95,7 +95,8 @@ async function verifySelectionAsk(page, calls) {
 }
 
 async function verifyReaderComposer(page, calls) {
-  await page.click("#t-reader");
+  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
   await page.fill("#composer-text", "composing reader");
   assert.equal((await dispatchComposingEnter(page, "#composer-text")).defaultPrevented, false);
@@ -112,7 +113,8 @@ async function verifyReaderComposer(page, calls) {
 }
 
 async function verifyCardComposer(page, calls) {
-  await page.click("#t-canvas");
+  await page.evaluate(() => document.getElementById("reader-restore").click());
+  await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
   await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
   const selector = ".node.root .nc-inner textarea";

@@ -14,11 +14,9 @@ export const CANVAS_SHELL = `
          library to browse, so the web shell injects those two itself (renderShell). -->
     <span id="tb-app"></span>
     <span class="sep" id="app-view-sep"></span>
-    <span id="tb-view" role="group" aria-label="View">
-      ${buttonMarkup({ id: "t-reader", title: "Reader view", ariaLabel: "Reader view", ariaPressed: "true", label: "Reader", labelClass: "view-label", svgIconHtml: iconSvg("reader") })}
-      ${buttonMarkup({ id: "t-canvas", title: "Canvas view", ariaLabel: "Canvas view", ariaPressed: "false", label: "Canvas", labelClass: "view-label", svgIconHtml: iconSvg("canvas") })}
-    </span>
-    <span class="sep"></span>
+    <!-- There is no Reader/Canvas toggle: the canvas is the place and the
+         reader is the current card maximized. You enter by expanding a card
+         and leave through the mirrored restore control (or Esc). -->
     <span class="tb-group" data-mode="reader">
       ${buttonMarkup({ id: "r-textdown", title: "Smaller text", label: "A−" })}
       ${buttonMarkup({ id: "r-textup", title: "Larger text", label: "A+" })}
@@ -49,6 +47,7 @@ export const CANVAS_SHELL = `
 <div id="reader">
   <div id="reader-workspace">
     <div id="reader-document">
+      ${iconButtonMarkup({ id: "reader-restore", title: "Back to canvas · Esc", ariaLabel: "Back to canvas", svgIconHtml: iconSvg("contract") })}
       <div id="reader-main"></div>
       <div id="composer">
         <div class="composer-inner" id="composer-inner">
