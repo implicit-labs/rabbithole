@@ -2,16 +2,23 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { BUNNY_MARK_SVG, faviconSvg, iconSvg } from "../../src/core/html/icons.js";
+import { ICON_SELECTIONS } from "../../src/core/html/icon-selection.js";
 
 const send = iconSvg("send");
 assert.match(send, /^<svg width="14" height="14" /);
 assert.match(send, /focusable="false" aria-hidden="true"/);
 assert.match(iconSvg("search", { size: 13 }), /^<svg width="13" height="13" /);
+assert.match(iconSvg("search"), /viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"/);
+assert.match(iconSvg("search"), /stroke-width="48"/);
+assert.doesNotMatch(iconSvg("search"), /(?:class|xmlns|<title)=?/);
 assert.notEqual(iconSvg("paste"), iconSvg("file"), "paste and file actions need distinct silhouettes");
+assert.notEqual(iconSvg("frame"), iconSvg("area-select"), "frame and area selection need distinct silhouettes");
 assert.equal(BUNNY_MARK_SVG, iconSvg("bunny"));
 assert.match(faviconSvg(), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
 assert.throws(() => iconSvg("missing"), /Unknown Rabbithole icon/);
 assert.throws(() => iconSvg("send", { size: 0 }), /positive number/);
+assert.equal(Object.keys(ICON_SELECTIONS).length, 31, "every functional icon role belongs in the shared selection map");
+for (const name of Object.keys(ICON_SELECTIONS)) assert.match(iconSvg(name), /^<svg/);
 
 const roots = ["src", "website/about"];
 const inspectedFiles = [];

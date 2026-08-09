@@ -898,7 +898,7 @@ async function verifyCanvasBranching() {
   });
   const gearOffset = await page.evaluate(() => {
     const button = document.getElementById("t-settings");
-    const glyph = button.querySelector("svg g");
+    const glyph = button.querySelector("svg");
     const box = glyph.getBBox();
     const ctm = glyph.getScreenCTM();
     const cx = ctm.a * (box.x + box.width / 2) + ctm.c * (box.y + box.height / 2) + ctm.e;

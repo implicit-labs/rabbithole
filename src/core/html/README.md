@@ -6,6 +6,14 @@ and CSS live as pure template strings here, while Node-only assembly lives under
 
 - `styles.js` contains the inline stylesheet.
 - `shell.js` contains the static DOM shell.
+- `icons.js` is the only product-facing icon registry. Curated Ionicons source
+  is normalized into `ionicons5.generated.js` by `npm run generate:icons`; the
+  generated data is committed so production installs never need the source pack.
+- `icon-selection.js` is the editable role-to-icon map. Run
+  `npm run icons:studio` and open `http://127.0.0.1:4178` to compare every
+  Ionicons 5 glyph in the real light, dark, navigation, and control contexts.
+  Draft choices remain local until **Apply to Rabbithole** regenerates the
+  curated payload and committed UI bundles.
 - `src/node/html/canvas.js` assembles the document and owns the public
   `buildCanvasHtml(...)` API for the MCP host.
 - `src/node/html/built-assets.js` reads committed files from `dist/`:
@@ -50,6 +58,8 @@ Behavior-preserving rules:
   `/sse`) or live asset route strings.
 - Do not read browser vendor assets from `node_modules` at runtime; vendor
   sources are inlined into `dist/` by `build.mjs`.
+- After changing the curated Ionicons set or its normalization, run
+  `npm run generate:icons`. `npm run check:icons` guards against generated drift.
 - Verify final HTML by extracting the executable inline `<script>` and running
   `node --check` on that extracted script.
 - `npm run check:dist` must pass before changes land so `dist/` stays fresh.
