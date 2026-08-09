@@ -9,7 +9,7 @@ MCP path requires: Node >= 18 and a browser.
 ## Paths
 
 - Human path: open `https://rabbithole.ing/`. Use an existing Claude or
-  ChatGPT subscription (`npx rabbithole bridge` exposes the local Claude
+  ChatGPT subscription (`npx @shlokkhemani/rabbithole bridge` exposes the local Claude
   Code / Codex CLIs and prints a pairing link), OpenRouter, or an
   OpenAI-compatible local endpoint such as Ollama. Keys stay in the browser
   except for requests to the provider origin the human configures. Holes

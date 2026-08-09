@@ -10,7 +10,7 @@ revisitable.
 There are two ways in:
 
 - **The web app** — [rabbithole.ing](https://rabbithole.ing). Use the Claude
-  or ChatGPT plan you already pay for (`npx rabbithole bridge`), bring an
+  or ChatGPT plan you already pay for (`npx @shlokkhemani/rabbithole bridge`), bring an
   OpenRouter key, run a local model, or point it at your own endpoint. Static
   site, no account, no backend: your key stays in your browser, and so do your
   documents.
@@ -31,7 +31,7 @@ Four ways to run a model:
 - **Claude & ChatGPT plans** — already pay for Claude or ChatGPT? One command:
 
   ```bash
-  npx rabbithole bridge
+  npx @shlokkhemani/rabbithole bridge
   ```
 
   It prints a link; clicking it connects the page. Answers come from the

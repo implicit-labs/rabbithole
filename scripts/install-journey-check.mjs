@@ -288,7 +288,7 @@ async function installTarball({ tarball, prefix, cache, home }) {
 
 function installedPaths(prefix) {
   return {
-    package: path.join(prefix, "node_modules", "rabbithole"),
+    package: path.join(prefix, "node_modules", "@shlokkhemani", "rabbithole"),
     rabbithole: path.join(prefix, "node_modules", ".bin", "rabbithole"),
     mcp: path.join(prefix, "node_modules", ".bin", "rabbithole-mcp"),
   };

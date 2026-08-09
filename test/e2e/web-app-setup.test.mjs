@@ -112,7 +112,7 @@ async function verifyExistingWebUserUpgrade() {
     await page.route("http://127.0.0.1:41414/bridge/ping", (route) => route.abort());
     await page.click('[data-provider="subscriptions"]');
     await page.waitForSelector('.bridge-surface[data-state="re_pair"] .bridge-command code');
-    assert.equal(await page.locator('.bridge-surface[data-state="re_pair"] .bridge-command code').innerText(), "npx rabbithole bridge", "first-run must show the command, not ask for a token from nowhere");
+    assert.equal(await page.locator('.bridge-surface[data-state="re_pair"] .bridge-command code').innerText(), "npx @shlokkhemani/rabbithole bridge", "first-run must show the command, not ask for a token from nowhere");
     assert.equal(await page.getAttribute('[data-provider="subscriptions"]', "aria-pressed"), "true", "Subscriptions must be reachable from pre-bridge preferences");
     await page.click('[data-provider="openrouter"]');
     assert.equal(await page.locator("#api-key").count(), 1);
@@ -1126,7 +1126,7 @@ async function verifySubscriptionsPanelStates() {
     const bridgeDownLatencyMs = performance.now() - killedAt;
     assert.ok(bridgeDownLatencyMs < 1_000, `bridge-down took ${bridgeDownLatencyMs.toFixed(1)}ms`);
     assert.equal(await page.locator('.bridge-surface[data-state="bridge_down"] [data-state-action]').count(), 1, "stream close has one bridge command action");
-    assert.equal(await page.locator(".bridge-command code").innerText(), "npx rabbithole bridge");
+    assert.equal(await page.locator(".bridge-command code").innerText(), "npx @shlokkhemani/rabbithole bridge");
     await page.waitForFunction((count) => (
       window.__bridgeStub.requests.filter((request) => request.kind === "events").length > count
     ), requestsBeforeKill);
@@ -1165,7 +1165,7 @@ async function verifySubscriptionsPanelStates() {
     await page.waitForSelector('.bridge-surface[data-state="re_pair"]');
     assert.equal(
       await page.locator('.bridge-surface[data-state="re_pair"] .bridge-command code').innerText(),
-      "npx rabbithole bridge",
+      "npx @shlokkhemani/rabbithole bridge",
       "an unpaired panel leads with the command instead of demanding a token from nowhere",
     );
     assert.match(await page.locator(".bridge-step-wait").innerText(), /Waiting for the bridge/);

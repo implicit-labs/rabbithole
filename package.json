@@ -1,5 +1,5 @@
 {
-  "name": "rabbithole",
+  "name": "@shlokkhemani/rabbithole",
   "version": "0.1.0",
   "type": "module",
   "description": "An infinite canvas for learning. Start from a document, select text, ask, and the answer branches out as a child document. Recurse forever.",
@@ -42,8 +42,8 @@
     "agent"
   ],
   "bin": {
-    "rabbithole": "./bin/rabbithole.js",
-    "rabbithole-mcp": "./bin/mcp-server.js"
+    "rabbithole": "bin/rabbithole.js",
+    "rabbithole-mcp": "bin/mcp-server.js"
   },
   "files": [
     "bin",
@@ -75,5 +75,8 @@
     "fake-indexeddb": "^6.2.5",
     "playwright": "^1.61.1",
     "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

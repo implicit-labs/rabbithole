@@ -4,7 +4,7 @@ export function bridgeRootUrl(baseUrl) {
   return String(baseUrl || "").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
 }
 
-export const BRIDGE_COMMAND = "npx rabbithole bridge";
+export const BRIDGE_COMMAND = "npx @shlokkhemani/rabbithole bridge";
 export const BRIDGE_DOWN_HEADING = "Use your Claude or ChatGPT plan.";
 export const BRIDGE_RECONNECT_INITIAL_MS = 1_000;
 export const BRIDGE_RECONNECT_MAX_MS = 15_000;
