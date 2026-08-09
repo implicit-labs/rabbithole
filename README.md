@@ -9,7 +9,8 @@ revisitable.
 
 There are two ways in:
 
-- **The web app** — [rabbithole.ing](https://rabbithole.ing). Bring an
+- **The web app** — [rabbithole.ing](https://rabbithole.ing). Use the Claude
+  or ChatGPT plan you already pay for (`npx rabbithole bridge`), bring an
   OpenRouter key, run a local model, or point it at your own endpoint. Static
   site, no account, no backend: your key stays in your browser, and so do your
   documents.
@@ -25,10 +26,19 @@ drop in a PDF or Markdown file, paste a URL, import a `.rabbithole` or
 snapshot `.html` — or just ask a question and let the answer become your
 first document.
 
-Three ways to run a model:
+Four ways to run a model:
 
-- **OpenRouter** (recommended) — one key, every major model. The model picker
-  pulls OpenRouter's live catalog.
+- **Claude & ChatGPT plans** — already pay for Claude or ChatGPT? One command:
+
+  ```bash
+  npx rabbithole bridge
+  ```
+
+  It prints a link; clicking it connects the page. Answers come from the
+  Claude Code or Codex CLI on your machine — your plan, your machine, no
+  extra key. (Needs `claude` or `codex` installed and signed in.)
+- **OpenRouter** — one key, every major model. The model picker pulls
+  OpenRouter's live catalog.
 - **Local** — Ollama on your machine, with setup help and installed-model
   discovery. No key required.
 - **Custom** — any other OpenAI-compatible endpoint: LM Studio, llama.cpp,

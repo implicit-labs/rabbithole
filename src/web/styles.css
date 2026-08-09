@@ -986,25 +986,14 @@ body.blank-dragging .composer-card {
   margin-top: 0;
 }
 
-.bridge-agent-choice button {
-  gap: 4px;
-}
-
 .bridge-agent-choice button:not([aria-pressed="true"]) {
   color: var(--fg);
 }
 
-.bridge-plan-badge {
+/* A CLI that isn't on this machine reads as a lesser option before it is
+   clicked; it stays clickable because activating it shows how to install. */
+.bridge-agent-choice button:not([aria-pressed="true"])[data-agent-state="missing"] {
   color: var(--fg-faint);
-  font-weight: var(--weight-medium);
-}
-
-.bridge-agent-choice button:not([aria-pressed="true"]) .bridge-plan-badge {
-  color: inherit;
-}
-
-.bridge-agent-choice button[aria-pressed="true"] .bridge-plan-badge {
-  color: var(--fg-dim);
 }
 
 .bridge-agent-choice button:not([aria-pressed="true"]):focus-visible {
@@ -1045,6 +1034,157 @@ body.blank-dragging .composer-card {
 .bridge-agent-state .field-hint {
   display: block;
   margin-top: 8px;
+}
+
+.bridge-install-option {
+  margin-top: 10px;
+}
+
+.bridge-install-plan {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fg-dim);
+  font: var(--weight-semibold) var(--text-xs)/var(--leading-ui) var(--font-ui);
+}
+
+.bridge-setup-why {
+  margin: 0 0 14px;
+  color: var(--fg-dim);
+  font: var(--text-sm)/1.55 var(--font-ui);
+}
+
+.bridge-setup-live {
+  color: color-mix(in srgb, var(--success) 82%, var(--fg));
+  font-weight: var(--weight-medium);
+}
+
+.bridge-check {
+  margin-right: 2px;
+}
+
+.bridge-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0 0 4px;
+}
+
+.bridge-step {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.bridge-step-marker {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 50%;
+  color: var(--fg-dim);
+  font: var(--weight-semibold) 11px/1 var(--font-ui);
+}
+
+.bridge-step-body {
+  min-width: 0;
+}
+
+.bridge-step-body p {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font: var(--text-sm)/1.45 var(--font-ui);
+}
+
+.bridge-step-upcoming {
+  opacity: 0.55;
+}
+
+.bridge-step-upcoming .bridge-step-body p {
+  margin-bottom: 0;
+}
+
+.bridge-setup-section .field-hint.bridge-step-wait {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.bridge-step-wait .ollama-spinner {
+  display: inline-block;
+  flex: none;
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  border-width: 1.5px;
+}
+
+.bridge-starting {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.bridge-starting .ollama-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.bridge-starting p {
+  margin: 0;
+}
+
+.bridge-step-lead {
+  margin: 0 0 10px;
+  color: var(--fg);
+  font: var(--text-sm)/1.45 var(--font-ui);
+}
+
+.bridge-paste-fallback {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.bridge-paste-fallback summary {
+  display: inline-flex;
+  padding: 10px 0 0;
+  color: var(--fg-dim);
+  font: var(--weight-semibold) var(--text-sm)/1.25 var(--font-ui);
+  cursor: pointer;
+  list-style: none;
+}
+
+.bridge-paste-fallback summary::-webkit-details-marker {
+  display: none;
+}
+
+.bridge-paste-fallback summary:hover {
+  color: var(--fg);
+}
+
+.bridge-paste-fallback[open] summary {
+  margin-bottom: 10px;
+}
+
+.bridge-paste-fallback .settings-advanced-grid {
+  padding: 0;
+}
+
+.bridge-pair-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.bridge-pair-grid .web-primary {
+  justify-self: start;
+  padding-inline: 18px;
+}
+
+.bridge-pair-grid .key-status:not(.visible) {
+  display: none;
 }
 
 .settings-recovery {

@@ -8,7 +8,7 @@ assert.equal(providerFor("custom_endpoint").id, "custom_endpoint");
 assert.equal(providerFor("nonsense").id, "openrouter", "unknown providers fall back to the recommended one");
 assert.equal(providerFor(undefined).id, "openrouter");
 
-assert.deepEqual(Object.values(PROVIDERS).map((provider) => provider.label), ["OpenRouter", "Subscriptions", "Local", "Custom"]);
+assert.deepEqual(Object.values(PROVIDERS).map((provider) => provider.label), ["OpenRouter", "CC/Codex", "Local", "Custom"]);
 assert.equal(providerFor("subscriptions").id, "subscriptions");
 assert.equal(PROVIDERS.subscriptions.requires_key, false, "subscriptions authenticate through the local helper, never a key");
 assert.equal(PROVIDERS.subscriptions.base_url, "http://127.0.0.1:41414/v1", "the helper owns a fixed loopback port");

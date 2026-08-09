@@ -126,8 +126,15 @@ const pairingHistory = {
     replacedUrl = url;
   },
 };
-assert.equal(takeBridgeTokenFromFragment(pairingLocation, pairingHistory), "fresh-token");
+assert.deepEqual(takeBridgeTokenFromFragment(pairingLocation, pairingHistory), { token: "fresh-token" });
 assert.equal(replacedUrl, "/h/example?view=canvas#route=notes&tab=2");
+
+/* A non-default port rides along in the fragment and is stripped with the token. */
+const portedLocation = { pathname: "/", search: "", hash: "#bridge=ported-token&bridge_port=41500" };
+let portedUrl = "";
+const portedHistory = { state: null, replaceState(_state, _title, url) { portedUrl = url; } };
+assert.deepEqual(takeBridgeTokenFromFragment(portedLocation, portedHistory), { token: "ported-token", port: 41500 });
+assert.equal(portedUrl, "/");
 
 /* Omitted keys preserve remembered credentials; only an explicit clear deletes them. */
 store.clear();

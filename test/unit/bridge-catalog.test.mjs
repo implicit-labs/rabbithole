@@ -135,4 +135,32 @@ try {
   globalThis.fetch = realFetch;
 }
 
+/* Pairing input takes whatever the terminal let the user grab. */
+const { pairingFromInput } = await import("../../src/web/brain/bridge-catalog.js");
+const hex = "a".repeat(64);
+assert.deepEqual(pairingFromInput(`https://rabbithole.ing/#bridge=${hex}`), { token: hex });
+assert.deepEqual(pairingFromInput(`  https://rabbithole.ing/#bridge=${hex}&bridge_port=41500 `), { token: hex, port: 41500 });
+assert.deepEqual(pairingFromInput(`#bridge=${hex}`), { token: hex });
+assert.deepEqual(pairingFromInput(`bridge=${hex}&bridge_port=99999`), { token: hex }, "an out-of-range port is dropped, not trusted");
+assert.deepEqual(pairingFromInput(hex), { token: hex });
+assert.equal(pairingFromInput("https://rabbithole.ing/#bridge="), null);
+assert.equal(pairingFromInput("   "), null);
+assert.equal(pairingFromInput("two words"), null);
+
+/* The ping probe answers up/down and never throws. */
+const pingFetch = globalThis.fetch;
+try {
+  const { pingBridge } = await import("../../src/web/brain/bridge-catalog.js");
+  let pingUrl = "";
+  globalThis.fetch = async (url) => { pingUrl = url; return { ok: true }; };
+  assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), true);
+  assert.equal(pingUrl, "http://127.0.0.1:41414/bridge/ping");
+  globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), false);
+  globalThis.fetch = async () => ({ ok: false, status: 403 });
+  assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), false);
+} finally {
+  globalThis.fetch = pingFetch;
+}
+
 process.stdout.write("bridge-catalog SSE state machine ok\n");

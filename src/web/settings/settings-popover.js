@@ -11,12 +11,15 @@ import {
   BRIDGE_AGENT_LABELS,
   BRIDGE_COMMAND,
   BRIDGE_DOWN_HEADING,
+  BRIDGE_PING_INTERVAL_MS,
   bridgeAgent,
   bridgeAgentOf,
   bridgeModelsForAgent,
   bridgeStateKey,
   consumeBridgeEvents,
   nextBridgeReconnectDelay,
+  pairingFromInput,
+  pingBridge,
   planLabel,
   reasoningLabel,
 } from "../brain/bridge-catalog.js";
@@ -72,6 +75,13 @@ export function createSettingsPopover({
   let lastBridgeFrameKey = "";
   let lastBridgeRenderKey = "";
   let bridgeRecoveryAgent = "";
+  let bridgeUnauthorized = false;
+  let bridgeProbeUp = false;
+  let bridgeProbeTimer = 0;
+  let bridgeProbeGeneration = 0;
+  let bridgeProbeInFlight = false;
+  let pairingSetupPending = false;
+  let pairingSetupComplete = null;
   let conditionalComboboxes = [];
 
   function applyPatch(patch) {
@@ -195,6 +205,7 @@ export function createSettingsPopover({
   }
 
   function renderSubscriptionsSections(host, settings) {
+    syncBridgeProbe();
     const recovery = recoveryStatus
       ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>`
       : "";
@@ -211,6 +222,8 @@ export function createSettingsPopover({
       settings.token,
       purpose,
       recoveryStatus,
+      bridgeProbeUp,
+      bridgeUnauthorized,
     ]);
     if (renderKey === lastBridgeRenderKey) return;
     lastBridgeRenderKey = renderKey;
@@ -227,6 +240,12 @@ export function createSettingsPopover({
       setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="starting">${bridgeStartingMarkup()}</div>`);
       return;
     }
+    const claudeAgent = bridgeAgent(bridgeState, "claude");
+    const codexAgent = bridgeAgent(bridgeState, "codex");
+    if (claudeAgent?.state === "missing" && codexAgent?.state === "missing") {
+      setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="none_installed">${bridgeNoneInstalledMarkup(claudeAgent, codexAgent)}</div>`);
+      return;
+    }
 
     const models = bridgeModelsFor(agentId);
     const body = state === "ready"
@@ -236,7 +255,7 @@ export function createSettingsPopover({
         : bridgeAgentStateMarkup(agent);
     const ready = state === "ready" && models.some((model) => model.id === settings.model);
     const finish = ready && (purpose !== "settings" || !getGenerationSetupStatus(settings).ready)
-      ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button">Finish setup</button></div>`
+      ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button">${getGenerationSetupStatus(settings).ready ? "Done" : "Finish setup"}</button></div>`
       : "";
     setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="${escapeHtml(state)}">
       ${bridgeAgentChoiceMarkup(settings)}<div class="bridge-agent-body">${body}</div>
@@ -402,16 +421,38 @@ export function createSettingsPopover({
     renderConditionalSections();
   }
 
+  /* Paired but the stream is down — the returning user only needs the command. */
   function bridgeSetupMarkup() {
-    return `<div class="settings-section bridge-setup-section"><h3>${escapeHtml(BRIDGE_DOWN_HEADING)}</h3>${bridgeCommandMarkup(BRIDGE_COMMAND)}<small class="field-hint">The bridge stream is closed. Run the command, then pair again if needed.</small></div>`;
+    return `<div class="settings-section bridge-setup-section"><h3>${escapeHtml(BRIDGE_DOWN_HEADING)}</h3><p class="bridge-setup-why">The bridge isn’t running. Start it in your terminal:</p>${bridgeCommandMarkup(BRIDGE_COMMAND)}<small class="field-hint">Rabbithole reconnects on its own once it’s up.</small></div>`;
   }
 
+  function bridgePairingFieldMarkup({ inline }) {
+    return `<div class="bridge-pair-grid settings-advanced-grid">${fieldMarkup({ id: "bridge-pairing-token", label: "Pairing link", value: "", placeholder: "https://rabbithole.ing/#bridge=…", autocomplete: "off", autocapitalize: "none", autocorrect: "off", spellcheck: "false", status: { id: "bridge-pair-status", className: "key-status idle", text: "" } })}<button id="bridge-pair" class="web-primary"${inline ? " data-state-action" : ""} type="button">Connect</button></div>`;
+  }
+
+  /*
+   * Unpaired (first run, or the bridge rejected our token). A live two-step
+   * guide: the ping probe checks step 1 off the moment the bridge comes up,
+   * so the panel always shows exactly one next action. The paste field stays
+   * reachable pre-detection (collapsed) because a denied local-network
+   * permission makes the probe blind while the bridge is actually fine.
+   */
   function bridgePairingMarkup() {
-    return `<div class="settings-section bridge-agent-state"><p>Paste the pairing token printed by the bridge.</p>${fieldMarkup({ id: "bridge-pairing-token", label: "Pairing token", value: "", autocomplete: "off", autocapitalize: "none", autocorrect: "off", spellcheck: "false" })}<button id="bridge-pair" class="web-primary" data-state-action type="button">Pair</button></div>`;
+    const heading = `<h3>${escapeHtml(BRIDGE_DOWN_HEADING)}</h3>`;
+    if (bridgeProbeUp) {
+      const lead = bridgeUnauthorized
+        ? "This browser lost its pairing. Click the link in the bridge’s terminal to pair again — or paste it here:"
+        : "Now click the link in your terminal to connect this page — or paste it here:";
+      return `<div class="settings-section bridge-setup-section">${heading}<p class="bridge-setup-why bridge-setup-live"><span class="bridge-check" aria-hidden="true">✓</span> The bridge is running on this computer.</p><p class="bridge-step-lead">${escapeHtml(lead)}</p>${bridgePairingFieldMarkup({ inline: true })}</div>`;
+    }
+    const why = bridgeUnauthorized
+      ? "This browser lost its pairing with the bridge. Connect it again:"
+      : "Answers come from Claude Code or Codex running on this computer — included in the plan you already pay for.";
+    return `<div class="settings-section bridge-setup-section">${heading}<p class="bridge-setup-why">${escapeHtml(why)}</p><div class="bridge-steps"><div class="bridge-step" data-step="run"><span class="bridge-step-marker" aria-hidden="true">1</span><div class="bridge-step-body"><p>Run this in your terminal:</p>${bridgeCommandMarkup(BRIDGE_COMMAND)}<small class="field-hint bridge-step-wait" role="status"><span class="ollama-spinner" aria-hidden="true"></span>Waiting for the bridge to start…</small></div></div><div class="bridge-step bridge-step-upcoming" data-step="connect"><span class="bridge-step-marker" aria-hidden="true">2</span><div class="bridge-step-body"><p>Click the link it prints to connect this page.</p></div></div></div><details class="bridge-paste-fallback"><summary>Paste the link instead</summary>${bridgePairingFieldMarkup({ inline: false })}</details></div>`;
   }
 
   function bridgeStartingMarkup(agentId = "") {
-    const label = agentId ? BRIDGE_AGENT_LABELS[agentId] : "your subscriptions";
+    const label = agentId ? BRIDGE_AGENT_LABELS[agentId] : "the bridge";
     return `<div class="settings-section bridge-agent-state bridge-starting" role="status"><span class="ollama-spinner" aria-hidden="true"></span><p>Connecting to ${escapeHtml(label)}…</p></div>`;
   }
 
@@ -421,21 +462,34 @@ export function createSettingsPopover({
 
   function bridgeAgentChoiceMarkup(settings) {
     const selected = selectedBridgeAgent(settings);
-    return `<div class="settings-section bridge-agent-section"><div class="bridge-agent-choice" role="group" aria-label="Subscription agent">${["claude", "codex"].map((agentId) => {
-      const agent = bridgeAgent(bridgeState, agentId);
-      const plan = agent?.state === "ready" ? planLabel(agent.plan) : "";
-      return `<button type="button" data-bridge-agent="${escapeHtml(agentId)}" aria-pressed="${agentId === selected}"><span>${escapeHtml(BRIDGE_AGENT_LABELS[agentId])}</span>${plan ? `<span class="bridge-plan-badge">· ${escapeHtml(plan)}</span>` : ""}</button>`;
+    return `<div class="settings-section bridge-agent-section"><div class="bridge-agent-choice" role="group" aria-label="Claude Code or Codex">${["claude", "codex"].map((agentId) => {
+      const state = bridgeAgent(bridgeState, agentId)?.state || "starting";
+      return `<button type="button" data-bridge-agent="${escapeHtml(agentId)}" data-agent-state="${escapeHtml(state)}" aria-pressed="${agentId === selected}">${escapeHtml(BRIDGE_AGENT_LABELS[agentId])}</button>`;
     }).join("")}</div></div>`;
   }
 
   function bridgeAgentStateMarkup(agent) {
     const label = BRIDGE_AGENT_LABELS[agent?.id] || "Subscription agent";
     const copy = agent?.state === "missing"
-      ? `${label} is not installed.`
+      ? `${label} isn’t installed on this computer.`
       : agent?.state === "signed_out"
         ? `Sign in to ${label}.`
         : `${label} needs attention.`;
-    return `<div class="settings-section bridge-agent-state"><p>${escapeHtml(copy)}</p>${agent?.detail ? `<small class="field-hint">${escapeHtml(agent.detail)}</small>` : ""}${bridgeCommandMarkup(agent?.fix || BRIDGE_COMMAND)}</div>`;
+    // The bridge re-probes both CLIs on its own, so install/sign-in resolves
+    // without a restart — say so, or the user goes hunting for a reload button.
+    const followUp = agent?.state === "missing" || agent?.state === "signed_out"
+      ? `<small class="field-hint">Rabbithole notices by itself — no restart needed.</small>`
+      : "";
+    return `<div class="settings-section bridge-agent-state"><p>${escapeHtml(copy)}</p>${agent?.detail ? `<small class="field-hint">${escapeHtml(agent.detail)}</small>` : ""}${bridgeCommandMarkup(agent?.fix || BRIDGE_COMMAND)}${followUp}</div>`;
+  }
+
+  /*
+   * Both CLIs are absent. A Claude Code/Codex switch over two identical
+   * dead ends would make the user discover the same failure twice — one
+   * screen states it once and routes by the plan they already pay for.
+   */
+  function bridgeNoneInstalledMarkup(claudeAgent, codexAgent) {
+    return `<div class="settings-section bridge-agent-state bridge-none-installed"><p>Neither Claude Code nor Codex is installed on this computer.</p><div class="bridge-install-option"><small class="bridge-install-plan">Claude plan</small>${bridgeCommandMarkup(claudeAgent.fix)}</div><div class="bridge-install-option"><small class="bridge-install-plan">ChatGPT plan</small>${bridgeCommandMarkup(codexAgent.fix)}</div><small class="field-hint">Install the one whose plan you pay for and sign in — Rabbithole notices by itself.</small></div>`;
   }
 
   function bridgeReadyMarkup(settings, agentId) {
@@ -471,6 +525,63 @@ export function createSettingsPopover({
     bridgeStream?.abort();
     bridgeStream = null;
     bridgeStreamKey = "";
+  }
+
+  /*
+   * The ping probe runs only while a disconnected panel is on screen. It is
+   * not the state transport (§6.2 still holds — the stream is the only state
+   * source); it answers the one question the stream cannot: "is a bridge
+   * even there?" for a client that has no token, or a fast "it's back" for a
+   * paired client between reconnect backoffs.
+   */
+  function probeableView() {
+    return bridgeView === "re_pair" || bridgeView === "bridge_down" || bridgeView === "idle";
+  }
+
+  function stopBridgeProbe() {
+    bridgeProbeGeneration += 1;
+    clearTimeout(bridgeProbeTimer);
+    bridgeProbeTimer = 0;
+    bridgeProbeUp = false;
+  }
+
+  function scheduleBridgeProbe(delay) {
+    clearTimeout(bridgeProbeTimer);
+    bridgeProbeTimer = setTimeout(() => {
+      bridgeProbeTimer = 0;
+      void runBridgeProbe();
+    }, delay);
+  }
+
+  async function runBridgeProbe() {
+    if (!surface || !probeableView()) return;
+    if (document.hidden) {
+      scheduleBridgeProbe(BRIDGE_PING_INTERVAL_MS);
+      return;
+    }
+    const generation = bridgeProbeGeneration;
+    bridgeProbeInFlight = true;
+    const up = await pingBridge(loadSettings().base_url);
+    bridgeProbeInFlight = false;
+    if (generation !== bridgeProbeGeneration || !surface || !probeableView()) return;
+    if (up !== bridgeProbeUp) {
+      bridgeProbeUp = up;
+      lastBridgeRenderKey = "";
+      renderConditionalSections();
+      if (up && bridgeView !== "re_pair" && bridgeStreamKey) {
+        requestBridgeReconnect(bridgeStreamKey, 0);
+      }
+    }
+    scheduleBridgeProbe(BRIDGE_PING_INTERVAL_MS);
+  }
+
+  function syncBridgeProbe() {
+    const wanted = !!surface && providerFor(loadSettings().preset).id === "subscriptions" && probeableView();
+    if (!wanted) {
+      stopBridgeProbe();
+      return;
+    }
+    if (!bridgeProbeTimer && !bridgeProbeInFlight) scheduleBridgeProbe(0);
   }
 
   function handleBridgeVisibilityChange() {
@@ -513,7 +624,10 @@ export function createSettingsPopover({
     lastBridgeFrameKey = "";
     if (reason === "unauthorized") {
       stopBridgeStream();
+      bridgeUnauthorized = true;
+      lastBridgeRenderKey = "";
       setBridgeView("re_pair");
+      renderConditionalSections();
       return;
     }
     setBridgeView("bridge_down");
@@ -571,19 +685,25 @@ export function createSettingsPopover({
     lastBridgeFrameKey = frameKey;
     bridgeState = nextState;
     bridgeView = "stream";
-    const current = loadSettings();
-    if (providerFor(current.preset).id === "subscriptions") {
-      const legacyAgent = bridgeAgentOf(current.model);
-      const agentId = current.agent === "claude" || current.agent === "codex"
-        ? current.agent
-        : legacyAgent || chooseInitialBridgeAgent(nextState);
-      const agents = { ...(current.agents || {}) };
-      if (legacyAgent) agents[legacyAgent] = bridgeAgentSnapshot(current, legacyAgent, agents);
-      applyBridgeSelection(current, agentId, agents);
-    }
+    bridgeUnauthorized = false;
+    applyBridgeSelectionFromState();
     lastBridgeRenderKey = "";
     renderConditionalSections();
     completeBridgeRecoveryIfReady();
+    completePairingSetupIfReady();
+  }
+
+  function applyBridgeSelectionFromState() {
+    if (!bridgeState) return;
+    const current = loadSettings();
+    if (providerFor(current.preset).id !== "subscriptions") return;
+    const legacyAgent = bridgeAgentOf(current.model);
+    const agentId = current.agent === "claude" || current.agent === "codex"
+      ? current.agent
+      : legacyAgent || chooseInitialBridgeAgent(bridgeState);
+    const agents = { ...(current.agents || {}) };
+    if (legacyAgent) agents[legacyAgent] = bridgeAgentSnapshot(current, legacyAgent, agents);
+    applyBridgeSelection(current, agentId, agents);
   }
 
   function startBridgeStream() {
@@ -622,6 +742,44 @@ export function createSettingsPopover({
     void callback();
   }
 
+  /*
+   * Pairing arrived via the printed link. The agent, model, and reasoning
+   * defaults are already chosen by the time the first ready frame lands, so
+   * asking the user to also press "Finish setup" is pure ceremony — complete
+   * it for them and leave the panel open so they can see (and adjust) what
+   * was picked.
+   */
+  function beginPairingSetup({ trigger = defaultTrigger, onComplete = null } = {}) {
+    pairingSetupPending = true;
+    pairingSetupComplete = onComplete;
+    open({ trigger, purpose: getGenerationSetupStatus().ready ? "settings" : "setup" });
+    startBridgeStream();
+    // A re-pair over a live stream gets no fresh frame to react to: re-run
+    // the selection and completion against the state we already hold.
+    if (bridgeView === "stream") {
+      applyBridgeSelectionFromState();
+      lastBridgeRenderKey = "";
+      renderConditionalSections();
+    }
+    completePairingSetupIfReady();
+  }
+
+  function completePairingSetupIfReady() {
+    if (!pairingSetupPending) return;
+    const settings = loadSettings();
+    const agentId = selectedBridgeAgent(settings);
+    const agent = bridgeAgent(bridgeState, agentId);
+    if (agent?.state !== "ready" || !bridgeModelsFor(agentId).some((model) => model.id === settings.model)) return;
+    pairingSetupPending = false;
+    const callback = pairingSetupComplete;
+    pairingSetupComplete = null;
+    markGenerationSetupComplete();
+    onSettingsChange();
+    lastBridgeRenderKey = "";
+    renderConditionalSections();
+    callback?.({ agentLabel: BRIDGE_AGENT_LABELS[agentId], plan: planLabel(agent.plan) });
+  }
+
   function wireConditionalSections(host) {
     wireModelComboboxes(host);
     wireField(host, { id: "provider-base" });
@@ -649,16 +807,34 @@ export function createSettingsPopover({
     host.querySelector("#local-vision-retry")?.addEventListener("click", () => void runLocalDiscovery());
     host.querySelector("#complete-model-setup")?.addEventListener("click", () => void completeSetup());
     const pair = () => {
-      const token = host.querySelector("#bridge-pairing-token")?.value.trim() || "";
-      if (!token) return;
-      applyPatch({ token });
+      const input = host.querySelector("#bridge-pairing-token");
+      const status = host.querySelector("#bridge-pair-status");
+      const pairing = pairingFromInput(input?.value);
+      if (!pairing) {
+        if (status) {
+          status.textContent = "Copy the whole link from the bridge’s terminal, then paste it here.";
+          status.className = "key-status invalid visible";
+        }
+        input?.classList.remove("shake-once");
+        requestAnimationFrame(() => input?.classList.add("shake-once"));
+        window.setTimeout(() => input?.classList.remove("shake-once"), 300);
+        return;
+      }
+      applyPatch({
+        token: pairing.token,
+        ...(pairing.port ? { base_url: `http://127.0.0.1:${pairing.port}/v1` } : {}),
+      });
       startBridgeStream();
     };
     host.querySelector("#bridge-pair")?.addEventListener("click", pair);
     host.querySelector("#bridge-pairing-token")?.addEventListener("keydown", (event) => {
-      if (!isCommandEnter(event)) return;
+      if (event.key !== "Enter" && !isCommandEnter(event)) return;
       event.preventDefault();
       pair();
+    });
+    host.querySelector(".bridge-paste-fallback")?.addEventListener("toggle", (event) => {
+      popover?.update();
+      if (event.target.open) host.querySelector("#bridge-pairing-token")?.focus({ preventScroll: true });
     });
     host.querySelectorAll("[data-copy-command]").forEach((button) => button.addEventListener("click", () => {
       void navigator.clipboard?.writeText(button.dataset.copyCommand).then(() => {
@@ -687,14 +863,17 @@ export function createSettingsPopover({
     const current = loadSettings();
     if (!id || id === providerFor(current.preset).id) return;
     localDiscoveryToken += 1; endpointDiscoveryToken += 1;
-    if (id !== "subscriptions") stopBridgeStream();
+    if (id !== "subscriptions") {
+      stopBridgeStream();
+      stopBridgeProbe();
+    }
     saveSettings({ ...current, api_key: getApiKey(current) });
     applyPatch(settingsForProvider(id, current));
     const pressed = pressedProviderId(id);
     surface.querySelectorAll("[data-provider]").forEach((choice) => choice.setAttribute("aria-pressed", choice.dataset.provider === pressed ? "true" : "false"));
     recoveryStatus = ""; localModels = null; localDiscovery = "idle";
     endpointModels = null; endpointDiscovery = "idle"; endpointDiscoveryMessage = "";
-    bridgeState = null; bridgeView = "idle"; lastBridgeFrameKey = ""; lastBridgeRenderKey = "";
+    bridgeState = null; bridgeView = "idle"; lastBridgeFrameKey = ""; lastBridgeRenderKey = ""; bridgeUnauthorized = false;
     renderConditionalSections();
     if (id === "local") void runLocalDiscovery();
     if (id === "custom_endpoint") void runEndpointDiscovery();
@@ -955,7 +1134,7 @@ export function createSettingsPopover({
         filter: filterBridgeModels,
         renderOption: (entry) => renderBridgeModelRow(entry.model, { current: loadSettings().transcribe_model, ...entry }),
         current: () => loadSettings().transcribe_model,
-        loading: "Checking vision support…", empty: "No vision-capable subscription models.",
+        loading: "Checking vision support…", empty: "No vision-capable models.",
         error: `Couldn't load models from ${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]}.`, onChange: commitTranscription
       }));
     } else if (preset.id === "custom_endpoint") {
@@ -989,7 +1168,7 @@ export function createSettingsPopover({
         filter: filterBridgeModels,
         renderOption: (entry) => renderBridgeModelRow(entry.model, { current: loadSettings().model, ...entry }),
         current: () => loadSettings().model,
-        loading: "Loading subscription models…",
+        loading: "Loading models…",
         empty: `${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]} returned no models.`,
         error: `Couldn't load models from ${BRIDGE_AGENT_LABELS[selectedBridgeAgent()]}.`,
         onChange: (id) => {
@@ -1085,6 +1264,9 @@ export function createSettingsPopover({
     activeTrigger?.removeAttribute("aria-controls"); activeTrigger?.setAttribute("aria-expanded", "false");
     readyCallback = null;
     bridgeRecoveryAgent = "";
+    pairingSetupPending = false;
+    pairingSetupComplete = null;
+    stopBridgeProbe();
   }
 
   function completeLocalSetup() {
@@ -1102,6 +1284,7 @@ export function createSettingsPopover({
     bridgeState = null;
     lastBridgeFrameKey = "";
     bridgeView = "re_pair";
+    bridgeUnauthorized = true;
     lastBridgeRenderKey = "";
     if (surface) renderConditionalSections();
   }
@@ -1133,7 +1316,10 @@ export function createSettingsPopover({
 
   function syncSubscriptionStream() {
     if (providerFor(loadSettings().preset).id === "subscriptions") startBridgeStream();
-    else stopBridgeStream();
+    else {
+      stopBridgeStream();
+      stopBridgeProbe();
+    }
   }
 
   return {
@@ -1141,6 +1327,7 @@ export function createSettingsPopover({
     close,
     completeLocalSetup,
     isOpen: () => !!surface,
+    beginPairingSetup,
     recoverBridgeAgent,
     recoverUnknownModel,
     showBridgeUnauthorized,

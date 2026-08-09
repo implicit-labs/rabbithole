@@ -1,7 +1,7 @@
 import { defaultBrainSettings, normalizeProviderSettings, providerFor } from "../brain/provider-registry.js";
 import { saveApiKey } from "./credential-store.js";
 
-const SETTINGS_KEY = "rh-web-settings";
+export const SETTINGS_KEY = "rh-web-settings";
 const DEFAULT_FETCH_PROXY_URL =
   typeof __RABBITHOLE_DEFAULT_PROXY_URL__ === "string" ? __RABBITHOLE_DEFAULT_PROXY_URL__ : "";
 

@@ -25,7 +25,7 @@ export async function readOrCreateBridgeToken({
       const token = (await fs.readFile(tokenPath, "utf8")).trim();
       if (TOKEN_PATTERN.test(token)) {
         await fs.chmod(tokenPath, 0o600);
-        return { token, path: tokenPath };
+        return { token, path: tokenPath, created: false };
       }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
@@ -38,7 +38,7 @@ export async function readOrCreateBridgeToken({
     mode: 0o600,
   });
   await fs.chmod(tokenPath, 0o600);
-  return { token, path: tokenPath };
+  return { token, path: tokenPath, created: true };
 }
 
 export function tokenMatches(expected, authorization) {

@@ -95,7 +95,7 @@ async function verifyConnectStatesAndAuth() {
     await routeEndpoint(page, { requireKey: true });
     await openSettingsOnCustom(page);
 
-    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "Subscriptions", "Local"]);
+    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
     assert.deepEqual(await page.locator(".local-mode-choice button").allTextContents(), ["Ollama", "Custom endpoint"]);
     assert.equal(await page.getAttribute('[data-local-mode="custom_endpoint"]', "aria-pressed"), "true");
     assert.equal(await page.locator("#api-key").count(), 1, "a custom endpoint must be able to authenticate");

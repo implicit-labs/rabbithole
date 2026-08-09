@@ -200,6 +200,38 @@ try {
       code: "forbidden_origin",
       noAcao: true,
     },
+    // /bridge/ping is the one unauthenticated route: the pre-pairing panel
+    // needs a CORS-readable liveness answer. Host/Origin gates still apply,
+    // and it must reveal nothing beyond {"ok":true}.
+    {
+      name: "ping no token allowed origin",
+      run: () => request(bridge, {
+        pathname: "/bridge/ping",
+        headers: { Origin: "https://rabbithole.ing" },
+      }),
+      status: 200,
+      acao: "https://rabbithole.ing",
+    },
+    {
+      name: "ping foreign origin",
+      run: () => request(bridge, {
+        pathname: "/bridge/ping",
+        headers: { Origin: "https://attacker.example" },
+      }),
+      status: 403,
+      code: "forbidden_origin",
+      noAcao: true,
+    },
+    {
+      name: "ping foreign host",
+      run: () => request(bridge, {
+        pathname: "/bridge/ping",
+        headers: { Host: "attacker.example" },
+      }),
+      status: 403,
+      code: "forbidden_host",
+      noAcao: true,
+    },
   ];
 
   const observed = [];
@@ -213,6 +245,7 @@ try {
     if (row.noAcao || row.code === "unauthorized") {
       assert.equal(result.headers["access-control-allow-origin"], undefined);
     }
+    if (row.acao) assert.equal(result.headers["access-control-allow-origin"], row.acao, row.name);
     observed.push({
       name: row.name,
       status: result.status,
@@ -229,6 +262,10 @@ try {
   });
   assert.equal(allowedUnauthorized.status, 401);
   assert.equal(allowedUnauthorized.headers["access-control-allow-origin"], undefined);
+
+  const ping = await request(bridge, { pathname: "/bridge/ping" });
+  assert.equal(ping.status, 200);
+  assert.deepEqual(ping.json, { ok: true }, "ping reveals nothing beyond liveness");
 
   const deletedStatus = await request(bridge, {
     pathname: "/bridge/status",

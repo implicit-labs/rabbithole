@@ -8,6 +8,7 @@ export const BRIDGE_COMMAND = "npx rabbithole bridge";
 export const BRIDGE_DOWN_HEADING = "Use your Claude or ChatGPT plan.";
 export const BRIDGE_RECONNECT_INITIAL_MS = 1_000;
 export const BRIDGE_RECONNECT_MAX_MS = 15_000;
+export const BRIDGE_PING_INTERVAL_MS = 2_000;
 export const BRIDGE_AGENT_COMMANDS = Object.freeze({
   claude: Object.freeze({
     login: "claude /login",
@@ -25,6 +26,47 @@ export function nextBridgeReconnectDelay(currentDelay = 0) {
   return current > 0
     ? Math.min(current * 2, BRIDGE_RECONNECT_MAX_MS)
     : BRIDGE_RECONNECT_INITIAL_MS;
+}
+
+/*
+ * Pre-pairing liveness. An unpaired page cannot read any authed bridge
+ * response — the 401 carries no CORS header, so it rejects exactly like
+ * "no bridge at all". /bridge/ping is the one unauthenticated route, and it
+ * lets the setup panel advance its instructions the moment the user runs
+ * the command instead of asking them to guess whether anything happened.
+ */
+export async function pingBridge(baseUrl, { timeoutMs = 1_500 } = {}) {
+  const url = `${bridgeRootUrl(baseUrl)}/bridge/ping`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal, ...addressSpaceHint(url) });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/*
+ * The bridge prints one pairing link; people paste whatever their terminal
+ * lets them grab — the whole link, the fragment, or just the token. Accept
+ * all of them rather than teaching the difference.
+ */
+export function pairingFromInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (raw.includes("bridge=")) {
+    const hashIndex = raw.indexOf("#");
+    const params = new URLSearchParams(hashIndex === -1 ? raw : raw.slice(hashIndex + 1));
+    const token = (params.get("bridge") || "").trim();
+    if (!token) return null;
+    const port = Number(params.get("bridge_port") || "");
+    return { token, ...(Number.isInteger(port) && port > 0 && port <= 65535 ? { port } : {}) };
+  }
+  if (/\s/.test(raw)) return null;
+  return { token: raw };
 }
 
 export async function consumeBridgeEvents(baseUrl, bearerToken, { signal, onState = () => {} } = {}) {

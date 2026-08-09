@@ -12,7 +12,7 @@ export const PROVIDERS = Object.freeze({
   }),
   subscriptions: Object.freeze({
     id: "subscriptions",
-    label: "Subscriptions",
+    label: "CC/Codex",
     model_source: "bridge",
     base_url: "http://127.0.0.1:41414/v1",
     kind: "openai-compatible",

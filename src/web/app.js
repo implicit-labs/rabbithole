@@ -3,7 +3,7 @@ import { createBrain } from "./brain/openai-compatible.js";
 import { providerFor, settingsForProvider } from "./brain/provider-registry.js";
 import { detectPdfTranscriptionCapability, pdfTranscriptionCapability } from "./brain/pdf-transcription.js";
 import { isHttpUrl } from "./brain/model-endpoint.js";
-import { loadSettings, saveSettings } from "./settings/preferences-store.js";
+import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings/preferences-store.js";
 import { getApiKey } from "./settings/credential-store.js";
 import { createSettingsPopover } from "./settings/settings-popover.js";
 import { createOllamaRecoveryDialog } from "./settings/ollama-recovery.js";
@@ -54,6 +54,7 @@ let composerPath = "";
 let lastHoleCount = 0;
 let railSummaries = null;
 let toastNotice = null;
+let initialBridgePairing = false;
 consumeInitialBridgePairing();
 let currentPdfTranscriptionCapability = pdfTranscriptionCapability(loadSettings());
 let pdfTranscriptionCheckToken = 0;
@@ -66,10 +67,15 @@ boot().catch((err) => {
 });
 
 function consumeInitialBridgePairing() {
-  const token = takeBridgeTokenFromFragment();
-  if (token === null) return;
+  const pairing = takeBridgeTokenFromFragment();
+  if (!pairing?.token) return;
   const paired = settingsForProvider("subscriptions", loadSettings());
-  saveSettings({ ...paired, token });
+  saveSettings({
+    ...paired,
+    token: pairing.token,
+    ...(pairing.port ? { base_url: `http://127.0.0.1:${pairing.port}/v1` } : {}),
+  });
+  initialBridgePairing = true;
 }
 
 async function boot() {
@@ -86,6 +92,7 @@ async function boot() {
   } else {
     showBlankCanvas();
   }
+  if (initialBridgePairing) beginBridgePairingSetup();
   installTestSeam({
     store,
     currentHoleId: () => currentHoleId,
@@ -204,6 +211,24 @@ function initAppChrome() {
   const rail = document.getElementById("web-rail");
   window.addEventListener("resize", syncRailPosition, { passive: true });
   window.addEventListener("popstate", () => { void openHistoryLocation(); });
+  // Pairing often lands in a second tab (the terminal link opens a fresh one).
+  // Settings are shared through localStorage, so let a tab that is sitting on
+  // the "waiting to pair" panel advance the moment another tab pairs.
+  window.addEventListener("storage", (event) => {
+    if (event.key !== SETTINGS_KEY) return;
+    refreshCurrentBrain();
+    syncGenerationSetupUi();
+    settingsController?.syncSubscriptionStream();
+  });
+  // Pasting the pairing link into an already-open tab's address bar changes
+  // only the hash — no reload, so the load-time consumption never runs.
+  window.addEventListener("hashchange", () => {
+    initialBridgePairing = false;
+    consumeInitialBridgePairing();
+    if (!initialBridgePairing) return;
+    refreshCurrentBrain();
+    beginBridgePairingSetup();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") void currentHost?.flushSave();
   });
@@ -484,6 +509,20 @@ function openModelSetup({ trigger, status = "", onReady = null } = {}) {
   const blankSetup = document.getElementById("blank-start-setup");
   const safeTrigger = trigger?.disabled ? (blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings")) : trigger;
   settingsController.open({ trigger: safeTrigger || document.getElementById("t-settings"), purpose: status ? "recovery" : "setup", status, onReady });
+}
+
+/* The user clicked the pairing link the bridge printed. Landing silently on a
+   blank canvas would throw the one moment this flow earns away — open the
+   panel on the live bridge state and confirm out loud once answers can flow. */
+function beginBridgePairingSetup() {
+  const blankSetup = document.getElementById("blank-start-setup");
+  const trigger = blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings");
+  settingsController.beginPairingSetup({
+    trigger,
+    onComplete: ({ agentLabel, plan }) => {
+      showToast({ message: `Connected — answers come from ${agentLabel}${plan ? ` (${plan})` : ""}.` });
+    },
+  });
 }
 
 function syncGenerationSetupUi() {
@@ -1056,7 +1095,7 @@ function brainForSettings(settings) {
 
 function brainRequiredErrorForSettings(settings) {
   return providerFor(settings.preset).id === "subscriptions"
-    ? { message: "Pair Rabbithole with your subscriptions to keep asking.", code: "subscription_unpaired" }
+    ? { message: "Connect your Claude or ChatGPT plan to keep asking.", code: "subscription_unpaired" }
     : null;
 }
 

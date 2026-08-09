@@ -155,6 +155,7 @@ try {
     /^src\//,
     /^README\.md$/,
     /^LICENSE$/,
+    /^THIRD_PARTY_NOTICES\.md$/,
     /^package\.json$/,
   ];
   const unexpectedPaths = [...packedPaths].filter((packedPath) =>
@@ -165,6 +166,7 @@ try {
     "package.json",
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "bin/mcp-server.js",
     "bin/rabbithole.js",
     ...(await filesBelow("src/node")),
@@ -292,7 +294,15 @@ try {
   assert.equal(modelList.object, "list");
   assert.ok(modelList.data.some((model) => model.id === "claude/sonnet"));
   assert.ok(modelList.data.some((model) => model.id === "codex/gpt-fake"));
-  assert.equal(bridgeOutput.stdout(), "", "bridge mode must not write to stdout");
+  // Bridge stdout is the human banner (stderr keeps the parseable log lines);
+  // only the no-arg MCP mode must keep stdout protocol-clean.
+  assert.match(bridgeOutput.stdout(), /Open this link to connect your browser/, "bridge stdout must lead with the pairing instruction");
+  assert.match(
+    bridgeOutput.stdout(),
+    new RegExp(`https://rabbithole\\.ing/#bridge=${bridgeOutput.token}&bridge_port=${bridgeOutput.port}`),
+    "the printed pairing link must carry the token and non-default port",
+  );
+  assert.doesNotMatch(bridgeOutput.stdout(), /\u001B\[/, "a non-TTY bridge run must print no ANSI escapes");
 
   child.kill("SIGTERM");
   const bridgeExit = await withTimeout(waitForExit(child), "clean bridge shutdown");

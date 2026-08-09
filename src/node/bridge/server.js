@@ -89,7 +89,7 @@ export async function createBridge({
   stateRefreshMs,
   codexConfigSuffix = "",
 } = {}) {
-  const { token } = await readOrCreateBridgeToken({
+  const { token, created: tokenCreated } = await readOrCreateBridgeToken({
     env,
     regenerate: newToken,
   });
@@ -314,6 +314,20 @@ export async function createBridge({
         return;
       }
 
+      const url = new URL(req.url || "/", `http://${HOST}:${actualPort}`);
+
+      // Pre-pairing liveness probe. An unpaired page can't read any authed
+      // response (401 carries no ACAO header, so it fails identically to
+      // "no bridge"), yet the setup panel must know when the bridge comes up
+      // to advance its instructions. This reveals only that a bridge is
+      // listening — which a port scan shows anyway — behind the same
+      // Host/Origin gates as everything else.
+      if (req.method === "GET" && url.pathname === "/bridge/ping") {
+        applyCors(req, res);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       if (!tokenMatches(token, req.headers.authorization)) {
         throw new BridgeError("Unauthorized.", "unauthorized", 401);
       }
@@ -338,7 +352,6 @@ export async function createBridge({
         });
       }
 
-      const url = new URL(req.url || "/", `http://${HOST}:${actualPort}`);
       if (req.method === "GET" && url.pathname === "/bridge/events") {
         openEventStream(req, res, state);
       } else if (req.method === "GET" && url.pathname === "/v1/models") {
@@ -418,6 +431,7 @@ export async function createBridge({
       return `http://${HOST}:${actualPort}`;
     },
     token,
+    tokenCreated,
   };
   return bridge;
 }
