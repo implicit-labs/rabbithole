@@ -879,7 +879,7 @@ body.blank-dragging .composer-card {
   display: none;
   position: absolute;
   z-index: calc(var(--layer-popover) + 1);
-  left: -105px;
+  inset-inline-start: -105px;
   bottom: calc(100% + 7px);
   width: 248px;
   box-sizing: border-box;
@@ -1022,12 +1022,15 @@ body.blank-dragging .composer-card {
   background: color-mix(in srgb, var(--fg) 5%, transparent);
 }
 
+/* The command is the critical content — on a phone-width popover it must wrap
+   into view, never sit clipped behind a cue-less horizontal scroll. */
 .bridge-command code {
   flex: 1;
-  overflow-x: auto;
+  min-width: 0;
   color: var(--fg-bold);
   font: var(--text-sm)/1.4 var(--font-mono);
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .bridge-setup-section .field-hint,
@@ -1038,6 +1041,13 @@ body.blank-dragging .composer-card {
 
 .bridge-install-option {
   margin-top: 10px;
+}
+
+/* The closing hint governs both install options, so it needs more distance
+   from the last option than the options keep between themselves — otherwise
+   it reads as a caption on the ChatGPT command alone. */
+.bridge-none-installed > .field-hint {
+  margin-top: 14px;
 }
 
 .bridge-install-plan {
@@ -1059,13 +1069,13 @@ body.blank-dragging .composer-card {
 }
 
 .bridge-check {
-  margin-right: 2px;
+  margin-inline-end: 2px;
 }
 
 .bridge-steps {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   margin: 0 0 4px;
 }
 
@@ -1150,6 +1160,8 @@ body.blank-dragging .composer-card {
 
 .bridge-paste-fallback summary {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 10px 0 0;
   color: var(--fg-dim);
   font: var(--weight-semibold) var(--text-sm)/1.25 var(--font-ui);
@@ -1159,6 +1171,22 @@ body.blank-dragging .composer-card {
 
 .bridge-paste-fallback summary::-webkit-details-marker {
   display: none;
+}
+
+/* Same disclosure chevron as .settings-advanced — collapsed content with no
+   cue may as well not exist. */
+.bridge-paste-fallback summary::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.bridge-paste-fallback[open] summary::after {
+  transform: rotate(45deg);
 }
 
 .bridge-paste-fallback summary:hover {
@@ -1485,7 +1513,8 @@ body.blank-dragging .composer-card {
   border-radius: var(--radius-control-lg);
   background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--fg);
-  padding: 8px 36px 8px 10px;
+  padding-block: 8px;
+  padding-inline: 10px 36px;
   font: 12px/1.5 var(--font-mono);
   transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
@@ -1502,7 +1531,7 @@ body.blank-dragging .composer-card {
 .key-input-wrap button {
   position: absolute;
   top: 50%;
-  right: 5px;
+  inset-inline-end: 5px;
   transform: translateY(-50%);
   display: inline-flex;
   width: 24px;
@@ -1604,16 +1633,18 @@ body.blank-dragging .composer-card {
   letter-spacing: 0.01em;
 }
 
+/* Same radius and inline padding as .key-input-wrap input — in the custom-endpoint
+   panel these fields stack as one visual block, so their edges must match. */
 .endpoint-section input,
 .settings-advanced-grid input,
 .settings-advanced-grid select {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-control-lg);
   background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--fg);
-  padding: 8px 9px;
+  padding: 8px 10px;
   font-size: var(--text-body);
   line-height: 18px;
   transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
@@ -1752,7 +1783,7 @@ body.blank-dragging .composer-card {
   height: 5px;
   border-radius: 50%;
   background: currentColor;
-  margin-right: 6px;
+  margin-inline-end: 6px;
   vertical-align: 1.5px;
 }
 
@@ -2233,14 +2264,15 @@ body.blank-dragging .composer-card {
 
   .key-input-wrap input {
     min-height: 48px;
-    padding: 10px 48px 10px 12px;
+    padding-block: 10px;
+    padding-inline: 12px 48px;
     /* iOS zooms the whole page when a smaller input receives focus. */
     font-size: 16px;
     line-height: 1.35;
   }
 
   .key-input-wrap button {
-    right: 2px;
+    inset-inline-end: 2px;
     width: var(--control-h-lg);
     height: var(--control-h-lg);
   }
