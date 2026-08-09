@@ -2,11 +2,10 @@
  * The product-facing icon name -> Ionicons 5 source mapping.
  *
  * This small module is the editable source of truth shared by the application,
- * the generated icon payload, and the local Icon Studio. The bunny is a
- * Rabbithole brand mark rather than an interface icon and stays in icons.js.
+ * the generated icon payload, and the local Icon Studio. Product-owned
+ * geometry (the bunny brand mark, the rail panel toggle) stays in icons.js.
  */
 export const ICON_SELECTIONS = Object.freeze({
-  "rail": "menu",
   "new": "add-circle-outline",
   "canvas": "git-branch-outline",
   "zoom-out": "remove-outline",

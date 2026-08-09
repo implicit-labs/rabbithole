@@ -24,9 +24,19 @@ function ionicon(name, size) {
   return { size, attrs: definition.attrs, body: definition.body };
 }
 
+/* The sidebar toggle is a panel-with-divider, not a hamburger: "menu" promises
+   a menu, and its wide-short silhouette can never sit optically level with the
+   round compose glyph beside it. Product-owned, drawn on the Ionicons
+   512-grid/48-stroke system so it reads as part of the set. */
+const RAIL_PANEL = {
+  attrs: 'viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"',
+  body: '<rect x="64" y="64" width="384" height="384" rx="57" fill="none" stroke-linejoin="round" stroke-width="48"/>' +
+    '<path fill="none" stroke-linecap="round" stroke-width="48" d="M192 64v384"/>',
+};
+
 const ICON_DEFINITIONS = Object.freeze({
   bunny: { size: null, attrs: 'viewBox="0 0 64 64" fill="currentColor"', body: BUNNY_SHAPES },
-  rail: ionicon(ICON_SELECTIONS.rail, 16),
+  rail: { size: 16, ...RAIL_PANEL },
   new: ionicon(ICON_SELECTIONS.new, 16),
   canvas: ionicon(ICON_SELECTIONS.canvas, 16),
   "zoom-out": ionicon(ICON_SELECTIONS["zoom-out"], 16),

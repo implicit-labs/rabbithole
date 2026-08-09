@@ -454,7 +454,11 @@ body.mode-canvas .tb-group[data-mode="reader"] { display: none; }
 body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .zoom-controls { display: inline-flex; align-items: center; gap: 1px; margin-inline: -2px; }
 .zoom-controls .tool-icon { width: var(--control-h-xs); height: var(--control-h-xs); }
+/* Per-glyph optical trims: the compose circle and the rail panel are drawn
+   slightly inside the shared grid, so each gets a nudge to sit level with its
+   toolbar neighbors (the e2e suite measures this). */
 #t-new svg { transform: scale(1.08); }
+#t-rail svg { transform: scale(1.04); }
 #zoom-label { height: 24px; min-width: 40px; padding: 0 4px; font-size: 11px; color: var(--fg-faint); text-align: center; font-variant-numeric: tabular-nums; }
 @media (hover: none), (pointer: coarse), (max-width: 760px) {
   :root { --taskbar-clear: calc(max(8px, env(safe-area-inset-top)) + 62px); }
