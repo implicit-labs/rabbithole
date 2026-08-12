@@ -155,6 +155,15 @@ async function verifyNoticePrimitive() {
   assert.equal(await page.locator("#toast").evaluate((el) => el.classList.contains("visible")), false, "the replacement timer should eventually hide the notice");
 
   await page.evaluate(() => {
+    window.noticeExpired = false;
+    wireNotice(document.getElementById("toast"), { variant: "toast" }).show({
+      message: "expires", duration: 80, onExpire: () => { window.noticeExpired = true; },
+    });
+  });
+  await page.waitForTimeout(120);
+  assert.equal(await page.evaluate(() => window.noticeExpired), true, "a timed notice should report expiry after it hides");
+
+  await page.evaluate(() => {
     const toast = document.getElementById("toast");
     wireNotice(toast, { variant: "toast" }).show({ message: "paused", actionLabel: "Undo", duration: 1200 });
     toast.querySelector("[data-notice-action]").focus();

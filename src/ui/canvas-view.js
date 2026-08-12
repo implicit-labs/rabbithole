@@ -1,8 +1,6 @@
 import {
   CANVAS_BASE,
-  MAX_FS,
   MAX_SCALE,
-  MIN_FS,
   MIN_SCALE,
   READER_BASE,
   SVGNS,
@@ -13,7 +11,6 @@ import {
   closed,
   currentNodeId,
   edgesSvg,
-  fontPx,
   flashHint,
   frozen,
   isVisible,
@@ -84,7 +81,7 @@ function defaultCanvasHooks(){
     hideAsk: function(){},
     sendFollowup: function(){ return null; },
     sendNote: function(){ return null; },
-    confirmDelete: function(){},
+    removeBranch: function(){},
     persistNode: function(){},
     persistNodesBulk: function(){},
     scheduleViewSave: function(){}
@@ -107,7 +104,8 @@ export function initCanvasView(){
   if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(scheduleEdges);
   registerCoreHooks({
     ensureCanvasBuilt: ensureCanvasBuilt,
-    diveToNode: diveToNode
+    diveToNode: diveToNode,
+    scheduleEdges: scheduleEdges
   });
   canvasScope.listen(world, "mouseover", onWorldMouseOver);
   canvasScope.listen(world, "mouseout", onWorldMouseOut);
@@ -150,7 +148,8 @@ function cleanupCanvasView(resetHooks){
   if (resetHooks) {
     registerCoreHooks({
       ensureCanvasBuilt: function(){},
-      diveToNode: function(){}
+      diveToNode: function(){},
+      scheduleEdges: function(){}
     });
   }
 }
@@ -227,8 +226,6 @@ export function createNodeEl(node, enter){
     }
     var titleEl = document.createElement("span"); titleEl.className = "node-title"; titleEl.textContent = node.title || "…";
     titleEl.title = node.title || "";
-    var aDown = cardButton(buttonMarkup({ bare: true, className: "node-btn node-font-btn", label: "A−", ariaLabel: "Smaller text", title: "Smaller text" }));
-    var aUp = cardButton(buttonMarkup({ bare: true, className: "node-btn node-font-btn", label: "A+", ariaLabel: "Larger text", title: "Larger text" }));
     var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card" }));
     syncCollapseButton(node, collapseBtn);
     var openBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_EXPAND_ICON, ariaLabel: "Expand document", title: "Expand document" }));
@@ -236,10 +233,10 @@ export function createNodeEl(node, enter){
     var acts = document.createElement("span"); acts.className = "node-acts";
     if (node.id !== rootId){
       var delBtn = cardButton(buttonMarkup({ bare: true, className: "node-btn danger", label: "✕", ariaLabel: "Remove this branch", title: "Remove this branch" }));
-      delBtn.addEventListener("click", function(e){ e.stopPropagation(); canvasLifecycle.hooks.confirmDelete(node, delBtn); });
+      delBtn.addEventListener("click", function(e){ e.stopPropagation(); canvasLifecycle.hooks.removeBranch(node); });
       acts.appendChild(delBtn);
     }
-    acts.appendChild(aDown); acts.appendChild(aUp); acts.appendChild(divider); acts.appendChild(collapseBtn); acts.appendChild(openBtn);
+    acts.appendChild(divider); acts.appendChild(collapseBtn); acts.appendChild(openBtn);
     head.appendChild(titleEl); head.appendChild(acts);
 
     var body = document.createElement("div"); body.className = "node-body";
@@ -273,8 +270,6 @@ export function createNodeEl(node, enter){
     });
     openBtn.addEventListener("click", function(e){ e.stopPropagation(); openNode(node.id); });
     collapseBtn.addEventListener("click", function(e){ e.stopPropagation(); toggleCollapse(node, collapseBtn); });
-    aDown.addEventListener("click", function(e){ e.stopPropagation(); setNodeFontScale(node, -0.1); });
-    aUp.addEventListener("click", function(e){ e.stopPropagation(); setNodeFontScale(node, 0.1); });
     // Scrolling a card moves the inline marks its children's edges start from.
     body.addEventListener("scroll", scheduleEdges, { passive: true });
     if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
@@ -434,7 +429,7 @@ export function updateCardComposer(node){
   // possibly off-screen. Pan just enough to bring it into view (user-initiated,
   // so moving the viewport is expected; streaming never does this).
 export function revealNode(n, source){
-    if (mode !== "canvas" || !n) return;
+    if (mode !== "canvas" || !n || isNoteNode(n)) return;
     var pad = 30, vw = viewport.clientWidth, vh = viewport.clientHeight;
     var x1 = n.x * view.scale + view.x, y1 = n.y * view.scale + view.y;
     var x2 = (n.x + n.w) * view.scale + view.x, y2 = (n.y + effH(n)) * view.scale + view.y;
@@ -658,14 +653,6 @@ export function fillBody(node){
     // after preventScroll focus. The camera owns this viewport, never DOM scroll.
     viewport.scrollLeft = 0; viewport.scrollTop = 0;
   }
-  function setNodeFontScale(node, delta){
-    node.font_scale = Math.min(MAX_FS, Math.max(MIN_FS, (node.font_scale || 1) + delta));
-    var dc = node.bodyEl && node.bodyEl.querySelector(".doc-content"); if (dc) dc.style.fontSize = fontPx(node, CANVAS_BASE) + "px";
-    if (mode === "reader" && currentNodeId === node.id){ var rdc = readerMain.querySelector(".doc-content"); if (rdc) rdc.style.fontSize = fontPx(node, READER_BASE) + "px"; }
-    scheduleEdges();
-    canvasLifecycle.hooks.persistNode(node);
-  }
-
 function layoutNode(node){
     var el = node.el; el.style.left = node.x + "px"; el.style.top = node.y + "px"; el.style.width = node.w + "px";
     if (!node.collapsed){

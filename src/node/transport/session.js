@@ -16,6 +16,7 @@ import { applyPersistedBrowserEvent, assetsOrphanedByDeletion, buildNodeAnswered
 import { MAX_PDF_FIGURE_ASSET_BYTES, normalizePdfExtension, parseFigureRefs, rewriteFigureRefs } from "../../core/pdf-shared.js";
 import { TRANSCRIBE_V1_RULES } from "../../core/prompts/transcribe-v1.js";
 import { cropPdfFigureToAsset, cropPdfRegionToFile, renderPdfPageToFile, sweepPdfRegionFiles } from "../pdf-crop.js";
+import { unavailableContextUsage } from "../context/usage.js";
 
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SAVE_DEBOUNCE_MS = 400;
@@ -31,11 +32,47 @@ const REARM_GRACE_MS = 20 * 1000;
 // Cap on retained SSE events for reconnect replay, so a long-lived session
 // doesn't grow this array without bound.
 const MAX_REPLAY_EVENTS = 500;
+const CONTEXT_BROADCAST_THROTTLE_MS = 2000;
 // After a branch_request is handed to the agent, expect answer_branch within
 // this window. If nothing comes back the agent likely died mid-generation
 // (cancelled without an MCP request in flight) — tell the browser so pending
 // asks don't shimmer forever. Self-heals: any later agent call re-attaches.
 const ANSWER_WATCHDOG_MS = 4 * 60 * 1000;
+
+function sanitizeContextUsage(usage) {
+  if (!usage || usage.type !== "context_usage" || usage.quality === "unavailable") {
+    return unavailableContextUsage(
+      usage?.agent === "claude" || usage?.agent === "codex" ? usage.agent : null,
+      typeof usage?.model === "string" ? usage.model : null
+    );
+  }
+  const valid = usage.quality === "reported" &&
+    (usage.agent === "claude" || usage.agent === "codex") &&
+    typeof usage.used_tokens === "number" && Number.isFinite(usage.used_tokens) && usage.used_tokens >= 0 &&
+    typeof usage.window_tokens === "number" && Number.isFinite(usage.window_tokens) && usage.window_tokens > 0 &&
+    usage.used_tokens <= usage.window_tokens &&
+    typeof usage.percent === "number" && Number.isFinite(usage.percent) && usage.percent >= 0 && usage.percent <= 100 &&
+    typeof usage.measured_at === "string";
+  if (!valid) return unavailableContextUsage();
+  // Only derived counters cross the loopback boundary. In particular, a
+  // correlator can never accidentally add a transcript path to this object.
+  return {
+    type: "context_usage",
+    quality: "reported",
+    agent: usage.agent,
+    model: typeof usage.model === "string" ? usage.model : null,
+    used_tokens: usage.used_tokens,
+    window_tokens: usage.window_tokens,
+    percent: usage.percent,
+    measured_at: usage.measured_at,
+  };
+}
+
+function sameContextUsage(left, right) {
+  return !!left && !!right && left.type === right.type && left.quality === right.quality && left.agent === right.agent &&
+    left.model === right.model && left.used_tokens === right.used_tokens && left.window_tokens === right.window_tokens &&
+    left.percent === right.percent && left.measured_at === right.measured_at;
+}
 
 function maxBlockMs() {
   const value = Number(process.env.RABBITHOLE_MAX_BLOCK_MS);
@@ -48,7 +85,7 @@ function maxBlockMs() {
  * drives the canvas and posts branch requests / node updates.
  */
 export class RabbitHoleSession {
-  constructor({ holeId, title, rootId, createdAt, nodes, assetNames, viewState, isResume, renderPage, onClose, mintGenerationRunId = randomUUID }) {
+  constructor({ holeId, title, rootId, createdAt, nodes, assetNames, viewState, isResume, renderPage, onClose, onContextClose, mintGenerationRunId = randomUUID }) {
     this.id = randomUUID();
     this.holeId = holeId || randomUUID();
     this.title = title || "Untitled";
@@ -57,6 +94,7 @@ export class RabbitHoleSession {
     this.assetNames = new Set(assetNames || []);
     this.renderPage = renderPage;
     this.onClose = onClose;
+    this.onContextClose = onContextClose;
     this.mintGenerationRunId = mintGenerationRunId;
 
     this.state = createHoleState({
@@ -99,6 +137,13 @@ export class RabbitHoleSession {
     this.disconnectTimer = null;
     this.outboundEvents = [];
     this.lastOutboundEventId = 0;
+    this.contextUsage = unavailableContextUsage();
+    this.contextBusy = false;
+    // Unavailable is the silent/default state: do not perturb existing event
+    // ordering merely because an agent turn starts before correlation succeeds.
+    this.lastContextBroadcast = this.contextUsage;
+    this.lastContextBroadcastAt = 0;
+    this.contextBroadcastTimer = null;
 
     this.timeoutHandle = null;
     this.saveChain = createSaveChain({
@@ -194,6 +239,12 @@ export class RabbitHoleSession {
     for (const filePath of this.regionFiles.values()) fs.unlink(filePath).catch(() => {});
     this.regionFiles.clear();
     this.closed = true;
+    this.onContextClose?.(this);
+    this.contextBusy = false;
+    if (this.contextBroadcastTimer) {
+      clearTimeout(this.contextBroadcastTimer);
+      this.contextBroadcastTimer = null;
+    }
     if (this.timeoutHandle) {
       clearTimeout(this.timeoutHandle);
       this.timeoutHandle = null;
@@ -252,6 +303,7 @@ export class RabbitHoleSession {
   waitForEvent(signal) {
     if (this.closed) return Promise.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id }));
     this.touch();
+    this.setContextBusy(false);
     this.markAgentAttached();
     if (this.queue.length > 0) return Promise.resolve(this.deliverToAgent(this.queue.shift()));
     const inFlight = this.nextInFlightBranchRequest();
@@ -323,6 +375,9 @@ export class RabbitHoleSession {
     if (event && (event.status === "branch_request" || event.status === "convert_request")) {
       this.inFlightBranchRequests.set(event.request_id, event);
       this.startAnswerWatchdog();
+    }
+    if (event && (event.status === "branch_request" || event.status === "convert_request" || event.status === "keep_listening")) {
+      this.setContextBusy(true);
     }
     return event;
   }
@@ -410,6 +465,12 @@ export class RabbitHoleSession {
       );
       if (stale !== -1) this.outboundEvents.splice(stale, 1);
     }
+    // Context usage is transient latest-state, just like streaming progress:
+    // reconnect replay needs one current reading, never a history of counters.
+    if (data.type === "context_usage") {
+      const stale = this.outboundEvents.findIndex((e) => e.data.type === "context_usage");
+      if (stale !== -1) this.outboundEvents.splice(stale, 1);
+    }
     const event = { id: ++this.lastOutboundEventId, data };
     this.outboundEvents.push(event);
     if (this.outboundEvents.length > MAX_REPLAY_EVENTS) {
@@ -441,9 +502,58 @@ export class RabbitHoleSession {
       // serving this page and the EventSource connecting gets replayed.
       last_event_id: this.lastOutboundEventId,
       agent_attached: this.agentAttached,
+      context_usage: this.projectContextUsage(),
       view_state: this.viewState,
       nodes: holeStateToHydrationNodes(this.state),
     };
+  }
+
+  setContextUsage(usage) {
+    const next = sanitizeContextUsage(usage);
+    if (sameContextUsage(next, this.contextUsage)) return;
+    this.contextUsage = next;
+    this.scheduleContextBroadcast();
+  }
+
+  setContextBusy(busy) {
+    busy = !!busy;
+    if (busy === this.contextBusy) return;
+    this.contextBusy = busy;
+    this.scheduleContextBroadcast();
+  }
+
+  projectContextUsage() {
+    return {
+      ...this.contextUsage,
+      quality: this.contextBusy && this.contextUsage.quality === "reported" ? "stale" : this.contextUsage.quality,
+    };
+  }
+
+  scheduleContextBroadcast() {
+    if (this.closed) return;
+    const next = this.projectContextUsage();
+    if (sameContextUsage(next, this.lastContextBroadcast)) return;
+    const elapsed = Date.now() - this.lastContextBroadcastAt;
+    if (!this.lastContextBroadcastAt || elapsed >= CONTEXT_BROADCAST_THROTTLE_MS) {
+      this.flushContextBroadcast();
+      return;
+    }
+    if (!this.contextBroadcastTimer) {
+      this.contextBroadcastTimer = setTimeout(() => {
+        this.contextBroadcastTimer = null;
+        this.flushContextBroadcast();
+      }, CONTEXT_BROADCAST_THROTTLE_MS - elapsed);
+      this.contextBroadcastTimer.unref?.();
+    }
+  }
+
+  flushContextBroadcast() {
+    if (this.closed) return;
+    const next = this.projectContextUsage();
+    if (sameContextUsage(next, this.lastContextBroadcast)) return;
+    this.lastContextBroadcast = next;
+    this.lastContextBroadcastAt = Date.now();
+    this.broadcast(next);
   }
 
   toHole() {
@@ -478,6 +588,7 @@ export class RabbitHoleSession {
   async answerBranch({ requestId, title, content, partial, baseUrl, assets, signal }) {
     this.touch();
     if (this.closed) throw new Error("Rabbithole session is already closed");
+    this.setContextBusy(false);
     this.clearAnswerWatchdog();
     this.markAgentAttached();
     this.inFlightBranchRequests.delete(requestId);
@@ -528,6 +639,7 @@ export class RabbitHoleSession {
         base_url: updated.base_url,
         base_url_source: updated.base_url_source,
       });
+      this.setContextBusy(true);
       return { ok: true, node_id: updated.id, request_id: requestId, partial: true };
     }
 
@@ -570,7 +682,7 @@ export class RabbitHoleSession {
     const pdf = request.pdf;
     this.dispatchHoleEvent({ type: "node_progress", node_id: node.id, markdown: request.markdown });
     this.broadcast({ type: "pdf_convert_progress", node_id: node.id, markdown: request.markdown, page_done: pdf.pages.at(-1)?.n || 0, page_total: pdf.pages.length });
-    if (partial) { this.startAnswerWatchdog(); this.scheduleSave(); return { ok: true, node_id: node.id, request_id: requestId, partial: true }; }
+    if (partial) { this.startAnswerWatchdog(); this.scheduleSave(); this.setContextBusy(true); return { ok: true, node_id: node.id, request_id: requestId, partial: true }; }
     const materialized = await this.materializeNodeFigures(request.markdown, pdf);
     this.dispatchHoleEvent({ ...buildNodeAnsweredEvent(this.nodes.get(node.id)), markdown: materialized });
     this.patchNodePdf(node.id, { ...pdf, converting: false, converted: true, convert_request: false });

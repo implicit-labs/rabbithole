@@ -65,6 +65,33 @@ export function initTransportStatus(){
   transportEpoch += 1;
   transportDisposed = false;
   transportDisposePromise = null;
+  renderContextUsage(hydration && hydration.context_usage);
+}
+
+function renderContextUsage(usage){
+  var el = document.getElementById("context-usage");
+  var sep = document.getElementById("context-usage-sep");
+  if (!el || !sep) return;
+  var available = usage && (usage.quality === "reported" || usage.quality === "stale") &&
+    typeof usage.used_tokens === "number" && isFinite(usage.used_tokens) && usage.used_tokens >= 0 &&
+    typeof usage.window_tokens === "number" && isFinite(usage.window_tokens) && usage.window_tokens > 0 &&
+    usage.used_tokens <= usage.window_tokens && typeof usage.percent === "number" && isFinite(usage.percent);
+  if (!available){
+    el.hidden = true; sep.hidden = true; el.textContent = ""; el.removeAttribute("title"); el.removeAttribute("aria-label");
+    el.classList.remove("stale");
+    return;
+  }
+  var stale = usage.quality === "stale";
+  var percent = Math.max(0, Math.min(100, Math.round(usage.percent)));
+  var agent = usage.agent === "claude" ? "Claude Code" : (usage.agent === "codex" ? "Codex CLI" : "Agent");
+  var model = usage.model || "unknown model";
+  var detail = agent + " · " + model + " · " + usage.used_tokens.toLocaleString() + " / " + usage.window_tokens.toLocaleString() + " tokens";
+  if (stale) detail += " · last measured";
+  el.textContent = percent + "%";
+  el.title = detail;
+  el.setAttribute("aria-label", percent + "% context. " + detail);
+  el.classList.toggle("stale", stale);
+  el.hidden = false; sep.hidden = false;
 }
 
 export function post(payload){
@@ -381,8 +408,11 @@ function handleServer(msg){
       setAgentAttached(!!msg.attached);
       setAgentReason(msg.reason || null);
       refreshStatus();
+    } else if (msg.type === "context_usage"){
+      renderContextUsage(msg);
     } else if (msg.type === "session_closed"){
       setClosedState(true, msg.reason || "session_closed");
+      renderContextUsage(null);
       // Stop EventSource from reconnecting forever to the now-dead endpoint.
       transportEpoch += 1;
       closeConnections();

@@ -1,13 +1,10 @@
 import {
-  CANVAS_BASE,
-  MAX_FS,
-  MIN_FS,
   READER_BASE,
   breadcrumbEl,
   buildDocContent,
+  changeReadingSize,
   childrenOf,
   currentNodeId,
-  fontPx,
   goToNode,
   mode,
   motionSourceFromEvent,
@@ -54,7 +51,6 @@ function defaultReaderHooks(){
     scheduleViewSave: function(){},
     setMode: function(){},
     mountDocImages: null,
-    persistNode: function(){},
     animateScroll: function(){}
   };
 }
@@ -192,8 +188,8 @@ export function initReader(){
     // Hovering a margin note lights its highlight so the pair reads as one.
     readerScope.listen(notes, "mouseover", function(e){ syncNoteHover(e, true); });
     readerScope.listen(notes, "mouseout", function(e){ syncNoteHover(e, false); });
-    readerScope.listen(document.getElementById("r-textdown"), "click", function(){ setReaderFontScale(-0.1); });
-    readerScope.listen(document.getElementById("r-textup"), "click", function(){ setReaderFontScale(0.1); });
+    readerScope.listen(document.getElementById("r-textdown"), "click", function(){ changeReadingSize(-0.1); });
+    readerScope.listen(document.getElementById("r-textup"), "click", function(){ changeReadingSize(0.1); });
     // Back to canvas lives in the taskbar's session cluster. It collapses the
     // reader back into its card and hands focus to the card's expand button,
     // so keyboard travel round-trips cleanly.
@@ -439,15 +435,6 @@ function pendingStatusHtml(k){
     };
     return copy[sessionPhase()];
   }
-function setReaderFontScale(delta){
-    var node = nodes[currentNodeId];
-    node.font_scale = Math.min(MAX_FS, Math.max(MIN_FS, (node.font_scale || 1) + delta));
-    var dcs = readerMain.querySelectorAll(".doc-content");
-    for (var i = 0; i < dcs.length; i++) dcs[i].style.fontSize = fontPx(node, READER_BASE) + "px";
-    if (node.bodyEl){ var cdc = node.bodyEl.querySelector(".doc-content"); if (cdc) cdc.style.fontSize = fontPx(node, CANVAS_BASE) + "px"; }
-    readerLifecycle.hooks.persistNode(node);
-  }
-
   // j/k focus ring over the current document's anchored branches.
   var kbdMarkIdx = -1;
 function allMarks(){ return readerMain.querySelectorAll("[data-child].rh-pdf-mark, mark[data-child]"); }

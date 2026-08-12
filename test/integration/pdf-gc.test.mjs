@@ -31,13 +31,7 @@ function storeFixture() {
   const host = new DirectRabbitholeHost({ store, hole: hole([pdfNode(), sibling]) });
   await host.handleDeleteNode({ node_id: "pdf" }); assert.equal(store.assets.has(sourceAsset), true);
 }
-{
-  const store = storeFixture(); let undo;
-  const host = new DirectRabbitholeHost({ store, hole: hole([pdfNode()]), onToast: (toast) => { undo = toast.onAction; } });
-  await host.handleDeleteNode({ node_id: "pdf" }); assert.equal(store.assets.has(sourceAsset), false);
-  await undo(); assert.equal(store.assets.has(sourceAsset), true);
-}
-console.log("ok PDF v2 GC: source deletion candidates, shared references, and undo use one reference extractor");
+console.log("ok PDF v2 GC: source deletion candidates and shared references use one reference extractor");
 
 {
   const store = storeFixture(); const host = new DirectRabbitholeHost({ store, hole: hole([]) });

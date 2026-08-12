@@ -1,5 +1,4 @@
 import {
-  confirmEl,
   canvasBuilt,
   childrenOf,
   currentNodeId,
@@ -9,6 +8,7 @@ import {
   mode,
   nodes,
   postBrowserEvent,
+  readerMain,
   rootId,
   setCurrentNodeId,
   setSurfaceOrigin,
@@ -17,17 +17,22 @@ import {
 import { lensLabel, lineageNodesFromMap, truncate } from "../core/model.js";
 import {
   clearEdgeHighlight,
+  createNodeEl,
   drawEdges,
+  fillBody,
   renderVisibility
 } from "./canvas-view.js";
 import {
   openNode,
   renderBreadcrumb,
-  renderMarginNotes
+  renderMarginNotes,
+  renderReaderBody
 } from "./reader.js";
 import { openPopover } from "./primitives/popover.js";
+import { wireNotice } from "./primitives/notice.js";
 import { createModuleLifecycle } from "./lifecycle.js";
-import { teardownNode } from "./node-teardown.js";
+import { detachNode, teardownNode } from "./node-teardown.js";
+import { removeMarks } from "./text-marks.js";
 
 function defaultBranchHooks(){
   return {
@@ -37,6 +42,8 @@ function defaultBranchHooks(){
 }
 
 var branchLifecycle = createModuleLifecycle({ defaults: defaultBranchHooks });
+var pendingRemoval = null;
+var undoNotice = null;
 
 export function registerBranchHooks(hooks) {
   branchLifecycle.register(hooks);
@@ -56,12 +63,8 @@ export function initBranchSurfaces(){
   branchScope.listen(document.getElementById("sm-trail"), "click", onCopyTrail);
   branchScope.listen(document.getElementById("sm-export"), "click", onExportSnapshot);
   branchScope.listen(document.getElementById("sm-portable"), "click", onExportPortable);
-  branchScope.listen(document.getElementById("cf-keep"), "click", hideConfirm);
-  branchScope.listen(document.getElementById("cf-remove"), "click", function(){
-    var node = confirmFor && nodes[confirmFor];
-    hideConfirm();
-    if (node) deleteBranch(node);
-  });
+  undoNotice = wireNotice(document.getElementById("branch-undo"), { variant: "toast" });
+  branchScope.listen(document, "keydown", onUndoKeydown);
   return disposeBranchSurfaces;
   } catch (error) {
     disposeBranchSurfaces();
@@ -74,12 +77,13 @@ export function disposeBranchSurfaces(){
 }
 
 function disposeBranchSurfaceResources(resetHooks){
+  if (pendingRemoval) commitPendingBranchRemoval();
+  if (undoNotice) undoNotice.hide();
   closeShare({ restoreFocus: false });
-  hideConfirm({ restoreFocus: false });
   branchLifecycle.dispose(resetHooks);
   shareOpen = false;
   shareAnchor = null;
-  confirmFor = null;
+  undoNotice = null;
 }
 
 
@@ -217,49 +221,96 @@ export function closeShare(settings){
       });
   }
   // ===========================================================================
-  // DELETE — remove a branch (and its subtree) after an inline confirm
+  // DELETE — remove a branch now; keep one exact local undo until the toast expires.
   // ===========================================================================
-  var confirmFor = null, confirmPopover = null;
-export function confirmDelete(node, anchor){
+export function removeBranch(node){
     if (closed){
       flashHint(frozen ? "This is a read-only snapshot." : "Session ended — changes can't be saved anymore.");
       return;
     }
-    var subCount = countSubtree(node.id) - 1;
-    document.getElementById("cf-msg").textContent = subCount > 0
-      ? "Remove this branch and " + subCount + " inside it?"
-      : "Remove this branch?";
-    hideConfirm({ restoreFocus: false });
-    confirmFor = node.id;
-    confirmEl.classList.add("visible");
-    setSurfaceOrigin(confirmEl, anchor.getBoundingClientRect());
-    confirmPopover = openPopover({ trigger: anchor, surface: confirmEl, placement: "bottom-end",
-      initialFocus: document.getElementById("cf-keep"), onClose: hideConfirm });
+    if (!node || node.id === rootId) return;
+    if (pendingRemoval) commitPendingBranchRemoval();
+    var ids = collectSubtree(node.id, []);
+    var previousCurrentId = currentNodeId;
+    pendingRemoval = { rootId: node.id, parentId: node.parent_id, ids: ids, previousCurrentId: previousCurrentId };
+    for (var i = 0; i < ids.length; i++){
+      var staged = nodes[ids[i]];
+      if (staged) staged._pendingDelete = true;
+    }
+    for (var j = 0; j < ids.length; j++){
+      var stagedNode = nodes[ids[j]];
+      if (!stagedNode) continue;
+      clearEdgeHighlight(stagedNode.id);
+      removeMarks(readerMain, stagedNode.id);
+      var parent = nodes[stagedNode.parent_id];
+      if (parent && parent.bodyEl) removeMarks(parent.bodyEl, stagedNode.id);
+      detachNode(stagedNode);
+    }
+    var currentGone = ids.indexOf(currentNodeId) !== -1;
+    if (currentGone) setCurrentNodeId((node.parent_id && nodes[node.parent_id]) ? node.parent_id : rootId);
+    refreshAfterRemoval(node.parent_id, currentGone);
+    undoNotice.show({ message: "Branch removed", actionLabel: "Undo", onAction: undoPendingRemoval,
+      onExpire: commitPendingBranchRemoval, duration: 6000 });
   }
-export function hideConfirm(settings){
-    confirmFor = null; confirmEl.classList.remove("visible");
-    if (confirmPopover){ var popover = confirmPopover; confirmPopover = null; popover.close(settings); }
-  }
-  function countSubtree(id){
-    var c = 1;
-    childrenOf(id).forEach(function(k){ c += countSubtree(k.id); });
-    return c;
+  function onUndoKeydown(e){
+    if (!pendingRemoval || !undoNotice?.isVisible() || !(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "z") return;
+    e.preventDefault();
+    undoPendingRemoval();
+    undoNotice.hide();
   }
   function collectSubtree(id, out){
     out.push(id);
     childrenOf(id).forEach(function(k){ collectSubtree(k.id, out); });
     return out;
   }
-  function deleteBranch(node){
-    var title = node.title || "Untitled";
-    var ids = collectSubtree(node.id, []);
-    postBrowserEvent({ type: "delete_node", node_id: node.id });
-    removeNodesLocal(ids, node.parent_id);
-    flashHint(ids.length > 1
-      ? "Removed “" + truncate(title, 40) + "” and " + (ids.length - 1) + " inside it"
-      : "Removed “" + truncate(title, 40) + "”");
+  function undoPendingRemoval(){
+    var removal = pendingRemoval;
+    if (!removal) return;
+    pendingRemoval = null;
+    for (var i = 0; i < removal.ids.length; i++){
+      var node = nodes[removal.ids[i]];
+      if (node) delete node._pendingDelete;
+    }
+    if (nodes[removal.previousCurrentId]) setCurrentNodeId(removal.previousCurrentId);
+    if (canvasBuilt){
+      for (var j = 0; j < removal.ids.length; j++){
+        var restored = nodes[removal.ids[j]];
+        if (restored && !restored.el) createNodeEl(restored, true);
+      }
+    }
+    refreshAfterRemoval(removal.parentId, false);
+    if (mode === "reader" && nodes[removal.previousCurrentId]) openNode(removal.previousCurrentId);
+  }
+export function commitPendingBranchRemoval(){
+    var removal = pendingRemoval;
+    if (!removal) return Promise.resolve({ ok: true });
+    pendingRemoval = null;
+    if (undoNotice) undoNotice.hide();
+    var request = postBrowserEvent({ type: "delete_node", node_id: removal.rootId });
+    removeNodesLocal(removal.ids, removal.parentId);
+    return Promise.resolve(request);
+  }
+  function refreshAfterRemoval(parentId, currentGone){
+    var parent = parentId && nodes[parentId];
+    if (parent && parent.bodyEl){
+      var scrollTop = parent.bodyEl.scrollTop;
+      fillBody(parent);
+      parent.bodyEl.scrollTop = scrollTop;
+    }
+    if (canvasBuilt){ renderVisibility(); drawEdges(); }
+    if (mode === "reader"){
+      if (currentGone) openNode(currentNodeId);
+      else {
+        if (currentNodeId === parentId) renderReaderBody();
+        renderBreadcrumb(); renderMarginNotes();
+      }
+    }
   }
 export function removeNodesLocal(ids, parentId){
+    if (pendingRemoval && ids.indexOf(pendingRemoval.rootId) !== -1){
+      pendingRemoval = null;
+      if (undoNotice) undoNotice.hide();
+    }
     var currentGone = false;
     for (var i = 0; i < ids.length; i++){
       var id = ids[i], n = nodes[id];

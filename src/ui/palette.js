@@ -1,11 +1,14 @@
 import {
+  changeReadingSize,
+  flashHint,
   goToNode,
   mode,
   motionSourceFromEvent,
   nodes,
   palResults,
   palText,
-  paletteEl
+  paletteEl,
+  resetReadingSize
 } from "./core.js";
 import { lensLabel, truncate } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
@@ -18,8 +21,7 @@ import { isCommandEnter } from "./input-intent.js";
 function defaultPaletteHooks(){
   return {
     hideAsk: function(){},
-    closeShare: function(){},
-    hideConfirm: function(){}
+    closeShare: function(){}
   };
 }
 
@@ -78,7 +80,7 @@ export function togglePalette(){ if (palOpen) closePalette(); else openPalette()
 function openPalette(){
     palOpen = true;
     palCanvasCommands = mode === "canvas";
-    paletteLifecycle.hooks.hideAsk(); paletteLifecycle.hooks.closeShare(); paletteLifecycle.hooks.hideConfirm();
+    paletteLifecycle.hooks.hideAsk(); paletteLifecycle.hooks.closeShare();
     paletteEl.classList.add("visible");
     palText.value = "";
     renderPalette("");
@@ -114,6 +116,7 @@ function closePalette(settings){
     var scored = [];
     for (var id in nodes){
       var n = nodes[id];
+      if (n._pendingDelete) continue;
       var score = 0, ok = true;
       var title = "", ask = "", body = "";
       if (tokens.length){
@@ -207,12 +210,16 @@ function closePalette(settings){
     else palText.removeAttribute("aria-activedescendant");
   }
   function paletteCommandItems(tokens){
-    if (!palCanvasCommands) return [];
     var commands = [
+      { type: "command", name: "Increase reading size", run: function(){ showReadingSize(changeReadingSize(0.1)); } },
+      { type: "command", name: "Decrease reading size", run: function(){ showReadingSize(changeReadingSize(-0.1)); } },
+      { type: "command", name: "Reset reading size", run: function(){ showReadingSize(resetReadingSize()); } }
+    ];
+    if (palCanvasCommands) commands.unshift(
       { type: "command", name: "New note", run: createStandaloneNoteAtViewportCenter },
       { type: "command", name: "Zoom to fit", run: function(){ frameAll(true, "keyboard"); } },
       { type: "command", name: "Tidy up layout", kbd: "T", run: function(){ tidy("keyboard"); } }
-    ];
+    );
     var out = [];
     for (var i = 0; i < commands.length; i++){
       var c = commands[i];
@@ -225,6 +232,7 @@ function closePalette(settings){
     }
     return out;
   }
+  function showReadingSize(scale){ flashHint("Reading size " + Math.round(scale * 100) + "%"); }
   function palSnippet(n, tokens){
     var body = getPlain(n);
     var lower = body.toLowerCase();

@@ -43,4 +43,11 @@ for (const pattern of [
   assert.doesNotMatch(removedActivityUi, pattern, `removed activity UI must stay absent: ${pattern}`);
 }
 
+// The world layer must never be permanently promoted: the compositor then
+// bitmap-scales stale text rasters on zoom instead of repainting, so existing
+// cards blur while freshly painted ones stay sharp.
+const worldRule = CANVAS_STYLES.match(/#world\s*\{[^}]*\}/)?.[0] ?? "";
+assert.ok(worldRule, "expected a #world rule in canvas styles");
+assert.doesNotMatch(worldRule, /will-change/, "#world must not carry will-change (stale-raster blur on zoom)");
+
 console.log("ok UI bundle boundaries: frozen client excludes live host modules and removed activity messaging");

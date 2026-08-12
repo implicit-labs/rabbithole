@@ -24,6 +24,7 @@ export function wireNotice(element, { variant } = {}) {
   let remaining = 0;
   let action = null;
   let dismiss = null;
+  let expire = null;
   let run = 0;
   let hovered = false;
   let focused = false;
@@ -51,6 +52,7 @@ export function wireNotice(element, { variant } = {}) {
     remaining = 0;
     action = null;
     dismiss = null;
+    expire = null;
     visibleClass(false);
   }
   function startTimer(token) {
@@ -59,7 +61,11 @@ export function wireNotice(element, { variant } = {}) {
     deadline = Date.now() + remaining;
     timer = setTimeout(function() {
       timer = 0;
-      if (token === run) hide();
+      if (token === run) {
+        const callback = expire;
+        hide();
+        callback?.();
+      }
     }, remaining);
   }
   function pauseTimer() {
@@ -74,13 +80,14 @@ export function wireNotice(element, { variant } = {}) {
   function isVisible() {
     return element.classList.contains(variant === "hint" ? "flash" : "visible");
   }
-  function show({ title = "", message = "", actionLabel = "", onAction = null, onDismiss = null, duration } = {}) {
+  function show({ title = "", message = "", actionLabel = "", onAction = null, onDismiss = null, onExpire = null, duration } = {}) {
     run += 1;
     clearTimer();
     titleEl && (titleEl.textContent = String(title));
     messageEl.textContent = String(message);
     action = typeof onAction === "function" ? onAction : null;
     dismiss = typeof onDismiss === "function" ? onDismiss : null;
+    expire = typeof onExpire === "function" ? onExpire : null;
     if (actionEl) {
       actionEl.textContent = String(actionLabel || "");
       actionEl.hidden = !actionLabel;

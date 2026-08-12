@@ -18,8 +18,8 @@ export const CANVAS_SHELL = `
          reader is the current card maximized. You enter by expanding a card
          and leave through Back to canvas in the session cluster (or Esc). -->
     <span class="tb-group" data-mode="reader">
-      ${buttonMarkup({ id: "r-textdown", title: "Smaller text", label: "A−" })}
-      ${buttonMarkup({ id: "r-textup", title: "Larger text", label: "A+" })}
+      ${buttonMarkup({ id: "r-textdown", title: "Decrease reading size", ariaLabel: "Decrease reading size", label: "A−" })}
+      ${buttonMarkup({ id: "r-textup", title: "Increase reading size", ariaLabel: "Increase reading size", label: "A+" })}
     </span>
     <span class="tb-group" data-mode="canvas">
       <span class="zoom-controls">
@@ -38,6 +38,8 @@ export const CANVAS_SHELL = `
       ${buttonMarkup({ id: "reader-restore", title: "Back to canvas · Esc", ariaLabel: "Back to canvas", label: "Back to canvas", svgIconHtml: iconSvg("contract") })}
     </div>
     <div class="tb-pill">
+    <span id="context-usage" hidden aria-live="polite"></span>
+    <span class="sep" id="context-usage-sep" hidden aria-hidden="true"></span>
     ${iconButtonMarkup({ id: "t-share", title: "Share and export", ariaLabel: "Share and export", ariaHaspopup: "menu", ariaControls: "sharemenu", ariaExpanded: "false", svgIconHtml: iconSvg("share") })}
     ${iconButtonMarkup({ id: "t-theme", title: "Toggle theme", ariaLabel: "Toggle theme", svgIconHtml: iconSvg("theme") })}
     ${iconButtonMarkup({ id: "t-settings", title: "Model settings", ariaLabel: "Model settings", ariaExpanded: "false", svgIconHtml: iconSvg("settings") })}
@@ -92,10 +94,7 @@ export const CANVAS_SHELL = `
   ${buttonMarkup({ bare: true, className: "sm-item", id: "sm-portable", role: "menuitem", tabIndex: -1, label: "Export Rabbithole (.rabbithole)", svgIconHtml: '<span class="sm-ic">⇣</span>' })}
 </div>
 
-<div id="confirm">
-  <div class="cf-msg" id="cf-msg"></div>
-  <div class="cf-row">${buttonMarkup({ bare: true, id: "cf-keep", label: "Keep" })}${buttonMarkup({ bare: true, className: "cf-remove", id: "cf-remove", label: "Remove" })}</div>
-</div>
+<div id="branch-undo"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Undo", hidden: true, dataAttrs: { noticeAction: "" } })}</div>
 
 <div id="banner"><div class="banner-body"><span class="banner-title" id="banner-title" data-notice-title></span><span id="banner-msg" data-notice-message></span></div>${iconButtonMarkup({ bare: true, id: "banner-x", title: "Dismiss", ariaLabel: "Dismiss banner", icon: "×", dataAttrs: { noticeDismiss: "" } })}</div>
 <div id="hint" data-notice-message></div>

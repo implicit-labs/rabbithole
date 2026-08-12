@@ -21,10 +21,10 @@ import {
 import { disposePalette, initPalette, registerPaletteHooks } from "./palette.js";
 import {
   closeShare,
-  confirmDelete,
+  commitPendingBranchRemoval,
   disposeBranchSurfaces,
-  hideConfirm,
   initBranchSurfaces,
+  removeBranch,
   registerBranchHooks
 } from "./branch-surfaces.js";
 import { disposeChrome, initChrome } from "./chrome-init.js";
@@ -76,22 +76,20 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       scheduleViewSave: host.scheduleViewSave || noop,
       setMode: setMode,
       mountDocImages: mountImages,
-      persistNode: host.persistNode || noop,
       animateScroll: animateScroll
     });
     registerCanvasHooks({
       hideAsk: hideAsk,
       sendFollowup: sendFollowup,
       sendNote: sendNote,
-      confirmDelete: confirmDelete,
+      removeBranch: removeBranch,
       persistNode: host.persistNode || noop,
       persistNodesBulk: host.persistNodesBulk || noop,
       scheduleViewSave: host.scheduleViewSave || noop
     });
     registerPaletteHooks({
       hideAsk: hideAsk,
-      closeShare: closeShare,
-      hideConfirm: hideConfirm
+      closeShare: closeShare
     });
     registerBranchHooks({
       exportSnapshot: capabilities.exportSnapshot || null,
@@ -125,6 +123,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       disposed = true;
       if (activeRuntime === runtime) activeRuntime = null;
       var errors = [];
+      try { await commitPendingBranchRemoval(); } catch (error) { errors.push(error); }
       if (typeof host.dispose === "function") {
         try { await host.dispose(); } catch (error) { errors.push(error); }
       }

@@ -15,14 +15,13 @@ const SAVE_DEBOUNCE_MS = 400;
 const WEB_ROOT_QUESTION = "web_root_question";
 
 export class DirectRabbitholeHost {
-  constructor({ store, hole, brain = null, brainRequiredError = null, registerAssetUrl = null, onToast = null, onDone = null, onRestore = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
+  constructor({ store, hole, brain = null, brainRequiredError = null, registerAssetUrl = null, onToast = null, onDone = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
     this.store = store;
     this.brain = brain;
     this.brainRequiredError = brainRequiredError;
     this.onEvent = null;
     this.onToast = onToast;
     this.onDone = onDone;
-    this.onRestore = onRestore;
     this.onAuthRequired = onAuthRequired;
     this.onProviderFailure = onProviderFailure;
     this.onRootAnswered = onRootAnswered;
@@ -275,8 +274,6 @@ export class DirectRabbitholeHost {
     const reduced = reduceHoleEvent(this.state, { type: "delete_node", node_id: targetId }, { mutate: true });
     const deletedNodes = (reduced.effects?.deletedNodes || []).map((node) => ({ ...node }));
     const deletedIds = deletedNodes.map((node) => node.id);
-    const parentId = deletedNodes[0]?.parent_id || null;
-    const deletedAssets = await this.snapshotAssetsForDeletedNodes(deletedNodes);
     for (const id of deletedIds) {
       const controller = this.abortByNode.get(id);
       if (controller) controller.abort();
@@ -287,47 +284,7 @@ export class DirectRabbitholeHost {
     this.scheduleSave();
     this.emit({ type: "node_deleted", node_ids: deletedIds });
 
-    const title = deletedNodes[0]?.title || "Untitled";
-    this.onToast?.({
-      message: deletedIds.length > 1
-        ? `Removed "${truncate(title, 40)}" and ${deletedIds.length - 1} inside it`
-        : `Removed "${truncate(title, 40)}"`,
-      actionLabel: "Undo",
-      timeoutMs: 10000,
-      onAction: async () => {
-        await this.restoreDeletedNodes(deletedNodes, deletedAssets);
-        this.onRestore?.({ parentId });
-      },
-    });
     return { ok: true, deleted: deletedIds };
-  }
-
-  async restoreDeletedNodes(deletedNodes, deletedAssets = []) {
-    const nodes = new Map(this.state.nodes);
-    for (const node of deletedNodes) nodes.set(node.id, { ...node });
-    this.state = { ...this.state, nodes };
-    for (const asset of deletedAssets) {
-      if (asset.blob) {
-        await this.store.putAsset(this.holeId, asset.name, asset.blob);
-        this.registerAssetUrl?.(asset.name, asset.blob);
-      }
-    }
-    await this.flushSave();
-  }
-
-  async snapshotAssetsForDeletedNodes(deletedNodes) {
-    const refs = new Set();
-    for (const node of deletedNodes) {
-      for (const name of extractNodeAssetRefs(node)) refs.add(name);
-    }
-    const out = [];
-    for (const name of refs) {
-      try {
-        const blob = await this.store.getAsset(this.holeId, name);
-        if (blob) out.push({ name, blob });
-      } catch {}
-    }
-    return out;
   }
 
   async gcAssetsForDeletedNodes(deletedNodes) {

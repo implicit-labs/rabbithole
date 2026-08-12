@@ -184,9 +184,9 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
   .loading-bunny, .stream-caret { animation: none; }
   .math-pending::after, .viz-pending::after { animation: none; }
   .rh-lightbox, .rh-lightbox-viewport { animation: none; }
-  .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.danger, .node-font-btn,
-  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, #sharemenu, #confirm { transition: none !important; }
-  #ask, #sharemenu, #confirm, .node.node-enter { transform: none; }
+  .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.danger,
+  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, #sharemenu, #branch-undo { transition: none !important; }
+  #ask, #sharemenu, #branch-undo, .node.node-enter { transform: none; }
   .node.node-enter { opacity: 1; }
 }
 
@@ -322,7 +322,10 @@ body.mode-flight #viewport { display: block; }
 #viewport.panning { cursor: grabbing; }
 #viewport.pinching { cursor: zoom-in; }
 #canvas-gesture-plane { position: absolute; inset: 0; touch-action: none; }
-#world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+/* No will-change here: a permanently promoted world layer lets the compositor
+   bitmap-scale stale text rasters on zoom instead of repainting at the new
+   scale (old cards blur while a fresh card paints sharp). */
+#world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 #edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
 #edges path { stroke: var(--edge); stroke-width: 1.5; fill: none; transition: stroke 0.22s ease; }
 /* Hover wakes an edge gently — a lean toward the accent, not a costume change. */
@@ -353,14 +356,14 @@ body.mode-flight #viewport { display: block; }
 .node-act-divider { width: 1px; height: 14px; margin: 0 3px; background: var(--border); flex-shrink: 0; opacity: 0; transition: opacity 150ms ease; }
 .tool-icon, .node-btn { appearance: none; width: var(--control-h-xs); height: var(--control-h-xs); padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius-control); flex-shrink: 0; background-color: transparent; color: var(--fg-faint); cursor: pointer; pointer-events: auto; font-family: var(--font-ui); font-size: var(--text-ui); font-weight: var(--weight-medium); line-height: 1; transition: var(--transition-color); }
 .tool-icon svg, .node-btn svg { display: block; width: 16px; height: 16px; flex-shrink: 0; }
-.node-btn.danger, .node-font-btn { opacity: 0; transition: opacity 150ms ease, background-color 120ms ease, color 120ms ease; }
-.node${""}:hover .node-btn.danger, .node${""}:hover .node-font-btn, .node${""}:hover .node-act-divider, .node-acts:focus-within .node-btn.danger, .node-acts:focus-within .node-font-btn, .node-acts:focus-within .node-act-divider { opacity: 1; }
+.node-btn.danger { opacity: 0; transition: opacity 150ms ease, background-color 120ms ease, color 120ms ease; }
+.node${""}:hover .node-btn.danger, .node${""}:hover .node-act-divider, .node-acts:focus-within .node-btn.danger, .node-acts:focus-within .node-act-divider { opacity: 1; }
 .tool-icon:hover, .node-btn:hover { color: var(--fg-bold); background-color: color-mix(in srgb, currentColor 8%, transparent); }
 .tool-icon:active, .node-btn:active { background-color: color-mix(in srgb, currentColor 13%, transparent); }
 .tool-icon:focus, .node-btn:focus { outline: none; }
 .tool-icon:focus-visible, .node-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .node-btn.danger:hover { color: var(--warn); background-color: color-mix(in srgb, var(--warn) 12%, transparent); }
-@media (hover: none) { .node-btn.danger, .node-font-btn, .node-act-divider { opacity: 1; } }
+@media (hover: none) { .node-btn.danger, .node-act-divider { opacity: 1; } }
 .node-body { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
 .note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
@@ -438,6 +441,9 @@ body.mode-flight #viewport { display: block; }
 #tb-done-pill:hover { border-color: var(--border-focus); }
 #tb-done-pill .tool-btn:hover { background: none; }
 .tb-pill .sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+#context-usage { display: inline-flex; min-width: 28px; align-items: center; justify-content: center; color: var(--fg-dim); font-size: var(--text-ui); font-weight: var(--weight-medium); line-height: 1; font-variant-numeric: tabular-nums; cursor: default; transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
+#context-usage.stale { color: var(--fg-faint); opacity: 0.7; }
+#context-usage[hidden], #context-usage-sep[hidden], body.frozen #context-usage, body.frozen #context-usage-sep { display: none !important; }
 .tb-group { display: inline-flex; align-items: center; gap: var(--space-3); }
 body.mode-canvas .tb-group[data-mode="reader"] { display: none; }
 body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
@@ -467,6 +473,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   #tb-session { position: sticky; right: 0; margin-left: auto; align-items: center; gap: 2px; background: var(--bar-bg); padding-left: 4px; }
   .tb-pill .tool-icon, .zoom-controls .tool-icon { width: 44px; height: 44px; }
   .tb-pill .tool-btn { min-width: 44px; min-height: 44px; flex: 0 0 auto; }
+  #context-usage { min-width: 38px; min-height: 44px; }
   #zoom-label { height: 44px; min-width: 52px; padding-inline: 6px; font-size: 12px; }
   .tb-pill .sep { height: 24px; flex: 0 0 1px; }
 }
@@ -590,19 +597,24 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .sm-item:hover .sm-ic { color: var(--fg-bold); }
 .sm-sep { height: 1px; background: var(--border); margin: 5px 8px; }
 
-/* ---------- delete confirm popover ---------- */
-#confirm { position: fixed; z-index: var(--layer-popover); visibility: hidden; opacity: 0; pointer-events: none; background: var(--surface-popover-bg); border: var(--surface-popover-border); border-radius: var(--surface-popover-radius);
-  -webkit-backdrop-filter: var(--surface-popover-blur); backdrop-filter: var(--surface-popover-blur);
-  padding: var(--space-5) var(--space-6); box-shadow: var(--surface-popover-shadow); font-family: var(--font-ui); font-size: var(--text-ui); color: var(--fg);
-  transform: scale(0.97) translateY(-4px); transform-origin: top center;
-  transition: opacity 125ms cubic-bezier(0.23, 1, 0.32, 1), transform 125ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 125ms; }
-#confirm.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); transition-delay: 0s; }
-#confirm .cf-msg { margin-bottom: 9px; color: var(--fg-bold); font-weight: 500; }
-#confirm .cf-row { display: flex; gap: 6px; justify-content: flex-end; }
-#confirm button { font-family: var(--font-ui); font-size: 11.5px; border-radius: 6px; padding: 4px 11px; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--fg-dim); }
-#confirm button:hover { color: var(--fg-bold); border-color: var(--border-focus); }
-#confirm button.cf-remove { background: var(--warn); border-color: var(--warn); color: var(--accent-contrast); font-weight: 600; }
-#confirm button.cf-remove:hover { filter: brightness(1.08); color: var(--accent-contrast); }
+/* ---------- branch undo toast ---------- */
+/* The hint pill's interactive sibling: same bottom-center station, same glass
+   surface, one quiet accent action. Centering is layout (auto margins) and
+   motion is transform, so reduced-motion can zero the transform safely. */
+#branch-undo { position: fixed; z-index: var(--layer-toast); inset-inline: 0; bottom: 18px; margin-inline: auto; width: fit-content;
+  display: flex; align-items: center; gap: var(--space-7); max-width: min(560px, calc(100vw - 24px));
+  padding: 6px 6px 6px 16px; border: var(--surface-popover-border); border-radius: var(--radius-pill);
+  background: var(--surface-popover-bg); -webkit-backdrop-filter: var(--surface-popover-blur); backdrop-filter: var(--surface-popover-blur);
+  color: var(--fg); box-shadow: var(--shadow-popover); font: var(--text-ui)/var(--leading-ui) var(--font-ui);
+  opacity: 0; pointer-events: none; transform: translateY(6px);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
+#branch-undo.visible { opacity: 1; pointer-events: auto; transform: translateY(0); transition-duration: var(--duration-enter); }
+#branch-undo button { appearance: none; border: 0; background: none; color: var(--accent);
+  font: var(--weight-semibold) var(--text-ui)/1 var(--font-ui); padding: 7px 12px; border-radius: var(--radius-pill); cursor: pointer;
+  transition: var(--transition-color), transform var(--duration-fast) var(--ease-out); }
+#branch-undo button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+#branch-undo button:active { transform: scale(0.97); }
+#branch-undo button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
 /* ---------- frozen (exported snapshot) ---------- */
 body.frozen #tb-done-pill, body.frozen .nc-handle, body.frozen .node-btn.danger { display: none !important; }
@@ -623,6 +635,7 @@ body.frozen.session-over .ll-frozen { display: inline; }
 #hint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 40; display: none; font-size: 11.5px; color: var(--fg); background: var(--bar-bg); border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; box-shadow: var(--shadow); pointer-events: none; max-width: 90vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #hint.flash { display: block; }
 body:not(.mode-canvas) #hint.flash { bottom: 84px; }
+body:not(.mode-canvas) #branch-undo { bottom: 84px; }
 
 /* ---------- native PDF pages ---------- */
 .doc-content.rh-pdf { display: flex; min-height: 0; flex-direction: column; background: var(--bg); }

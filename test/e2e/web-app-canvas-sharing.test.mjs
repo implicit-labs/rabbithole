@@ -623,9 +623,12 @@ async function verifyAnchoredNotes() {
     await page.keyboard.up("Control");
     assert.equal(await page.evaluate(() => CSS.highlights?.has("rh-ask") || false), true,
       "the selection wash must stay put while typing or holding modifiers");
+    const viewBeforeNote = await readCanvasView(page);
     await page.press("#ask-text", "Enter");
     const enterNote = page.locator(".node-note", { hasText: "Enter-created marginalia" });
     await enterNote.waitFor();
+    await page.waitForTimeout(350);
+    assert.deepEqual(await readCanvasView(page), viewBeforeNote, "creating an anchored note must preserve the exact canvas viewport");
     assert.equal(await enterNote.locator(".node-title").innerText(), "Note", "note cards should use the reducer's default title");
     assert.equal(await page.locator(".node-note-tag").count(), 0, "note cards should rely on their title and tinted header without a separate tag");
     assert.equal(await enterNote.locator(".loading, .stream-status").count(), 0, "notes should appear complete without pending UI");
@@ -634,9 +637,12 @@ async function verifyAnchoredNotes() {
     await selectText(page, "command anchor");
     await page.waitForSelector("#ask.visible");
     await page.fill("#ask-text", "Why is this a command ask?");
+    const viewBeforeAsk = await readCanvasView(page);
     await page.press("#ask-text", "Control+Enter");
     const commandAsk = page.locator(".node:not(.root)", { hasText: "Why is this a command ask?" });
     await commandAsk.waitFor();
+    await page.waitForTimeout(350);
+    assert.notDeepEqual(await readCanvasView(page), viewBeforeAsk, "creating an ask must retain its existing viewport reveal behavior");
     assert.equal(await commandAsk.locator(".loading").count(), 1, "Cmd/Ctrl+Enter should create a pending ask card");
 
     await selectText(page, "restore anchor");
@@ -885,6 +891,8 @@ async function verifyStandaloneNotesAndEditing() {
     const commands = await page.locator(".pal-item").evaluateAll((rows) => rows.map((row) => row.querySelector(".pal-title")?.textContent));
     assert(commands.includes("New note"), "the canvas palette should expose New note");
     assert(commands.includes("Zoom to fit"), "the canvas palette should expose Zoom to fit");
+    assert(commands.includes("Increase reading size") && commands.includes("Decrease reading size") && commands.includes("Reset reading size"),
+      "the canvas palette should expose the global reading-size commands");
     const zoomCommand = page.locator(".pal-item", { hasText: "Zoom to fit" });
     assert.equal(await zoomCommand.locator("kbd:visible").count(), 0, "Zoom to fit must not advertise the deleted global F shortcut");
     await page.keyboard.press("Escape");
@@ -1419,22 +1427,42 @@ async function verifyCanvasBranching() {
   })));
   assert.deepEqual(cardControls, [
     { type: "button", name: "Remove this branch" },
-    { type: "button", name: "Smaller text" },
-    { type: "button", name: "Larger text" },
     { type: "button", name: "Collapse card" },
     { type: "button", name: "Expand document" },
-  ], "all five card controls should use Button kit semantics and accessible names");
+  ], "card headers should keep only branch, collapse, and document controls");
+  await childCard.locator('.node-btn[aria-label="Collapse card"]').click();
+  assert.equal(await childCard.evaluate((card) => card.classList.contains("collapsed")), true, "the branch fixture should collapse");
+  assert.equal(await childCard.locator(".node-font-btn").count(), 0, "a collapsed card header must not expose font controls");
+  await childCard.locator('.node-btn[aria-label="Expand card"]').click();
   const childPosition = await childCard.evaluate((card) => ({ left: card.style.left, top: card.style.top }));
-  const smallerBox = await childCard.locator('.node-btn[aria-label="Smaller text"]').boundingBox();
-  await page.mouse.move(smallerBox.x + smallerBox.width / 2, smallerBox.y + smallerBox.height / 2);
+  const collapseBox = await childCard.locator('.node-btn[aria-label="Collapse card"]').boundingBox();
+  await page.mouse.move(collapseBox.x + collapseBox.width / 2, collapseBox.y + collapseBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(smallerBox.x + 50, smallerBox.y + 40);
+  await page.mouse.move(collapseBox.x + 50, collapseBox.y + 40);
   await page.mouse.up();
   assert.deepEqual(await childCard.evaluate((card) => ({ left: card.style.left, top: card.style.top })), childPosition, "card controls should remain excluded from card dragging");
+  await page.keyboard.press("Control+K");
+  await page.fill("#pal-text", "Increase reading size");
+  await page.press("#pal-text", "Enter");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 15],
+    "one reading-size command should update every card document together");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), "1.1", "the global reading size should persist locally");
+  assert((await page.evaluate(() => window.__rabbitholeTest.exportPortable())).hole.nodes.every((node) => node.font_scale === 1),
+    "global reading size must not rewrite per-card document data");
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(".node:not(.root)");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 15],
+    "the saved global reading size should apply when the Rabbithole reloads");
+  await page.keyboard.press("Control+K");
+  await page.fill("#pal-text", "Reset reading size");
+  await page.press("#pal-text", "Enter");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [14, 14],
+    "resetting reading size should restore every card document together");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), null, "resetting reading size should clear the saved override");
   await childCard.locator(".node-btn.danger").click();
-  await page.waitForSelector("#confirm.visible");
-  await page.click("#cf-remove");
   await childCard.waitFor({ state: "detached" });
+  await page.waitForSelector("#branch-undo.visible");
+  assert.match(await page.locator("#branch-undo").innerText(), /Branch removed\s+Undo/, "removing a branch should immediately offer one undo action");
 
   const canvasReadingPosition = await page.evaluate(() => {
     const scroller = document.querySelector(".node.root .node-body");
@@ -1770,32 +1798,42 @@ async function verifyCanvasBranching() {
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "clicking a canvas mark must stay in canvas and dive to the card");
 
   await page.waitForSelector("body.mode-canvas");
-  await zoomToFit(page); // leave the mark-dive zoom behind so popover geometry is measured from a neutral view
+  await zoomToFit(page); // leave the mark-dive zoom behind so removal is measured from a neutral view
   await page.waitForTimeout(400);
-  const childDelete = page.locator('.node:not(.root)', { hasText: "Euler identity connects rotation" }).locator('.node-btn.danger');
+  const undoChild = page.locator('.node:not(.root)', { hasText: "Euler identity connects rotation" });
+  const undoChildId = await undoChild.getAttribute("data-id");
+  await undoChild.locator('.node-btn[aria-label="Collapse card"]').click();
+  const branchBeforeUndo = await undoChild.evaluate((card) => ({
+    left: card.style.left, top: card.style.top, width: card.style.width,
+    collapsed: card.classList.contains("collapsed"), text: card.textContent,
+  }));
+  const childDelete = undoChild.locator('.node-btn.danger');
   await childDelete.focus();
-  await page.evaluate(() => { window.__deleteTrigger = document.activeElement; });
   await page.keyboard.press("Enter");
-  await page.waitForSelector("#confirm.visible");
-  await page.waitForFunction(() => document.activeElement?.id === "cf-keep");
-  await page.waitForTimeout(140);
-  assert.equal(await page.evaluate(() => document.activeElement?.id), "cf-keep", "delete confirmation should initially focus Keep");
-  const confirmAnchor = await page.evaluate(() => {
-    const trigger = window.__deleteTrigger.getBoundingClientRect();
-    const confirm = document.getElementById("confirm").getBoundingClientRect();
-    const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--surface-gap"));
-    return { placement: document.getElementById("confirm").dataset.placement, delta: confirm.top - trigger.bottom, gap };
+  await page.waitForSelector(`.node[data-id="${undoChildId}"]`, { state: "detached" });
+  await page.waitForSelector("#branch-undo.visible");
+  assert.equal(await page.locator("#confirm").count(), 0, "the old branch confirmation surface must be removed entirely");
+  const undoToastCraft = await page.locator("#branch-undo").evaluate((toast) => {
+    const style = getComputedStyle(toast);
+    return {
+      role: toast.getAttribute("role"), live: toast.getAttribute("aria-live"), message: toast.querySelector("[data-notice-message]").textContent,
+      action: toast.querySelector("[data-notice-action]").textContent, shadow: style.boxShadow, radius: style.borderRadius,
+    };
   });
-  assert.equal(confirmAnchor.placement, "bottom-end");
-  assert(Math.abs(confirmAnchor.delta - confirmAnchor.gap) < 1, "confirmation should use the token gap from the delete control");
-  await page.keyboard.press("Escape");
-  assert.equal(await page.evaluate(() => document.activeElement?.matches('.node:not(.root) .node-btn.danger')), true, "confirmation Escape should restore delete-control focus");
-  await page.keyboard.press("Enter");
-  await page.waitForSelector("#confirm.visible");
-  await page.mouse.click(3, 300);
-  await page.waitForSelector("#confirm:not(.visible)", { state: "attached" });
-  await page.waitForTimeout(20);
-  assert.equal(await page.evaluate(() => document.activeElement?.matches('.node:not(.root) .node-btn.danger')), true, "outside-pointer dismissal should restore delete-control focus");
+  assert.deepEqual({ role: undoToastCraft.role, live: undoToastCraft.live, message: undoToastCraft.message, action: undoToastCraft.action },
+    { role: "status", live: "polite", message: "Branch removed", action: "Undo" },
+    "the undo toast should be a concise accessible status surface");
+  assert.notEqual(undoToastCraft.shadow, "none", "the undo toast should use the shared elevated-surface craft");
+  assert(Number.parseFloat(undoToastCraft.radius) > 0, "the undo toast should use the shared rounded-surface craft");
+  await page.locator("#branch-undo [data-notice-action]").click();
+  await page.waitForSelector(`.node[data-id="${undoChildId}"]`);
+  assert.deepEqual(await page.locator(`.node[data-id="${undoChildId}"]`).evaluate((card) => ({
+    left: card.style.left, top: card.style.top, width: card.style.width,
+    collapsed: card.classList.contains("collapsed"), text: card.textContent,
+  })), branchBeforeUndo, "Undo should restore the branch position, collapsed state, and content exactly");
+  assert.equal(await page.locator(`path[data-child="${undoChildId}"]`).count(), 1, "Undo should restore the branch edge");
+  assert.equal(await page.locator(`mark[data-child="${undoChildId}"]`).count(), 1, "Undo should restore the branch origin mark");
+  await page.locator(`.node[data-id="${undoChildId}"] .node-btn[aria-label="Expand card"]`).click();
 
   // Export while the child is the current node so the frozen reader opens with
   // a parent crumb (mark clicks no longer change the current node).
@@ -1861,14 +1899,37 @@ async function verifyCanvasBranching() {
   assert(!page.url().includes(MOCK_KEY), "URL must not contain provider key");
 
   await page.waitForSelector("body.mode-canvas");
-  const removeTrigger = page.locator('.node:not(.root) .node-btn.danger').first();
-  await removeTrigger.focus();
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.activeElement?.id === "cf-keep");
-  await page.focus("#cf-remove");
-  await page.keyboard.press("Enter");
-  await page.waitForSelector(".node:not(.root)", { state: "detached" });
-  assert.equal(await page.locator("#confirm.visible").count(), 0, "Enter on Remove should close confirmation and delete the branch subtree");
+  const finalBranch = page.locator('.node:not(.root)', { hasText: "Euler identity connects rotation" });
+  const finalBranchId = await finalBranch.getAttribute("data-id");
+  const subtreeBeforeKeyboardUndo = await readCanvasSubtree(page, finalBranchId);
+  assert.equal(subtreeBeforeKeyboardUndo.length, 2, "the deletion fixture should contain a branch and its descendant");
+  await finalBranch.locator(".node-btn.danger").click();
+  await page.waitForFunction((ids) => ids.every((id) => !document.querySelector(`.node[data-id="${id}"]`)), subtreeBeforeKeyboardUndo.map((node) => node.id));
+  await page.waitForSelector("#branch-undo.visible");
+  await page.keyboard.press("Control+z");
+  await page.waitForFunction((ids) => ids.every((id) => document.querySelector(`.node[data-id="${id}"]`)), subtreeBeforeKeyboardUndo.map((node) => node.id));
+  assert.deepEqual(await readCanvasSubtree(page, finalBranchId), subtreeBeforeKeyboardUndo,
+    "Cmd+Z should restore every node in the subtree with exact content, positions, sizes, and collapsed state");
+  assert.equal(await page.locator("#branch-undo.visible").count(), 0, "Cmd+Z should dismiss the active undo toast");
+  for (const node of subtreeBeforeKeyboardUndo) {
+    assert.equal(await page.locator(`path[data-child="${node.id}"]`).count(), 1, `Undo should restore the edge for ${node.id}`);
+  }
+
+  const descendantId = subtreeBeforeKeyboardUndo.find((node) => node.parent_id === finalBranchId).id;
+  await page.locator(`.node[data-id="${descendantId}"] .node-btn.danger`).click();
+  await page.waitForSelector("#branch-undo.visible");
+  await page.locator(`.node[data-id="${finalBranchId}"] .node-btn.danger`).click();
+  await page.waitForSelector(`.node[data-id="${finalBranchId}"]`, { state: "detached" });
+  await page.locator("#branch-undo [data-notice-action]").click();
+  await page.waitForSelector(`.node[data-id="${finalBranchId}"]`);
+  assert.equal(await page.locator(`.node[data-id="${descendantId}"]`).count(), 0,
+    "removing a second branch should commit the first removal and offer Undo only for the newest one");
+
+  await page.locator(`.node[data-id="${finalBranchId}"] .node-btn.danger`).click();
+  await page.waitForSelector("#branch-undo.visible");
+  await page.waitForSelector("#branch-undo:not(.visible)", { state: "attached", timeout: 8000 });
+  await page.waitForFunction(async () => (await window.__rabbitholeTest.readStoredHole()).nodes.every((node) => node.parent_id === null));
+  assert.equal(await page.locator(".node:not(.root)").count(), 0, "an expired undo toast should leave the subtree deletion final");
 
   const external = requests.filter((url) => !url.startsWith(baseUrl));
   assert(external.length > 0, "provider and key validation should have been called");
@@ -1889,6 +1950,34 @@ async function zoomToFit(page) {
   await page.fill("#pal-text", "Zoom to fit");
   await page.press("#pal-text", "Enter");
   await page.waitForSelector("#palette", { state: "hidden" });
+}
+
+async function readCanvasSubtree(page, rootId) {
+  return page.evaluate(async (targetId) => {
+    const hole = await window.__rabbitholeTest.readStoredHole();
+    const byParent = new Map();
+    for (const node of hole.nodes) {
+      const siblings = byParent.get(node.parent_id) || [];
+      siblings.push(node);
+      byParent.set(node.parent_id, siblings);
+    }
+    const ids = [];
+    const visit = (id) => {
+      ids.push(id);
+      for (const child of byParent.get(id) || []) visit(child.id);
+    };
+    visit(targetId);
+    return ids.map((id) => {
+      const node = hole.nodes.find((candidate) => candidate.id === id);
+      const card = document.querySelector(`.node[data-id="${id}"]`);
+      return {
+        id: node.id, parent_id: node.parent_id, title: node.title, markdown: node.markdown,
+        origin: node.origin, position: node.position, size: node.size, collapsed: node.collapsed,
+        status: node.status, extensions: node.extensions,
+        card: { left: card.style.left, top: card.style.top, width: card.style.width, collapsed: card.classList.contains("collapsed") },
+      };
+    });
+  }, rootId);
 }
 
 async function findCanvasBackground(page) {

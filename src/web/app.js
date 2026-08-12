@@ -861,7 +861,6 @@ async function mountHole(hole, { replace = false } = {}) {
       history.replaceState(null, "", `${location.pathname}${location.hash}`);
       location.reload();
     },
-    onRestore: () => { if (currentHost === host) location.reload(); },
     onAuthRequired: (...args) => { if (currentHost === host) return handleBranchAuthRequired(...args); },
     onProviderFailure: (...args) => { if (currentHost === host) return handleBranchProviderFailure(...args); },
     onRootAnswered: () => { if (currentHost === host) return renderRail(); },

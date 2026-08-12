@@ -1382,19 +1382,10 @@ async function verifyAskKeyUxAndRail() {
   const mutationSnapshot = JSON.parse(extractSnapshotPayload(await page.evaluate(() => window.__rabbitholeTest.exportSnapshot())));
   assert.equal(mutationSnapshot.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.collapsed, true,
     `immediate snapshot export must flush the canonical document mutation (root=${rootIdWhileLoading}, nodes=${JSON.stringify(mutationSnapshot.hole.nodes)})`);
-  await page.click('.node-btn[aria-label="Larger text"]');
+  assert.equal(await page.locator(".node.collapsed .node-font-btn").count(), 0, "collapsed cards must not retain per-card font controls");
   const mutationPortable = await page.evaluate(() => window.__rabbitholeTest.exportPortable());
-  assert.equal(mutationPortable.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.font_scale, 1.1,
-    `immediate portable export must flush the canonical document mutation (root=${rootIdWhileLoading}, nodes=${JSON.stringify(mutationPortable.hole.nodes)})`);
-  /* A second quick click on a card control also emits a dblclick, which the head reads as
-     "open this document" — so the fast way to nudge type size must not eject you to Reader. */
-  await page.dblclick('.node-btn[aria-label="Larger text"]');
-  assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true,
-    "double-clicking a card control must stay on the canvas");
-  const doubleClickedFontScale = (await page.evaluate(() => window.__rabbitholeTest.exportPortable()))
-    .hole.nodes.find((node) => node.id === rootIdWhileLoading)?.font_scale;
-  assert.equal(Number(doubleClickedFontScale.toFixed(2)), 1.3,
-    `both clicks of a double-click must still reach the control (got ${doubleClickedFontScale})`);
+  assert.equal(mutationPortable.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.font_scale, 1,
+    "legacy per-card font scale should remain inert document data");
   const persistedViewBeforeLiveChange = await page.evaluate(async () => (await window.__rabbitholeTest.readStoredHole()).view_state);
   await page.dblclick(`.node[data-id="${rootIdWhileLoading}"] .node-head`);
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
