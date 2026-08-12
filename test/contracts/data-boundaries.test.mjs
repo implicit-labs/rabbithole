@@ -18,10 +18,11 @@ import {
   createPortableProjection,
   validatePortableProjection,
 } from "../../src/core/portable-projection.js";
+import { createSnapshotProjection, snapshotProjectionToFrozenHydration } from "../../src/core/snapshot-projection.js";
 import { parsePersistedHole, toPersistedHole, validatePersistedHole } from "../../src/core/schema.js";
 import { assertRabbitholeStore, RABBITHOLE_STORE_METHODS } from "../../src/core/store.js";
 import { FsStore } from "../../src/node/fs-store.js";
-import { importRabbitholeFile, importSnapshotFile, parseRabbitholeFile } from "../../src/web/portable.js";
+import { buildRabbitholeExport, importRabbitholeFile, importSnapshotFile, parseRabbitholeFile } from "../../src/web/portable.js";
 import { persistedHoleFixture, portableArtifactFixture } from "../fixtures/contracts/artifact-fixture.js";
 import { storeFixture } from "../fixtures/contracts/store-fixture.js";
 import { brainFixture, generationEventFixtures } from "../fixtures/contracts/generation-fixture.js";
@@ -128,6 +129,61 @@ console.log("ok data boundaries: typed content fixtures distinguish extension, h
   assert.deepEqual(normalizedPortable, portableArtifactFixture, "portable fixture survives parse and re-persist");
 }
 console.log("ok data boundaries: typed persisted and portable artifacts are canonical fixed points");
+
+{
+  const anchoredOrigin = {
+    kind: "note",
+    selected_text: "source phrase",
+    anchor: { offset_start: 5, offset_end: 18 },
+    branch_type: "selection",
+  };
+  const noteHole = toPersistedHole(validHole({
+    hole_id: "note-projections",
+    nodes: [
+      validNode(),
+      validNode({
+        id: "anchored-note",
+        parent_id: "root",
+        title: "Anchored note",
+        markdown: "Anchored **content**",
+        origin: anchoredOrigin,
+        read: false,
+        extensions: { personal: { color: "amber" } },
+      }),
+      validNode({
+        id: "standalone-note",
+        parent_id: null,
+        title: "Standalone note",
+        markdown: "Hole-wide content",
+        origin: { kind: "note" },
+        read: false,
+      }),
+    ],
+  }), { updatedAt: stamp });
+  const reparsed = parsePersistedHole(noteHole);
+  assert.equal(reparsed.schema_version, 2, "notes do not bump the persisted schema version");
+  assert.deepEqual(reparsed.nodes.find((node) => node.id === "anchored-note")?.origin, anchoredOrigin, "note kind, selected text, and anchor survive persisted round-trip");
+  assert.equal(reparsed.nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "a non-root standalone note is valid persisted state");
+
+  const exportStore = await newStore();
+  await exportStore.saveHole(noteHole);
+  const exported = await buildRabbitholeExport(exportStore, noteHole.hole_id);
+  const importStore = await newStore();
+  const imported = await importRabbitholeFile(importStore, JSON.stringify(exported));
+  const importedHole = await importStore.loadHole(imported.hole_id);
+  assert.deepEqual(importedHole.nodes.find((node) => node.id === "anchored-note")?.origin, anchoredOrigin, "portable export/import preserves anchored note origin");
+  assert.equal(importedHole.nodes.find((node) => node.id === "anchored-note")?.markdown, "Anchored **content**", "portable export/import preserves note markdown");
+  assert.equal(importedHole.nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "portable export/import preserves standalone notes");
+
+  const snapshotProjection = createSnapshotProjection(noteHole, noteHole.view_state, {});
+  const snapshotNote = snapshotProjection.hole.nodes.find((node) => node.id === "anchored-note");
+  assert.deepEqual(snapshotNote.origin, anchoredOrigin, "snapshot projection preserves anchored note origin");
+  assert.equal(snapshotNote.markdown, "Anchored **content**", "snapshot projection preserves note markdown");
+  assert.deepEqual(snapshotNote.extensions, {}, "snapshot projection may strip personal extensions without stripping note content");
+  const frozen = snapshotProjectionToFrozenHydration(snapshotProjection);
+  assert.equal(frozen.nodes.find((node) => node.id === "standalone-note")?.markdown, "Hole-wide content", "frozen hydration retains standalone note content");
+}
+console.log("ok data boundaries notes: persisted, portable export/import, and snapshot projections preserve note content and anchors");
 
 assert.throws(
   () => validatePersistedHole(validHole({ nodes: [validNode({ extensions: [] })] })),

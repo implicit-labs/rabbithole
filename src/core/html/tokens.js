@@ -72,6 +72,7 @@ export const DESIGN_TOKENS = `:root {
   --node-bg: #201f1d; --node-head: #262523; --bar-bg: #1e1d1b; --code-bg: #151412;
   --accent: #8faaf0; --accent-contrast: #12141c; --edge: #3d3b37;
   --hl: rgba(143, 170, 240, .16); --hl-strong: rgba(143, 170, 240, .30);
+  --note-ink: #d4a55c; --note-hl: rgba(212, 165, 92, .18); --note-hl-strong: rgba(212, 165, 92, .32);
   --warn: #d9a866; --success: #5fbd8d; --sk-base: rgba(255, 255, 255, .06);
   --scrim: rgba(26, 25, 24, .62);
   --shadow: var(--shadow-card);
@@ -86,6 +87,7 @@ html[data-theme="light"] {
   --node-bg: #fdfcfa; --node-head: #f7f5f0; --bar-bg: #faf9f5; --code-bg: #f1eee7;
   --accent: #3b5bcc; --accent-contrast: #fff; --edge: #cdc9be;
   --hl: rgba(59, 91, 204, .10); --hl-strong: rgba(59, 91, 204, .22);
+  --note-ink: #9a6518; --note-hl: rgba(154, 101, 24, .12); --note-hl-strong: rgba(154, 101, 24, .24);
   --warn: #a3690e; --success: #268c60; --sk-base: rgba(59, 55, 45, .08);
   --scrim: rgba(245, 243, 238, .62);
   --shadow-card: 0 4px 18px rgba(28, 25, 18, .08); --shadow-modal: 0 20px 70px rgba(0, 0, 0, .24);
@@ -97,6 +99,7 @@ html[data-theme="dark"] {
   --node-bg: #201f1d; --node-head: #262523; --bar-bg: #1e1d1b; --code-bg: #151412;
   --accent: #8faaf0; --accent-contrast: #12141c; --edge: #3d3b37;
   --hl: rgba(143, 170, 240, .16); --hl-strong: rgba(143, 170, 240, .30);
+  --note-ink: #d4a55c; --note-hl: rgba(212, 165, 92, .18); --note-hl-strong: rgba(212, 165, 92, .32);
   --warn: #d9a866; --success: #5fbd8d; --sk-base: rgba(255, 255, 255, .06);
   --scrim: rgba(26, 25, 24, .62);
   --shadow-card: 0 6px 24px rgba(0, 0, 0, .45); --shadow-modal: 0 20px 70px rgba(0, 0, 0, .48);

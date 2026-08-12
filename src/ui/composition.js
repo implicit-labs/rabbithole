@@ -14,8 +14,8 @@ import {
   disposeAskFollowups,
   hideAsk,
   initAskFollowups,
-  registerAskHooks,
   sendFollowup,
+  sendNote,
   updateComposerState
 } from "./ask-followups.js";
 import { disposePalette, initPalette, registerPaletteHooks } from "./palette.js";
@@ -75,7 +75,6 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       updateComposerState: updateComposerState,
       scheduleViewSave: host.scheduleViewSave || noop,
       setMode: setMode,
-      post: post,
       mountDocImages: mountImages,
       persistNode: host.persistNode || noop,
       animateScroll: animateScroll
@@ -83,19 +82,18 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
     registerCanvasHooks({
       hideAsk: hideAsk,
       sendFollowup: sendFollowup,
+      sendNote: sendNote,
       confirmDelete: confirmDelete,
       persistNode: host.persistNode || noop,
       persistNodesBulk: host.persistNodesBulk || noop,
       scheduleViewSave: host.scheduleViewSave || noop
     });
-    registerAskHooks({ post: post });
     registerPaletteHooks({
       hideAsk: hideAsk,
       closeShare: closeShare,
       hideConfirm: hideConfirm
     });
     registerBranchHooks({
-      post: post,
       exportSnapshot: capabilities.exportSnapshot || null,
       exportPortable: capabilities.exportPortable || null
     });

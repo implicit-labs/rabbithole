@@ -41,7 +41,7 @@ async function verifyBranchContentSizing() {
   await page.waitForSelector("#composer-text:visible");
 
   await page.fill("#composer-text", "Give me a brief answer");
-  await page.click("#composer-send");
+  await page.click('#composer-actions [data-commit="ask"]');
   const shortCard = page.locator(".node:not(.root)", { hasText: "Brief answer" });
   await shortCard.waitFor({ state: "attached" });
   await page.evaluate(() => document.getElementById("reader-restore").click());
@@ -56,7 +56,7 @@ async function verifyBranchContentSizing() {
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("#composer-text:visible");
   await page.fill("#composer-text", "Give me a long answer");
-  await page.click("#composer-send");
+  await page.click('#composer-actions [data-commit="ask"]');
   const longCard = page.locator(".node:not(.root)", { hasText: "Long answer" });
   await longCard.waitFor({ state: "attached" });
   await page.evaluate(() => document.getElementById("reader-restore").click());

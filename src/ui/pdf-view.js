@@ -1,4 +1,5 @@
 import { normalizePdfExtension } from "../core/pdf-shared.js";
+import { isNoteNode } from "../core/model.js";
 import { iconSvg } from "../core/html/icons.js";
 import { childrenOf, postBrowserEvent } from "./core.js";
 import { showAskFromSelection } from "./ask-followups.js";
@@ -352,7 +353,7 @@ export function mountPdfView(container, node, options = {}) {
   function refreshAllMarks() {
     for (const state of pageStates) state.marks.replaceChildren();
     for (const child of childrenOf(node.id)) {
-      if (child.origin?.anchor?.pdf) mountPdfRectMark(container, child.origin.anchor, child.id, `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}`);
+      if (child.origin?.anchor?.pdf) mountPdfRectMark(container, child.origin.anchor, child.id, `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}${isNoteNode(child) ? " mark-note" : ""}`);
     }
   }
 
@@ -751,7 +752,7 @@ function createToolbar(pdf, node, { reader = false } = {}) {
   center.append(zoomControls, message);
 
   const documentActions = document.createElement("div"); documentActions.className = "rh-pdf-toolbar-actions rh-pdf-document-actions";
-  if (!pdf.converted && !childrenOf(node.id).length) {
+  if (!pdf.converted && !childrenOf(node.id).some((child) => !isNoteNode(child))) {
     const convert = button("Create text version", "Turn every page into clean, searchable text while preserving figures");
     convert.className += " rh-pdf-convert";
     convert.innerHTML = `${iconSvg("file-text")}<span>${reader ? "Text version" : "Create text version"}</span>`;

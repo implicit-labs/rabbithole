@@ -9,7 +9,7 @@ import {
 } from "./core.js";
 import { lensLabel, truncate } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
-import { frameAll, tidy } from "./canvas-view.js";
+import { createStandaloneNoteAtViewportCenter, frameAll, tidy } from "./canvas-view.js";
 import { openDialog } from "./primitives/dialog.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { ensureNodeHtml } from "./renderer.js";
@@ -166,8 +166,8 @@ function closePalette(settings){
       row._snippet.hidden = item.type === "command";
       if (item.type === "command"){
         row._title.textContent = item.name;
-        row._kbd.textContent = item.kbd;
-        row._kbd.hidden = false;
+        row._kbd.textContent = item.kbd || "";
+        row._kbd.hidden = !item.kbd;
         fragment.appendChild(row);
         return;
       }
@@ -209,7 +209,8 @@ function closePalette(settings){
   function paletteCommandItems(tokens){
     if (!palCanvasCommands) return [];
     var commands = [
-      { type: "command", name: "Frame everything", kbd: "F", run: function(){ frameAll(true, "keyboard"); } },
+      { type: "command", name: "New note", run: createStandaloneNoteAtViewportCenter },
+      { type: "command", name: "Zoom to fit", run: function(){ frameAll(true, "keyboard"); } },
       { type: "command", name: "Tidy up layout", kbd: "T", run: function(){ tidy("keyboard"); } }
     ];
     var out = [];
@@ -269,8 +270,8 @@ function closePalette(settings){
     var item = palItems[palSel];
     if (!item) return;
     if (item.type === "command"){
-      item.run();
       closePalette();
+      item.run();
       return;
     }
     var node = nodes[item.id];

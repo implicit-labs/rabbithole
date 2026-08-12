@@ -177,7 +177,7 @@ async function selectAndAsk(page, phrase, question) {
   assert.equal(selected, phrase, `selection mismatch: ${JSON.stringify({ selected, phrase })}`);
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", question);
-  await page.press("#ask-text", "Enter");
+  await page.press("#ask-text", "Control+Enter");
 }
 
 async function streamAnswer(client, request, title) {

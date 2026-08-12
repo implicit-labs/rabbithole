@@ -1,5 +1,5 @@
 const MAX_BODY_BYTES = 4 * 1024 * 1024; // 4 MB — answers can be large
-export const CLOSE_TIMEOUT_MS = 5000;
+const CLOSE_TIMEOUT_MS = 5000;
 
 export function buildJsonError(message, status = 400) {
   const err = new Error(message);

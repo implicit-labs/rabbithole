@@ -10,4 +10,7 @@ export function isSubmitEnter(event) {
   return isCommandEnter(event) && !event.shiftKey;
 }
 
-export const ENTER_SEND_HINT = "Send (Enter) · New line (Shift+Enter)";
+export function followupCommitFromEnter(event) {
+  if (!isSubmitEnter(event) || event.altKey) return null;
+  return event.metaKey || event.ctrlKey ? "ask" : "note";
+}

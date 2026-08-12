@@ -15,13 +15,17 @@ import {
   edgesSvg,
   fontPx,
   flashHint,
+  frozen,
   isVisible,
   mode,
   motionSourceFromEvent,
+  nextOrder,
   nodes,
   playLandingCue,
+  postBrowserEvent,
   readerMain,
   registerCoreHooks,
+  registerNode,
   rootId,
   setCanvasBuilt,
   setCanvasFramed,
@@ -32,9 +36,11 @@ import {
   view,
   viewport,
   world,
+  uuid,
   zoomLabel
 } from "./core.js";
 import {
+  DEFAULT_STANDALONE_NOTE,
   TREE_PARENT_GAP,
   TREE_STACK_GAP,
   boundsOverlap,
@@ -46,20 +52,24 @@ import {
 import {
   BRANCH_FOLLOWUP,
   BRANCH_SELECTION,
+  LENSES,
   branchTypeOfNode,
+  isNoteNode,
   lensLabel
 } from "../core/model.js";
 import { openNode } from "./reader.js";
 import { flyReaderToRect } from "./mode-transition.js";
 import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { easeInOutMotion, easeOutMotion } from "./easing.js";
-import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
+import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
 import { buildOriginCrop } from "./origin-provenance.js";
 import { BUNNY_MARK_SVG, iconSvg } from "../core/html/icons.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
-import { applyComposerState } from "./composer-state.js";
-import { ENTER_SEND_HINT, isSubmitEnter } from "./input-intent.js";
+import { applyComposerState, wireComposerActions } from "./composer-state.js";
+import { isCommandEnter } from "./input-intent.js";
+import { refreshNodeHtml } from "./renderer.js";
+import { teardownNode } from "./node-teardown.js";
 
 function isSelectionBranch(node) {
   return branchTypeOfNode(node) === BRANCH_SELECTION;
@@ -73,6 +83,7 @@ function defaultCanvasHooks(){
   return {
     hideAsk: function(){},
     sendFollowup: function(){ return null; },
+    sendNote: function(){ return null; },
     confirmDelete: function(){},
     persistNode: function(){},
     persistNodesBulk: function(){},
@@ -84,6 +95,7 @@ var canvasLifecycle = createModuleLifecycle({ defaults: defaultCanvasHooks });
 var filmCameraHandle = null;
 var cardResizeObserver = null;
 var activePointerGestures = new Set();
+var suppressClickUntil = 0;
 
 export function registerCanvasHooks(hooks) {
   canvasLifecycle.register(hooks);
@@ -102,7 +114,6 @@ export function initCanvasView(){
   initViewportPan();
   canvasScope.listen(viewport, "wheel", onViewportWheel, { passive: false });
   canvasScope.listen(viewport, "dblclick", onViewportDblClick);
-  canvasScope.listen(document.getElementById("t-frame"), "click", function(e){ frameAll(true, motionSourceFromEvent(e)); });
   canvasScope.listen(document.getElementById("t-tidy"), "click", function(e){ tidy(motionSourceFromEvent(e)); });
   canvasScope.listen(document.getElementById("t-zin"), "click", function(){ zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, 1.15); });
   canvasScope.listen(document.getElementById("t-zout"), "click", function(){ zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, 0.87); });
@@ -121,6 +132,7 @@ function cleanupCanvasView(resetHooks){
   cardResizeObserver = null;
   activePointerGestures.forEach(function(cancel){ cancel(); });
   activePointerGestures.clear();
+  suppressClickUntil = 0;
   cancelViewAnimation();
   if (edgeRaf){ cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
   if (filmCameraHandle && window.__rhFilmCamera === filmCameraHandle) {
@@ -201,7 +213,7 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
 
 export function createNodeEl(node, enter){
     var el = document.createElement("div");
-    el.className = "node" + (node.id === rootId ? " root" : "");
+    el.className = "node" + (node.id === rootId ? " root" : "") + (isNoteNode(node) ? " node-note" : "");
     if (node.id === currentNodeId) el.className += " current";
     if (enter && !document.hidden && !shouldReduceMotion()) el.className += " node-enter";
     el.dataset.id = node.id;
@@ -244,13 +256,34 @@ export function createNodeEl(node, enter){
 
     enableDrag(node, head);
     enableResize(node, resize);
-    head.addEventListener("dblclick", function(e){ if (onCardControl(e)) return; openNode(node.id); });
+    head.addEventListener("dblclick", function(e){
+      var hit = e.target.closest && e.target.closest(".node-title");
+      if (!hit && e.target === head){
+        var pointHit = document.elementFromPoint(e.clientX, e.clientY);
+        hit = pointHit && pointHit.closest && pointHit.closest(".node-title");
+      }
+      if (hit === titleEl){
+        var titleRange = document.createRange(); titleRange.selectNodeContents(titleEl);
+        var textRect = titleRange.getBoundingClientRect();
+        if (e.clientX >= textRect.left && e.clientX <= textRect.right && e.clientY >= textRect.top && e.clientY <= textRect.bottom){
+          e.preventDefault(); e.stopPropagation(); startTitleEditing(node, titleEl); return;
+        }
+      }
+      if (!onCardControl(e)) openNode(node.id);
+    });
     openBtn.addEventListener("click", function(e){ e.stopPropagation(); openNode(node.id); });
     collapseBtn.addEventListener("click", function(e){ e.stopPropagation(); toggleCollapse(node, collapseBtn); });
     aDown.addEventListener("click", function(e){ e.stopPropagation(); setNodeFontScale(node, -0.1); });
     aUp.addEventListener("click", function(e){ e.stopPropagation(); setNodeFontScale(node, 0.1); });
     // Scrolling a card moves the inline marks its children's edges start from.
     body.addEventListener("scroll", scheduleEdges, { passive: true });
+    if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
+      var dc = e.target.closest && e.target.closest(".doc-content");
+      if (!dc || !body.contains(dc)) return;
+      if (e.target.closest("a, button, input, textarea, select, summary, [contenteditable], [role=button], [role=link], [data-child]")) return;
+      e.stopPropagation();
+      startNoteEditing(node, dc, markdownCaretForPrefix(node.md || "", renderedPrefixAtPoint(dc, e.clientX, e.clientY)));
+    });
     // Hovering a card lights up its edge and the exact text it branched from.
     el.addEventListener("mouseenter", function(){ focusOrigin(node, true); });
     el.addEventListener("mouseleave", function(){
@@ -298,9 +331,8 @@ function rectMostlyVisible(rect){
   }
 
   // ---------- per-card follow-up composer ----------
-  var SEND_ICON = iconSvg("send");
   // The scrollbar only appears once the textarea is actually at its cap —
-  // otherwise sub-pixel rounding paints a stray thumb next to the send button.
+  // otherwise sub-pixel rounding paints a stray thumb next to the commit row.
 export function autoGrowEl(ta, max){
     ta.style.height = "auto";
     ta.style.height = Math.min(max, ta.scrollHeight) + "px";
@@ -309,29 +341,32 @@ export function autoGrowEl(ta, max){
   function buildCardComposer(node){
     var comp = document.createElement("div"); comp.className = "node-composer";
     var clip = document.createElement("div"); clip.className = "nc-clip"; clip.id = cardDrawerId(node);
-    var inner = document.createElement("div"); inner.className = "nc-inner";
+    var inner = document.createElement("div"); inner.className = "nc-inner followup-composer";
+    var input = document.createElement("div"); input.className = "ask-input";
     var ta = document.createElement("textarea"); ta.rows = 1;
-    var send = cardButton(iconButtonMarkup({ bare: true, className: "send-btn", ariaLabel: "Send follow-up", title: ENTER_SEND_HINT, svgIconHtml: SEND_ICON }));
-    var handle = document.createElement("button"); handle.type = "button"; handle.className = "nc-handle"; handle.title = "Ask a follow-up about this document";
+    var actions = cardButton(composerActionsMarkup());
+    var handle = document.createElement("button"); handle.type = "button"; handle.className = "nc-handle"; handle.title = "Ask or note about this document";
     handle.setAttribute("aria-expanded", "false"); handle.setAttribute("aria-controls", clip.id);
     var plus = document.createElement("span"); plus.className = "nc-plus"; plus.textContent = "+";
-    handle.appendChild(plus); handle.appendChild(document.createTextNode(" Follow-up"));
-    inner.appendChild(ta); inner.appendChild(send); clip.appendChild(inner);
+    handle.appendChild(plus); handle.appendChild(document.createTextNode(" Ask or note"));
+    input.appendChild(ta); inner.appendChild(input); inner.appendChild(actions); clip.appendChild(inner);
     comp.appendChild(clip); comp.appendChild(handle);
-    node.ncComp = comp; node.ncInner = inner; node.ncText = ta; node.ncSend = send; node.ncHandle = handle;
+    node.ncComp = comp; node.ncInner = inner; node.ncText = ta; node.ncActions = actions; node.ncHandle = handle;
     handle.addEventListener("click", function(e){ e.stopPropagation(); openCardDrawer(node); });
     ta.addEventListener("input", function(){ autoGrowEl(ta, 90); updateCardComposer(node); });
     ta.addEventListener("keydown", function(e){
-      if (isSubmitEnter(e)){ e.preventDefault(); submitCardFollowup(node, "keyboard"); }
-      else if (e.key === "Escape"){ e.stopPropagation(); closeCardDrawer(node); handle.focus({ preventScroll: true }); }
+      if (e.key === "Escape"){ e.stopPropagation(); closeCardDrawer(node); handle.focus({ preventScroll: true }); }
     });
+    wireComposerActions({ text: ta, actions: actions,
+      onCommit: function(kind, e){ e.stopPropagation(); submitCardFollowup(node, kind, cardComposerSource(e)); },
+      onLens: function(lens, e){ e.stopPropagation(); submitCardLens(node, lens, cardComposerSource(e)); } });
     // Click-away with an empty drawer tucks it back in (a draft keeps it out).
     ta.addEventListener("blur", function(){
       if (!ta.value.trim() && !(node.el && node.el.matches(":hover"))) closeCardDrawer(node);
     });
-    send.addEventListener("click", function(e){ e.stopPropagation(); submitCardFollowup(node, motionSourceFromEvent(e)); });
     return comp;
   }
+  function cardComposerSource(e){ return e && e.type === "keydown" ? "keyboard" : motionSourceFromEvent(e); }
   function cardDrawerId(node){
     return "card-followup-" + String(node.id).replace(/[^A-Za-z0-9_-]/g, function(ch){ return "-" + ch.charCodeAt(0).toString(16) + "-"; });
   }
@@ -353,26 +388,47 @@ export function autoGrowEl(ta, max){
 export function updateCardComposer(node){
     if (!node.ncText) return;
     // A draft in progress keeps the drawer out even when the pointer wanders off.
-    node.ncComp.classList.toggle("nc-draft", !!node.ncText.value.trim());
+    var hasDraft = !!node.ncText.value.trim();
+    node.ncComp.classList.toggle("nc-draft", hasDraft);
+    node.ncInner.classList.toggle("has-draft", hasDraft);
     applyComposerState(
-      { text: node.ncText, send: node.ncSend, wrap: node.ncInner },
+      { text: node.ncText, commits: node.ncActions.querySelectorAll(".ask-commit"),
+        lenses: node.ncActions.querySelectorAll(".lens"), wrap: node.ncInner },
       { phase: sessionPhase(), pending: node.status === "pending" || !!node.extensions?.pdf?.converting },
       { frozen: "Read-only snapshot", closed: "Session ended — saved",
         pending: "Still being written…", away: "Asks are saved for the agent…",
-        live: "Ask a follow-up…" }
+        live: "Ask or note…" }
     );
   }
-  function submitCardFollowup(node, source){
-    if (closed){ flashHint("Session ended — reopen this Rabbithole from your terminal to continue."); return; }
-    if (node.status === "pending" || node.extensions?.pdf?.converting) return;
-    var question = node.ncText.value.trim();
-    if (!question) return;
-    var kid = canvasLifecycle.hooks.sendFollowup(node, question, null);
-    node.ncText.value = "";
-    autoGrowEl(node.ncText, 90);
+  // The card composer's submit gate (a closed session says so out loud), and
+  // the shared landing: retract the drawer and pan the new card into view.
+  function cardComposerBlocked(node){
+    if (closed){ flashHint("Session ended — reopen this Rabbithole from your terminal to continue."); return true; }
+    return node.status === "pending" || !!node.extensions?.pdf?.converting;
+  }
+  function settleCardSubmit(node, kid, source){
     closeCardDrawer(node);
     updateCardComposer(node);
     revealNode(kid, source);
+  }
+  // A lens on a card is a whole-document ask on that card — canned question,
+  // same contract as the reader composer and the empty-box popover lenses.
+  function submitCardLens(node, lens, source){
+    if (cardComposerBlocked(node)) return;
+    var kid = canvasLifecycle.hooks.sendFollowup(node, LENSES[lens].q, lens);
+    if (kid) settleCardSubmit(node, kid, source);
+  }
+  function submitCardFollowup(node, commit, source){
+    if (cardComposerBlocked(node)) return;
+    var question = node.ncText.value.trim();
+    if (!question) return;
+    var kid = commit === "note"
+      ? canvasLifecycle.hooks.sendNote(node, question)
+      : canvasLifecycle.hooks.sendFollowup(node, question, null);
+    if (!kid) return;
+    node.ncText.value = "";
+    autoGrowEl(node.ncText, 90);
+    settleCardSubmit(node, kid, source);
   }
   // Asking from a card spawns the answer card wherever placeChild puts it —
   // possibly off-screen. Pan just enough to bring it into view (user-initiated,
@@ -420,6 +476,7 @@ function animateView(tx, ty, ts, opts){
 
 export function fillBody(node){
     var body = node.bodyEl; if (!body) return;
+    if (node._noteEditor) return;
     var previous = body.querySelector(".doc-content"); if (previous && previous._rhDispose) previous._rhDispose();
     body.classList.remove("pdf-body");
     body.innerHTML = "";
@@ -438,6 +495,169 @@ export function fillBody(node){
     body.classList.toggle("pdf-body", dc.classList.contains("rh-pdf"));
     applyChildHighlights(dc, node);
   }
+  function noteSurface(node, surface){
+    var dc = buildDocContent(node, surface === "reader" ? READER_BASE : CANVAS_BASE);
+    applyChildHighlights(dc, node);
+    return dc;
+  }
+  function replaceNoteSurface(node, surface, current){
+    var dc = noteSurface(node, surface);
+    current.replaceWith(dc);
+    return dc;
+  }
+  function refreshMountedNoteSurfaces(node, editor){
+    var mounted = document.querySelectorAll('.doc-content[data-node-id="' + node.id + '"]');
+    replaceNoteSurface(node, editor.dataset.surface, editor);
+    mounted.forEach(function(dc){
+      if (dc._rhDispose) dc._rhDispose();
+      replaceNoteSurface(node, dc.dataset.surface, dc);
+    });
+    scheduleEdges();
+  }
+  function cancelNoteEditing(node, editor){
+    node._noteEditor = null;
+    if (node._ephemeral){ teardownNode(node.id); return; }
+    replaceNoteSurface(node, editor.dataset.surface, editor);
+    scheduleEdges();
+  }
+  function startTitleEditing(node, titleEl){
+    if (frozen || closed || titleEl.isContentEditable) return;
+    var previous = node.title || "";
+    titleEl.textContent = previous;
+    titleEl.removeAttribute("title");
+    titleEl.setAttribute("contenteditable", "plaintext-only");
+    titleEl.focus({ preventScroll: true });
+    var range = document.createRange(); range.selectNodeContents(titleEl);
+    var selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    var settled = false;
+    function finish(save){
+      if (settled) return;
+      settled = true;
+      var next = titleEl.textContent.trim();
+      titleEl.removeEventListener("keydown", onKeyDown);
+      titleEl.removeAttribute("contenteditable");
+      if (save && next){ node.title = next; canvasLifecycle.hooks.persistNode(node); }
+      titleEl.textContent = node.title || "…";
+      titleEl.title = node.title || "";
+      if (document.activeElement === titleEl) titleEl.blur();
+    }
+    function onKeyDown(e){
+      if (e.key === "Escape"){
+        e.preventDefault(); e.stopPropagation(); finish(false);
+      } else if (e.key === "Enter"){
+        e.preventDefault(); e.stopPropagation(); finish(true);
+      }
+    }
+    titleEl.addEventListener("keydown", onKeyDown);
+    titleEl.addEventListener("blur", function(){ finish(true); }, { once: true });
+  }
+  function commitNoteEditing(node, editor){
+    var markdown = editor.value;
+    if (!markdown.trim()){ cancelNoteEditing(node, editor); return; }
+    node._noteEditor = null;
+    node.md = markdown;
+    refreshNodeHtml(node);
+    refreshMountedNoteSurfaces(node, editor);
+    if (!node._ephemeral){ canvasLifecycle.hooks.persistNode(node); return; }
+    delete node._ephemeral;
+    Promise.resolve(postBrowserEvent({ type: "node_create", id: node.id, parent_id: null,
+      title: node.title, markdown: node.md, origin: node.origin,
+      position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } }))
+      .then(function(response){
+        if (response && response.ok) return;
+        if (nodes[node.id] === node) teardownNode(node.id);
+        flashHint("Couldn't save that note — it was undone.");
+      });
+  }
+  // The rendered text from the top of the note to the double-clicked point.
+  // Null when the point doesn't resolve to text inside this note.
+  function renderedPrefixAtPoint(dc, x, y){
+    var caretNode = null, caretOffset = 0;
+    if (document.caretPositionFromPoint){
+      var pos = document.caretPositionFromPoint(x, y);
+      if (pos){ caretNode = pos.offsetNode; caretOffset = pos.offset; }
+    } else if (document.caretRangeFromPoint){
+      var cr = document.caretRangeFromPoint(x, y);
+      if (cr){ caretNode = cr.startContainer; caretOffset = cr.startOffset; }
+    }
+    if (!caretNode || !dc.contains(caretNode)) return null;
+    var r = document.createRange();
+    r.selectNodeContents(dc);
+    try { r.setEnd(caretNode, caretOffset); } catch(e){ return null; }
+    return r.toString();
+  }
+  function countOccurrences(haystack, needle){
+    var count = 0, idx = haystack.indexOf(needle);
+    while (idx !== -1){ count++; idx = haystack.indexOf(needle, idx + needle.length); }
+    return count;
+  }
+  function nthOccurrence(haystack, needle, n){
+    var idx = -1;
+    while (n-- > 0){
+      idx = haystack.indexOf(needle, idx === -1 ? 0 : idx + needle.length);
+      if (idx === -1) return -1;
+    }
+    return idx;
+  }
+  // Maps a rendered-text prefix back to a caret offset in the markdown source.
+  // Rendered text and markdown disagree on whitespace and syntax (**, #, links),
+  // so match on a whitespace-stripped suffix of the prefix, longest needle
+  // first; the needle's occurrence ordinal inside the prefix picks the right
+  // duplicate. Returns -1 when nothing matches (caller falls back to the end).
+  function markdownCaretForPrefix(md, prefix){
+    if (prefix == null) return -1;
+    var stripped = prefix.replace(/\s+/g, "");
+    if (!stripped) return 0;
+    var norm = "", map = [];
+    for (var i = 0; i < md.length; i++){
+      if (!/\s/.test(md[i])){ norm += md[i]; map.push(i); }
+    }
+    for (var len = Math.min(48, stripped.length); len >= 1; len -= (len > 12 ? 12 : 1)){
+      var needle = stripped.slice(-len);
+      var idx = nthOccurrence(norm, needle, countOccurrences(stripped, needle));
+      if (idx !== -1) return map[idx + needle.length - 1] + 1;
+    }
+    return -1;
+  }
+  function startNoteEditing(node, dc, caretOffset){
+    if (!isNoteNode(node) || frozen || closed || node._noteEditor) return;
+    var editor = document.createElement("textarea");
+    editor.className = "note-editor md";
+    editor.rows = 1;
+    editor.dataset.nodeId = node.id;
+    editor.dataset.surface = dc.dataset.surface || "canvas";
+    editor.setAttribute("aria-label", "Edit note");
+    editor.spellcheck = true;
+    editor.value = node.md || "";
+    editor.style.fontSize = dc.style.fontSize;
+    dc.replaceWith(editor);
+    node._noteEditor = editor;
+    var settled = false;
+    function finish(save){
+      if (settled) return;
+      settled = true;
+      if (save) commitNoteEditing(node, editor);
+      else cancelNoteEditing(node, editor);
+    }
+    function grow(){ autoGrowEl(editor, Math.max(90, node.h - 60)); }
+    editor.addEventListener("input", grow);
+    editor.addEventListener("keydown", function(e){
+      if (e.key === "Escape"){
+        e.preventDefault(); e.stopPropagation(); finish(false);
+      } else if ((e.metaKey || e.ctrlKey) && isCommandEnter(e)){
+        e.preventDefault(); e.stopPropagation(); finish(true);
+      }
+    });
+    editor.addEventListener("blur", function(){ finish(true); });
+    grow();
+    editor.focus({ preventScroll: true });
+    var caret = (caretOffset == null || caretOffset < 0 || caretOffset > editor.value.length)
+      ? editor.value.length : caretOffset;
+    editor.setSelectionRange(caret, caret);
+    // Setting a textarea selection can scroll an overflow-hidden ancestor even
+    // after preventScroll focus. The camera owns this viewport, never DOM scroll.
+    viewport.scrollLeft = 0; viewport.scrollTop = 0;
+  }
   function setNodeFontScale(node, delta){
     node.font_scale = Math.min(MAX_FS, Math.max(MIN_FS, (node.font_scale || 1) + delta));
     var dc = node.bodyEl && node.bodyEl.querySelector(".doc-content"); if (dc) dc.style.fontSize = fontPx(node, CANVAS_BASE) + "px";
@@ -453,7 +673,7 @@ function layoutNode(node){
       // Short answers therefore hug their content while longer answers retain
       // the existing scrollable viewport. Keep the root's established fixed
       // document window; it is the canvas anchor rather than a branch.
-      if (node.id === rootId){
+      if (node.id === rootId || (isNoteNode(node) && node.parent_id == null)){
         el.style.height = node.h + "px";
         el.style.maxHeight = "";
       } else {
@@ -494,7 +714,7 @@ function layoutNode(node){
   // The head carries the card's own gestures — drag it, double-click to open — but it also
   // holds the controls, and a pointer that lands on one of those is operating the control,
   // not the card. Every head gesture owes that distinction the same answer.
-  function onCardControl(e){ return !!e.target.closest(".node-btn"); }
+  function onCardControl(e){ return !!e.target.closest(".node-btn, [contenteditable]"); }
   function enableDrag(node, handle){
     var sx, sy, ox, oy;
     onPointerGesture(handle,
@@ -701,7 +921,6 @@ function focusOrigin(node, on){
   function initTouchViewportGestures(){
     var touches = new Map();
     var gesture = null;
-    var suppressClickUntil = 0;
     var PAN_SLOP = 3;
 
     function touchPoint(event){
@@ -902,10 +1121,37 @@ export function frameAll(animate, source){
     if (animate){ animateView(tx, ty, ts, { source: source, duration: 270, ease: "inOut" }); return; }
     view.scale = ts; view.x = tx; view.y = ty; applyTransform();
   }
-  // Double-clicking empty canvas = frame everything (canvas-tool muscle memory).
+export function createStandaloneNoteAtViewportCenter(){
+    var fullW=viewport.clientWidth||window.innerWidth, fullH=viewport.clientHeight||window.innerHeight;
+    var rail=document.getElementById("web-rail"), taskbar=document.getElementById("taskbar");
+    var insetX=(rail && rail.classList.contains("open")) ? rail.getBoundingClientRect().width : 0;
+    var insetY=taskbar ? taskbar.getBoundingClientRect().height : 0;
+    createStandaloneNoteAtScreen(
+      insetX + (fullW - insetX) / 2 - DEFAULT_STANDALONE_NOTE.w * view.scale / 2,
+      insetY + (fullH - insetY) / 2 - DEFAULT_STANDALONE_NOTE.h * view.scale / 2
+    );
+  }
+  function createStandaloneNoteAtScreen(sx, sy){
+    if (mode !== "canvas" || document.body.classList.contains("mode-flight") || frozen || closed) return null;
+    cancelViewAnimation();
+    viewport.scrollLeft = 0; viewport.scrollTop = 0;
+    var point = screenToWorld(sx, sy);
+    var node = registerNode({
+      id: uuid(), parent_id: null, title: "Note", html: "", md: "",
+      base_url: null, base_url_source: null, read: true, origin: { kind: "note" },
+      x: point.x, y: point.y,
+      w: DEFAULT_STANDALONE_NOTE.w, h: DEFAULT_STANDALONE_NOTE.h, font_scale: 1, collapsed: false,
+      status: "answered", _order: nextOrder(), _startTs: 0, extensions: {}, _ephemeral: true
+    });
+    createNodeEl(node, true);
+    renderVisibility(); drawEdges();
+    startNoteEditing(node, node.bodyEl.querySelector(".doc-content"));
+    return node;
+  }
   function onViewportDblClick(e){
+    if (Date.now() < suppressClickUntil) return;
     if (e.target.closest && e.target.closest(".node")) return;
-    frameAll(true, motionSourceFromEvent(e));
+    createStandaloneNoteAtScreen(e.clientX, e.clientY);
   }
 
 export function tidy(source){

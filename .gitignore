@@ -26,6 +26,8 @@ scratchpad/
 # local working state (session scratch)
 SPEC-SELECT.md
 SPEC-SUBS.md
+SPEC-NOTES.md
+prototypes/
 .agents/
 .playwright-mcp/
 pdf-reader-*.png

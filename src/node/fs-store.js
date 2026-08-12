@@ -6,12 +6,7 @@ import { randomUUID } from "node:crypto";
 import { warn } from "./logger.js";
 import { parsePersistedHole, toPersistedHole } from "../core/schema.js";
 import { assertSafeHoleId, assertSafeIngestId, createIngestId, holeSummary } from "../core/store.js";
-import {
-  MAX_ASSET_BYTES,
-  MAX_ASSETS_PER_CALL,
-  maxAssetBytes,
-  validateAssetName,
-} from "../core/assets.js";
+import { MAX_ASSETS_PER_CALL, maxAssetBytes, validateAssetName } from "../core/assets.js";
 
 /**
  * Holes are persisted one JSON file per hole under ~/.rabbithole/.
@@ -240,14 +235,14 @@ async function moveFile(source, dest) {
   }
 }
 
-async function cleanupStagedAssets({ olderThanMs = STAGING_TTL_MS } = {}) {
+async function cleanupStagedAssets() {
   let entries;
   try {
     entries = await fs.readdir(stagingRootDir(), { withFileTypes: true });
   } catch {
     return;
   }
-  const cutoff = Date.now() - olderThanMs;
+  const cutoff = Date.now() - STAGING_TTL_MS;
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const full = path.join(stagingRootDir(), entry.name);

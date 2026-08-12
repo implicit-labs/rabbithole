@@ -1,6 +1,7 @@
 import { childrenOf, nodes } from "./core.js";
+import { isNoteNode } from "../core/model.js";
 
-export var MARK_FRAGMENT_SELECTOR = "mark[data-child], .rh-pdf-mark[data-child]";
+var MARK_FRAGMENT_SELECTOR = "mark[data-child], .rh-pdf-mark[data-child]";
 
 function markGroupsAt(target){
   var el = target && target.nodeType === 1 ? target : target && target.parentElement;
@@ -28,7 +29,7 @@ function sameMarkGroup(groups, group){
   return false;
 }
 
-export function toggleMarkGroup(fragment, stateClass, on){
+function toggleMarkGroup(fragment, stateClass, on){
   if (!fragment || !fragment.matches || !fragment.matches(MARK_FRAGMENT_SELECTOR)) return;
   var root = fragment.closest(".doc-content"), childId = fragment.dataset.child;
   if (!root || childId == null) return;
@@ -57,7 +58,7 @@ export function applyChildHighlights(dc, node){
     var a = k.origin.anchor;
     var r = rangeFromOffsets(dc, a.offset_start, a.offset_end);
     if (!r) return;
-    wrapRange(r, k.id, "hl " + (k.status === "answered" ? "mark-ready" : "mark-pending"));
+    wrapRange(r, k.id, "hl " + (k.status === "answered" ? "mark-ready" : "mark-pending") + (isNoteNode(k) ? " mark-note" : ""));
   });
 }
 

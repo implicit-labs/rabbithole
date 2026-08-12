@@ -30,8 +30,6 @@ export function snapshotProjectionToFrozenHydration(projection) {
     assetData[name] = `data:${getAssetContentType(name)};base64,${encoded}`;
   }
   return {
-    session_id: `snapshot-${hole.hole_id}`,
-    hole_id: hole.hole_id,
     title: hole.title,
     root_id: hole.root_id,
     last_event_id: 0,

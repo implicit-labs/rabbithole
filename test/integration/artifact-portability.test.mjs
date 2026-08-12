@@ -170,10 +170,13 @@ async function assertShellPolish(page) {
   const keyLinkCount = await page.locator(`a[href="${"https://openrouter.ai/keys"}"]`).count();
   assert.equal(keyLinkCount, 1, "OpenRouter key link should appear exactly once in settings");
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
-  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
-  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
+  assert.deepEqual(
+    await page.locator(".provider-row .provider-copy strong").allTextContents(),
+    ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"],
+  );
+  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true");
   await page.click('[data-provider="local"]');
-  assert.equal(await page.getAttribute('[data-provider="local"]', "aria-pressed"), "true", "provider flow should switch through the shared provider control");
+  assert.equal(await page.getAttribute('[data-provider="local"]', "aria-checked"), "true", "provider flow should switch through the shared provider list");
   assert.equal(await page.locator("#provider-base").count(), 1);
   await page.locator(".settings-advanced summary").click();
   assert.equal(await page.locator("#provider-base").isVisible(), true, "Local should keep only its endpoint under Connection settings");

@@ -8,7 +8,7 @@ import {
   closed,
   mode,
   nodes,
-  readerMain,
+  postBrowserEvent,
   rootId,
   setCurrentNodeId,
   setSurfaceOrigin,
@@ -31,7 +31,6 @@ import { teardownNode } from "./node-teardown.js";
 
 function defaultBranchHooks(){
   return {
-    post: function(){ return Promise.resolve({ ok: true }); },
     exportSnapshot: null,
     exportPortable: null
   };
@@ -254,7 +253,7 @@ export function hideConfirm(settings){
   function deleteBranch(node){
     var title = node.title || "Untitled";
     var ids = collectSubtree(node.id, []);
-    branchLifecycle.hooks.post({ type: "delete_node", node_id: node.id });
+    postBrowserEvent({ type: "delete_node", node_id: node.id });
     removeNodesLocal(ids, node.parent_id);
     flashHint(ids.length > 1
       ? "Removed “" + truncate(title, 40) + "” and " + (ids.length - 1) + " inside it"

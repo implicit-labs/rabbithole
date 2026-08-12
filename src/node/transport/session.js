@@ -3,13 +3,12 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { openBrowser } from "./browser.js";
 import { log, error as logError } from "../logger.js";
-import { addAssetsToHole, defaultFsStore, resolveAsset } from "../fs-store.js";
+import { addAssetsToHole, defaultFsStore } from "../fs-store.js";
 import { maybeUpgradeBaseUrlFromFrontmatter, normalizeBaseUrl } from "../../core/base-url.js";
 import { extractNodeAssetRefs } from "../../core/assets.js";
 import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../core/reducer.js";
-import { toPersistedHole } from "../../core/schema.js";
-import { lineageTitlesFromMap, normalizePdfAnchor } from "../../core/model.js";
-import { buildJsonError, closeServerGracefully, CLOSE_TIMEOUT_MS } from "./http.js";
+import { collectAllNotes, collectRelevantNotes, isNoteNode, lineageTitlesFromMap, normalizePdfAnchor } from "../../core/model.js";
+import { buildJsonError, closeServerGracefully } from "./http.js";
 import { writeSseEvent } from "./sse.js";
 import { handleSessionRequest } from "./session-router.js";
 import { GenerationIngress } from "./generation-ingress.js";
@@ -214,7 +213,7 @@ export class RabbitHoleSession {
     const waiters = this.waiters.splice(0);
     for (const waiter of waiters) {
       waiter.cleanup?.();
-      waiter.resolve({ status: "session_closed", session_id: this.id });
+      waiter.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id }));
     }
 
     if (this.shutdownScheduled) return this.closePromise;
@@ -233,7 +232,6 @@ export class RabbitHoleSession {
       const server = this.server;
       this.server = null;
       closeServerGracefully(server, {
-        timeoutMs: CLOSE_TIMEOUT_MS,
         onClosed: () => {
           this.onClose?.(this);
           log(`Session ${this.id} closed (${reason})`);
@@ -252,7 +250,7 @@ export class RabbitHoleSession {
    * pending asks stop pretending an answer is coming.
    */
   waitForEvent(signal) {
-    if (this.closed) return Promise.resolve({ status: "session_closed", session_id: this.id });
+    if (this.closed) return Promise.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id }));
     this.touch();
     this.markAgentAttached();
     if (this.queue.length > 0) return Promise.resolve(this.deliverToAgent(this.queue.shift()));
@@ -263,18 +261,18 @@ export class RabbitHoleSession {
       let done = false;
       let budgetTimer = null;
       let waiter = null;
-      const finish = (event, { deliver = true } = {}) => {
+      const finish = (event) => {
         if (done) return;
         done = true;
         const idx = this.waiters.indexOf(waiter);
         if (idx !== -1) this.waiters.splice(idx, 1);
         waiter?.cleanup?.();
-        resolve(deliver ? this.deliverToAgent(event) : event);
+        resolve(event);
       };
       const onAbort = () => {
         this.clearAnswerWatchdog();
         this.setAgentAttached(false, "cancelled");
-        finish({ status: "cancelled", session_id: this.id }, { deliver: false });
+        finish(this.deliverToAgent({ status: "cancelled", session_id: this.id }));
       };
       const cleanup = () => {
         if (budgetTimer) {
@@ -293,7 +291,7 @@ export class RabbitHoleSession {
       }
       budgetTimer = setTimeout(() => {
         this.scheduleRearmDetach();
-        finish(this.keepListeningResult(), { deliver: false });
+        finish(this.deliverToAgent(this.keepListeningResult()));
       }, maxBlockMs());
       budgetTimer.unref?.();
       this.waiters.push(waiter);
@@ -304,7 +302,7 @@ export class RabbitHoleSession {
     const waiter = this.waiters.shift();
     if (waiter) {
       waiter.cleanup?.();
-      waiter.resolve(event);
+      waiter.resolve(this.deliverToAgent(event));
       return;
     }
     this.queue.push(event);
@@ -313,6 +311,15 @@ export class RabbitHoleSession {
   // Every branch_request handed to the agent arms the watchdog; any subsequent
   // agent activity (answer_branch, another waitForEvent) clears or re-arms it.
   deliverToAgent(event) {
+    if (event?.status === "branch_request") {
+      const notes = collectRelevantNotes(this.nodes, event.parent_node_id, { includeLineage: true });
+      if (notes.length) event.notes = notes;
+      else delete event.notes;
+    } else if (event?.status === "session_closed") {
+      const notes = collectAllNotes(this.nodes);
+      if (notes.length) event.notes = notes;
+      else delete event.notes;
+    }
     if (event && (event.status === "branch_request" || event.status === "convert_request")) {
       this.inFlightBranchRequests.set(event.request_id, event);
       this.startAnswerWatchdog();
@@ -427,8 +434,6 @@ export class RabbitHoleSession {
 
   buildHydration() {
     return {
-      session_id: this.id,
-      hole_id: this.holeId,
       title: this.title,
       root_id: this.rootId,
       // The highest event id reflected in this snapshot — the client passes it
@@ -448,9 +453,7 @@ export class RabbitHoleSession {
     const hole = holeStateToHole(this.state);
     return {
       ...hole,
-      nodes: hole.nodes
-        .filter((n) => (n.status ?? "answered") === "answered" || n.status === "pending")
-        .map((n) => (n.status === "pending" ? { ...n, markdown: "" } : n)),
+      nodes: hole.nodes.map((n) => (n.status === "pending" ? { ...n, markdown: "" } : n)),
     };
   }
 
@@ -615,7 +618,7 @@ export class RabbitHoleSession {
   async handleConvertPdf(payload, { saved = false } = {}) {
     const nodeId = String(payload.node_id || ""), node = this.nodes.get(nodeId), pdf = normalizePdfExtension(node);
     if (!pdf) throw buildJsonError("This node is not a native PDF", 400);
-    if ([...this.nodes.values()].some((candidate) => candidate.parent_id === nodeId)) throw buildJsonError("Create a text version before asking follow-ups", 409);
+    if ([...this.nodes.values()].some((candidate) => candidate.parent_id === nodeId && !isNoteNode(candidate))) throw buildJsonError("Create a text version before asking follow-ups", 409);
     if (pdf.converting && !saved) throw buildJsonError("Conversion is already running", 409);
     const requestId = randomUUID();
     if (!pdf.converting) this.patchNodePdf(nodeId, { ...pdf, converting: true, converted: false, original_markdown: node.markdown, convert_request: true });
@@ -645,11 +648,13 @@ export class RabbitHoleSession {
 
   buildRehydrationPayload() {
     const saved = [...this.nodes.values()].filter((n) => n.status === "pending" && n.origin);
+    const notes = collectAllNotes(this.nodes);
     return {
       title: this.title,
       nodes: [...this.nodes.values()]
         .filter((n) => n.status === "answered")
-        .map((n) => ({ id: n.id, parent_id: n.parent_id, title: n.title, markdown: n.markdown })),
+        .map((n) => ({ id: n.id, parent_id: n.parent_id, title: n.title, markdown: n.markdown, ...(isNoteNode(n) ? { kind: "note" } : {}) })),
+      notes,
       ...(saved.length
         ? {
             saved_asks: saved.map((n) => ({
@@ -824,6 +829,13 @@ export class RabbitHoleSession {
     return this.applyPersistedBrowserEvent(payload);
   }
 
+  async handleNodeCreate(payload) {
+    const effects = this.dispatchHoleEvent({ ...payload, type: "node_create" }, { now: new Date().toISOString() });
+    this.scheduleSave();
+    await this.flushSave();
+    return { ok: true, node_id: effects.createdNode.id };
+  }
+
   // Batched layout update (e.g. Tidy) — one request, one debounced save.
   handleNodesUpdate(payload) {
     return this.applyPersistedBrowserEvent(payload);
@@ -847,6 +859,7 @@ export class RabbitHoleSession {
           await this.flushSave();
           return result;
         },
+        node_create: (event) => this.handleNodeCreate(event),
         node_update: (event) => this.handleNodeUpdate(event),
         nodes_update: (event) => this.handleNodesUpdate(event),
         block_state: (event) => this.applyPersistedBrowserEvent(event),

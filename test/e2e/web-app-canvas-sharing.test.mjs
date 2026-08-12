@@ -29,6 +29,8 @@ try {
   await verifyDesktopReaderLayout(browser);
   await verifyMobileSelectionSurface(browser, "chromium");
   await verifyMobileSelectionSurface(mobileWebKit, "webkit");
+  await verifyAnchoredNotes();
+  await verifyStandaloneNotesAndEditing();
   await verifyLogicalMarkGrouping();
   await verifyCanvasBranching();
   console.log("web app verification passed");
@@ -201,6 +203,9 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
     await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
     await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
     await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
+    assert.deepEqual(await composerRowState(page, "#composer-actions"), { lensesVisible: true, commitsHidden: true },
+      `${engineName}: an empty mobile reader composer must rest on the four lenses with the commit pair hidden`);
+    await page.fill("#composer-text", "Mobile follow-up draft");
     const mobileReader = await page.evaluate(() => {
       const rect = (selector) => {
         const value = document.querySelector(selector).getBoundingClientRect();
@@ -209,7 +214,11 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
       };
       const main = document.getElementById("reader-main");
       const input = document.getElementById("composer-text");
-      const send = rect("#composer-send");
+      const commits = Array.from(document.querySelectorAll("#composer-actions .ask-commit")).map((button) => {
+        const value = button.getBoundingClientRect();
+        return { left: value.left, right: value.right, top: value.top, bottom: value.bottom,
+          width: value.width, height: value.height };
+      });
       return {
         viewport: { width: innerWidth, height: innerHeight },
         reader: rect("#reader"),
@@ -219,7 +228,7 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
         column: rect(".reader-col"),
         composer: rect("#composer"),
         inputFont: parseFloat(getComputedStyle(input).fontSize),
-        send,
+        commits,
         notesDisplay: getComputedStyle(document.getElementById("margin-notes")).display,
       };
     });
@@ -239,11 +248,12 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
       `${engineName}: the follow-up composer must remain above the phone viewport edge (${JSON.stringify(mobileReader)})`);
     assert(mobileReader.inputFont >= 16,
       `${engineName}: the mobile follow-up field must not trigger iOS focus zoom`);
-    assert(mobileReader.send.width >= 44 && mobileReader.send.height >= 44,
-      `${engineName}: the mobile follow-up send target must be at least 44px (${JSON.stringify(mobileReader)})`);
+    assert(mobileReader.commits.every((target) => target.width >= 44 && target.height >= 44),
+      `${engineName}: both mobile follow-up commit targets must be at least 44px (${JSON.stringify(mobileReader)})`);
     assert.equal(mobileReader.notesDisplay, "none",
       `${engineName}: margin notes must stay out of the phone reading surface — inline marks carry narrow screens`);
 
+    await page.fill("#composer-text", "");
     if (engineName === "chromium") await verifyRealChromiumReaderScroll(context, page);
 
     await page.close();
@@ -469,7 +479,7 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
         rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
         viewport: { left: viewport.offsetLeft, right: viewport.offsetLeft + viewport.width, top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height },
         inputFont: parseFloat(getComputedStyle(input).fontSize),
-        lensColumns: getComputedStyle(document.getElementById("ask-lenses")).gridTemplateColumns.split(" ").length,
+        lensColumns: getComputedStyle(document.getElementById("ask-actions")).gridTemplateColumns.split(" ").length,
         lensMinHeight: Math.min(...lenses.map((lens) => lens.getBoundingClientRect().height)),
         keyHintsHidden: lenses.every((lens) => getComputedStyle(lens.querySelector("kbd")).display === "none"),
       };
@@ -493,7 +503,11 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
       return document.activeElement?.id === "ask-text" && surface.top >= viewport.offsetTop && surface.bottom <= viewport.offsetTop + viewport.height;
     });
     assert.equal(await canvasPage.evaluate(() => window.visualViewport?.scale), 1, `${engineName}: focusing the mobile question field must not zoom the page`);
-    await canvasPage.keyboard.press("Enter");
+    const commitMinHeight = await canvasPage.locator("#ask .ask-commit").evaluateAll((buttons) => Math.min(...buttons.map((button) => button.getBoundingClientRect().height)));
+    assert(commitMinHeight >= 44, `${engineName}: mobile Note/Ask targets must be at least 44px tall (got ${commitMinHeight})`);
+    assert.deepEqual(await canvasPage.locator("#ask .ask-commit kbd").evaluateAll((chips) => chips.map((chip) => getComputedStyle(chip).display !== "none")),
+      [true, true], `${engineName}: mobile commit chips must stay visible`);
+    await canvasPage.click('#ask .ask-commit[data-commit="ask"]');
     await canvasPage.waitForSelector("#ask:not(.visible)");
     await canvasPage.locator(".node:not(.root)", { hasText: "Mobile custom question completed." }).waitFor();
     await canvasPage.close();
@@ -527,7 +541,7 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
     await readerPage.waitForSelector("#ask.visible.mobile-sheet");
     assert.equal(await readerPage.evaluate(() => window.getSelection().toString()), "reliable action sheet", `${engineName}: reader selection should open the sheet without collapsing the range`);
     const sidebarBranchCount = await readerPage.locator(".side-item").count();
-    await readerPage.click('.lens[data-lens="explain"]');
+    await readerPage.click('#ask .lens[data-lens="explain"]');
     await readerPage.waitForSelector("#ask:not(.visible)");
     await readerPage.waitForFunction((before) => document.querySelectorAll(".side-item").length > before, sidebarBranchCount);
     await readerPage.waitForFunction(() => Array.from(document.querySelectorAll(".side-item")).some((item) => !item.classList.contains("pending")));
@@ -538,6 +552,380 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
     assert(await readerPage.locator("#reader-main mark[data-child]").count() >= 1,
       `${engineName}: the lens branch must leave an inline mark as the phone affordance`);
     await readerPage.close();
+  } finally {
+    await context.close();
+  }
+}
+
+async function verifyAnchoredNotes() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  try {
+    await routeProvider(page, {
+      streams: [
+        ["TITLE: Command ask\n", "Command ask completed."],
+        ["TITLE: Blank ask\n", "Blank ask completed."],
+        ["TITLE: Lens ask\n", "Lens ask completed."],
+        ["TITLE: Button ask\n", "Button ask completed."],
+      ],
+      providerDelayMs: 500,
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, [
+      "# Anchored notes",
+      "",
+      "The first anchor belongs to an Enter-created note.",
+      "",
+      "The command anchor belongs to a keyboard-created ask.",
+      "",
+      "The restore anchor checks that clearing the draft restores lenses.",
+      "",
+      "The lens anchor checks the empty numeric shortcut.",
+      "",
+      "The typed lens anchor keeps numbers in the textarea.",
+      "",
+      "The click note anchor uses the labeled Note action.",
+      "",
+      "The click ask anchor uses the labeled Ask action.",
+    ].join("\n"));
+
+    await selectText(page, "first anchor");
+    await page.waitForSelector("#ask.visible");
+    assert.deepEqual(await composerRowState(page, "#ask"), { lensesVisible: true, commitsHidden: true },
+      "an empty anchored popover should rest on the four lenses");
+    assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
+      active: document.activeElement?.id,
+      hasDraft: surface.classList.contains("has-draft"),
+      askHighlight: CSS.highlights?.has("rh-ask") || false,
+    })), { active: "ask-text", hasDraft: false, askHighlight: true },
+    "an empty anchored popover should focus its input with the selection wash lit");
+    await page.fill("#ask-text", "Enter-created marginalia");
+    assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
+      hasDraft: surface.classList.contains("has-draft"),
+      lensesHidden: Array.from(surface.querySelectorAll(".lens")).every((button) => getComputedStyle(button).display === "none"),
+      commits: Array.from(surface.querySelectorAll(".ask-commit")).map((button) => ({
+        label: button.childNodes[0].textContent.trim(),
+        hint: button.querySelector("kbd")?.textContent,
+        visible: getComputedStyle(button).display !== "none",
+      })),
+      askHighlight: CSS.highlights?.has("rh-ask") || false,
+    })), {
+      hasDraft: true,
+      lensesHidden: true,
+      commits: [
+        { label: "Note", hint: "↵", visible: true },
+        { label: "Ask", hint: "⌘↵", visible: true },
+      ],
+      askHighlight: true,
+    }, "typing should morph the lens row into labeled commit actions while the selection wash stays put");
+    await page.keyboard.down("Control");
+    await page.keyboard.up("Control");
+    assert.equal(await page.evaluate(() => CSS.highlights?.has("rh-ask") || false), true,
+      "the selection wash must stay put while typing or holding modifiers");
+    await page.press("#ask-text", "Enter");
+    const enterNote = page.locator(".node-note", { hasText: "Enter-created marginalia" });
+    await enterNote.waitFor();
+    assert.equal(await enterNote.locator(".node-title").innerText(), "Note", "note cards should use the reducer's default title");
+    assert.equal(await page.locator(".node-note-tag").count(), 0, "note cards should rely on their title and tinted header without a separate tag");
+    assert.equal(await enterNote.locator(".loading, .stream-status").count(), 0, "notes should appear complete without pending UI");
+    assert.equal(await page.locator(".node.root mark.mark-ready.mark-note").count(), 1, "an HTML note should paint note ink on its parent");
+
+    await selectText(page, "command anchor");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Why is this a command ask?");
+    await page.press("#ask-text", "Control+Enter");
+    const commandAsk = page.locator(".node:not(.root)", { hasText: "Why is this a command ask?" });
+    await commandAsk.waitFor();
+    assert.equal(await commandAsk.locator(".loading").count(), 1, "Cmd/Ctrl+Enter should create a pending ask card");
+
+    await selectText(page, "restore anchor");
+    await page.waitForSelector("#ask.visible");
+    const nodeCountBeforeBlank = await page.locator(".node").count();
+    await page.fill("#ask-text", "temporary draft");
+    await page.fill("#ask-text", "");
+    assert.deepEqual(await composerRowState(page, "#ask"), { lensesVisible: true, commitsHidden: true },
+      "emptying the textarea should restore the lenses");
+    assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
+      hasDraft: surface.classList.contains("has-draft"),
+      askHighlight: CSS.highlights?.has("rh-ask") || false,
+    })), { hasDraft: false, askHighlight: true }, "emptying the textarea should restore rest state and ask ink");
+    await page.press("#ask-text", "Enter");
+    assert.equal(await page.locator(".node").count(), nodeCountBeforeBlank, "blank Enter must be inert");
+    assert.equal(await page.locator("#ask.visible").count(), 1, "blank Enter must leave the popover open");
+    await page.press("#ask-text", "Control+Enter");
+    const blankAsk = page.locator(".node:not(.root)", { has: page.locator(".node-title", { hasText: /^…$/ }) });
+    await blankAsk.waitFor();
+    assert.equal(await blankAsk.locator(".loading").count(), 1, "blank Cmd/Ctrl+Enter should retain the pending ellipsis ask");
+
+    await selectText(page, "lens anchor");
+    await page.waitForSelector("#ask.visible");
+    const beforeLens = await page.locator(".node").count();
+    await page.press("#ask-text", "1");
+    await page.waitForFunction((count) => document.querySelectorAll(".node").length === count + 1, beforeLens);
+    const lensState = await page.evaluate(() => window.__rabbitholeTest.readStoredHole());
+    assert.equal(lensState.nodes.at(-1).origin?.lens, "explain", "1 should submit the Explain lens while the box is empty");
+
+    await selectText(page, "typed lens anchor");
+    await page.waitForSelector("#ask.visible");
+    const beforeTypedLens = await page.locator(".node").count();
+    await page.fill("#ask-text", "draft");
+    await page.press("#ask-text", "1");
+    assert.equal(await page.inputValue("#ask-text"), "draft1", "lens number keys should type normally once the box is non-empty");
+    assert.equal(await page.locator(".node").count(), beforeTypedLens, "a lens key must not submit while text is present");
+    await page.keyboard.press("Escape");
+
+    await selectText(page, "click note anchor");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Button-created marginalia");
+    await page.click('#ask .ask-commit[data-commit="note"]');
+    await page.locator(".node-note", { hasText: "Button-created marginalia" }).waitFor();
+
+    await selectText(page, "click ask anchor");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Button-created ask");
+    await page.click('#ask .ask-commit[data-commit="ask"]');
+    await page.locator(".node:not(.root)", { hasText: "Button-created ask" }).waitFor();
+
+    await page.waitForFunction(async () => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.filter((node) => node.origin?.kind === "note").length === 2;
+    });
+    const persisted = await page.evaluate(() => window.__rabbitholeTest.readStoredHole());
+    const notes = persisted.nodes.filter((node) => node.origin?.kind === "note");
+    assert.deepEqual(notes.map((node) => ({ title: node.title, markdown: node.markdown, status: node.status, read: node.read, selected: node.origin.selected_text })), [
+      { title: "Note", markdown: "Enter-created marginalia", status: "answered", read: true, selected: "first anchor" },
+      { title: "Note", markdown: "Button-created marginalia", status: "answered", read: true, selected: "click note anchor" },
+    ], "node_create should persist both complete anchored notes");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(".node-note");
+    assert.equal(await page.locator(".node-note").count(), 2, "persisted notes should hydrate as note cards");
+    assert.equal(await page.locator(".node.root mark.mark-note").count(), 2, "persisted HTML note marks should rebuild on hydration");
+    console.log("ok web app: anchored morphing actions, commit keys, honest preview, HTML note ink, and persistence");
+  } finally {
+    await context.close();
+  }
+}
+
+async function verifyStandaloneNotesAndEditing() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  await routeProvider(page);
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, [
+      "# Phase 3 notes",
+      "",
+      "This anchored edit target becomes durable marginalia.",
+      "",
+      "Double-clicking this document must never create a standalone note.",
+    ].join("\n"));
+    assert.equal(await page.locator("#t-frame").count(), 0, "zoom-to-fit must not have a toolbar surface");
+
+    await selectText(page, "anchored edit target");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Original anchored note");
+    await page.click('#ask .ask-commit[data-commit="note"]');
+    const anchored = page.locator(".node-note", { hasText: "Original anchored note" });
+    await anchored.waitFor();
+    const anchoredId = await anchored.getAttribute("data-id");
+    const anchoredCard = page.locator(`.node-note[data-id="${anchoredId}"]`);
+    const rootCard = page.locator(".node.root");
+    const rootId = await rootCard.getAttribute("data-id");
+    await page.waitForTimeout(350);
+
+    const persistedNoteCount = async () => page.evaluate(async () => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.filter((node) => node.origin?.kind === "note").length;
+    });
+    assert.equal(await persistedNoteCount(), 1);
+
+    const noteTitle = anchoredCard.locator(".node-title");
+    await noteTitle.dblclick({ position: { x: 5, y: 8 } });
+    const noteTitleEditing = await noteTitle.evaluate((title) => ({ editable: title.getAttribute("contenteditable"),
+      isEditable: title.isContentEditable, active: document.activeElement === title,
+      mode: document.body.className }));
+    assert.equal(noteTitleEditing.editable, "plaintext-only", `a note title should become editable in place (${JSON.stringify(noteTitleEditing)})`);
+    assert(await page.locator("body.mode-canvas").count(), "renaming a title must not trigger the header's reader dive");
+    await noteTitle.fill("Renamed note window");
+    await noteTitle.press("Enter");
+    assert.equal(await noteTitle.innerText(), "Renamed note window", "Enter should commit an inline note title rename");
+
+    const rootTitle = rootCard.locator(".node-title");
+    const originalRootTitle = await rootTitle.innerText();
+    await rootTitle.dblclick({ position: { x: 5, y: 8 } });
+    await rootTitle.fill("Discard this root title");
+    await rootTitle.press("Escape");
+    assert.equal(await rootTitle.innerText(), originalRootTitle, "Escape should cancel an inline title rename");
+    await rootTitle.dblclick({ position: { x: 5, y: 8 } });
+    await rootTitle.fill("   ");
+    await rootTitle.press("Enter");
+    assert.equal(await rootTitle.innerText(), originalRootTitle, "an empty trimmed title should keep the old title");
+    await rootTitle.dblclick({ position: { x: 5, y: 8 } });
+    await rootTitle.fill("Renamed answer window");
+    await rootTitle.press("Tab");
+    assert.equal(await rootTitle.innerText(), "Renamed answer window", "blur should commit a non-note title rename");
+    await page.waitForFunction(async ({ rootId, anchoredId }) => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.find((node) => node.id === rootId)?.title === "Renamed answer window"
+        && hole.nodes.find((node) => node.id === anchoredId)?.title === "Renamed note window";
+    }, { rootId, anchoredId });
+
+    await page.locator(".node.root .doc-content p").last().dblclick({ position: { x: 8, y: 8 } });
+    await page.waitForTimeout(80);
+    assert.equal(await page.locator(".node-note").count(), 1, "double-clicking a card must not create a note");
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+    await page.locator(".node.root mark.mark-note").dblclick();
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator(".node-note").count(), 1, "double-clicking a mark must not create a note");
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
+    const anchoredSurface = anchoredCard.locator(".doc-content");
+    const renderedStyle = await anchoredSurface.evaluate((surface) => {
+      const style = getComputedStyle(surface);
+      return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
+        color: style.color, backgroundColor: style.backgroundColor, padding: style.padding };
+    });
+    await anchoredSurface.click({ position: { x: 8, y: 8 } });
+    assert.equal(await anchoredCard.locator(".note-editor").count(), 0, "a single note-body click should remain ordinary document interaction");
+    const clickedWordBox = await anchoredSurface.evaluate((surface) => {
+      const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const idx = node.textContent.indexOf("anchored");
+        if (idx === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + "anchored".length);
+        const rect = range.getBoundingClientRect();
+        const host = surface.getBoundingClientRect();
+        return { x: rect.left - host.left + rect.width / 2, y: rect.top - host.top + rect.height / 2 };
+      }
+      return null;
+    });
+    assert(clickedWordBox, "the rendered note should contain the word targeted for caret placement");
+    await anchoredSurface.dblclick({ position: clickedWordBox });
+    const anchoredEditor = anchoredCard.locator(".note-editor");
+    await anchoredEditor.waitFor();
+    assert.equal(await anchoredEditor.evaluate((editor) => editor.classList.contains("doc-content")), false,
+      "the note editor must not participate in document selection handling");
+    const editorSurface = await anchoredEditor.evaluate((editor) => {
+      const style = getComputedStyle(editor);
+      return { visual: { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
+        color: style.color, backgroundColor: style.backgroundColor, padding: style.padding },
+        border: style.borderTopWidth, outline: style.outlineStyle, shadow: style.boxShadow,
+        caret: [editor.selectionStart, editor.selectionEnd, editor.value.length] };
+    });
+    assert.deepEqual(editorSurface.visual, renderedStyle, "the markdown-source editor should inherit the rendered document surface exactly");
+    assert.deepEqual({ border: editorSurface.border, outline: editorSurface.outline, shadow: editorSurface.shadow },
+      { border: "0px", outline: "none", shadow: "none" }, "the note editor should add no box or focus chrome");
+    const editorValue = await anchoredEditor.inputValue();
+    const clickedWordStart = editorValue.indexOf("anchored");
+    assert.equal(editorSurface.caret[0], editorSurface.caret[1], "double-click editing should leave a collapsed caret, not a selection");
+    assert(editorSurface.caret[0] >= clickedWordStart && editorSurface.caret[0] <= clickedWordStart + "anchored".length,
+      `double-click editing should place the caret at the clicked point in the markdown source (caret ${editorSurface.caret[0]}, word at ${clickedWordStart})`);
+    await anchoredEditor.fill("Edited anchored **durably**");
+    await anchoredEditor.press("Control+Enter");
+    await anchoredCard.locator(".doc-content strong", { hasText: "durably" }).waitFor();
+    await page.waitForFunction(async () => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.some((node) => node.origin?.kind === "note" && node.markdown === "Edited anchored **durably**");
+    });
+    const assertEditedStored = async (label) => {
+      const markdown = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id)?.markdown, anchoredId);
+      assert.equal(markdown, "Edited anchored **durably**", label);
+    };
+    await page.waitForTimeout(1000);
+    await assertEditedStored("the edited note must remain durable after pending saves settle");
+
+    let point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    await page.waitForSelector(".node-note .note-editor");
+    assert.equal(await page.locator(".node-note").count(), 2, "double-click should register one ephemeral note card");
+    await page.waitForTimeout(260);
+    const clickSpawn = await page.locator(".node-note:has(.note-editor)").evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      return { left: rect.left, top: rect.top };
+    });
+    assert(Math.abs(clickSpawn.left - point.x) < 2 && Math.abs(clickSpawn.top - point.y) < 2,
+      `a canvas double-click should place the note's top-left at the click (${JSON.stringify({ clickSpawn, point })})`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelectorAll(".node-note").length === 1);
+    assert.equal(await persistedNoteCount(), 1, "Escape must leave no persisted empty note");
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    await page.waitForSelector(".node-note .note-editor");
+    await page.click("#t-theme");
+    await page.waitForFunction(() => document.querySelectorAll(".node-note").length === 1);
+    assert.equal(await persistedNoteCount(), 1, "blur while empty must leave no persisted note");
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    const standaloneEditor = page.locator(".node-note .note-editor");
+    await standaloneEditor.waitFor();
+    const standaloneCard = page.locator(".node-note:has(.note-editor)");
+    assert.deepEqual(await standaloneCard.evaluate((card) => ({
+      width: parseFloat(card.style.width),
+      height: parseFloat(card.style.height),
+    })), { width: 300, height: 180 }, "standalone notes should use the compact default size");
+    await standaloneEditor.fill("Standalone note survives reload");
+    await page.click("#t-theme");
+    await page.locator(".node-note .doc-content", { hasText: "Standalone note survives reload" }).waitFor();
+    await page.waitForFunction(async () => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.some((node) => node.parent_id === null && node.origin?.kind === "note" && node.markdown === "Standalone note survives reload");
+    });
+
+    await page.keyboard.press("Control+K");
+    await page.waitForSelector("#palette:not([hidden])");
+    const commands = await page.locator(".pal-item").evaluateAll((rows) => rows.map((row) => row.querySelector(".pal-title")?.textContent));
+    assert(commands.includes("New note"), "the canvas palette should expose New note");
+    assert(commands.includes("Zoom to fit"), "the canvas palette should expose Zoom to fit");
+    const zoomCommand = page.locator(".pal-item", { hasText: "Zoom to fit" });
+    assert.equal(await zoomCommand.locator("kbd:visible").count(), 0, "Zoom to fit must not advertise the deleted global F shortcut");
+    await page.keyboard.press("Escape");
+
+    await ensureRailOpen(page);
+    const visibleCenter = await page.evaluate(() => {
+      const rail = document.getElementById("web-rail");
+      const taskbar = document.getElementById("taskbar");
+      const viewport = document.getElementById("viewport");
+      const fullW = viewport.clientWidth || innerWidth;
+      const fullH = viewport.clientHeight || innerHeight;
+      const insetX = rail.classList.contains("open") ? rail.getBoundingClientRect().width : 0;
+      const insetY = taskbar.getBoundingClientRect().height;
+      return { x: insetX + (fullW - insetX) / 2, y: insetY + (fullH - insetY) / 2 };
+    });
+    await page.keyboard.press("Control+K");
+    await page.fill("#pal-text", "New note");
+    await page.press("#pal-text", "Enter");
+    await page.waitForFunction(() => document.activeElement?.classList.contains("note-editor"));
+    assert.equal(await page.locator("#palette:visible").count(), 0, "New note must close the palette before focusing its editor");
+    await page.waitForTimeout(260);
+    const paletteCardCenter = await page.locator(".node-note:has(.note-editor)").evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    });
+    assert(Math.abs(paletteCardCenter.x - visibleCenter.x) < 2 && Math.abs(paletteCardCenter.y - visibleCenter.y) < 2,
+      `palette notes should center in the rail-adjusted viewport (${JSON.stringify({ paletteCardCenter, visibleCenter })})`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelectorAll(".node-note").length === 2);
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(".node-note", { state: "attached" });
+    const reloadedNoteText = await page.locator(".node-note .doc-content").evaluateAll((docs) => docs.map((dc) => dc.textContent).join(" "));
+    assert(reloadedNoteText.includes("Edited anchored durably") && reloadedNoteText.includes("Standalone note survives reload"),
+      `committed note markdown should hydrate after reload (${JSON.stringify(reloadedNoteText)})`);
+    assert.equal(await page.locator(`.node[data-id="${anchoredId}"] .node-title`).innerText(), "Renamed note window",
+      "a renamed note title should survive reload");
+    assert.equal(await page.locator(`.node[data-id="${rootId}"] .node-title`).innerText(), "Renamed answer window",
+      "a renamed non-note title should survive reload");
+    assert.equal(await page.locator(".node-note").count(), 2, "only committed notes should survive reload");
+    console.log("ok web app: top-left note spawn, seamless double-click editing, all-node title renames, and persistence");
   } finally {
     await context.close();
   }
@@ -572,7 +960,7 @@ async function verifyLogicalMarkGrouping() {
     await selectAcrossBlocks(page, "grouped selection", "unmistakable ending");
     await page.waitForSelector("#ask.visible");
     await page.fill("#ask-text", "Why should this whole range highlight?");
-    await page.click("#ask-go");
+    await page.click('#ask .ask-commit[data-commit="ask"]');
     const groupedCanvasMark = page.locator('.node.root mark[aria-label="Open branch: Grouped mark branch"].mark-ready');
     await groupedCanvasMark.first().waitFor();
     const groupedId = await groupedCanvasMark.first().getAttribute("data-child");
@@ -580,7 +968,7 @@ async function verifyLogicalMarkGrouping() {
     await selectText(page, "distinctive phrase");
     await page.waitForSelector("#ask.visible");
     await page.fill("#ask-text", "How does this overlap the larger range?");
-    await page.click("#ask-go");
+    await page.click('#ask .ask-commit[data-commit="ask"]');
     const overlappingCanvasMark = page.locator('.node.root mark[aria-label="Open branch: Overlapping mark branch"].mark-ready');
     await overlappingCanvasMark.waitFor();
     const overlappingId = await overlappingCanvasMark.getAttribute("data-child");
@@ -588,7 +976,7 @@ async function verifyLogicalMarkGrouping() {
     await selectText(page, "unrelated anchor");
     await page.waitForSelector("#ask.visible");
     await page.fill("#ask-text", "Why is this mark separate?");
-    await page.click("#ask-go");
+    await page.click('#ask .ask-commit[data-commit="ask"]');
     const unrelatedCanvasMark = page.locator('.node.root mark[aria-label="Open branch: Unrelated mark branch"].mark-ready');
     await unrelatedCanvasMark.waitFor();
     const unrelatedId = await unrelatedCanvasMark.getAttribute("data-child");
@@ -775,7 +1163,7 @@ async function verifyNonFirstFragmentCanvasNavigation(page, childId) {
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true,
     "clicking a non-first mark fragment must dive to the branch in Canvas");
   await page.waitForTimeout(400);
-  await page.click("#t-frame");
+  await zoomToFit(page);
   await page.waitForTimeout(400);
 
   await nonFirst.focus();
@@ -785,7 +1173,7 @@ async function verifyNonFirstFragmentCanvasNavigation(page, childId) {
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true,
     "pressing Enter on a non-first mark fragment must dive to the branch in Canvas");
   await page.waitForTimeout(400);
-  await page.click("#t-frame");
+  await zoomToFit(page);
   await page.waitForTimeout(400);
 }
 
@@ -1010,7 +1398,7 @@ async function verifyCanvasBranching() {
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.matches(".node.root .nc-inner textarea"));
   await page.evaluate(() => document.querySelector(".node.root").matches = () => false);
-  await page.focus("#t-frame");
+  await page.focus("#t-theme");
   await page.waitForFunction(() => !document.querySelector(".node.root .node-composer").classList.contains("open"));
   await page.evaluate(() => delete document.querySelector(".node.root").matches);
   assert.equal(await rootDrawer.getAttribute("aria-expanded"), "false", "empty-draft blur should close an unhovered card drawer");
@@ -1019,10 +1407,10 @@ async function verifyCanvasBranching() {
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.matches(".node.root .nc-inner textarea"));
   await page.keyboard.type("Create a card follow-up child");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+Enter");
   await waitForCanvasText(page, "Card drawer keyboard submission created this follow-up child");
   assert.equal(await rootDrawer.getAttribute("aria-expanded"), "false", "submitting a card follow-up should close its drawer");
-  assert.equal(providerCalls, 1, "card keyboard submission should use the follow-up request path once");
+  assert.equal(providerCalls, 1, "card Cmd/Ctrl+Enter should use the follow-up request path once");
 
   const childCard = page.locator(".node:not(.root)", { hasText: "Card drawer keyboard submission" }).first();
   const cardControls = await childCard.locator(".node-head .node-btn").evaluateAll((buttons) => buttons.map((button) => ({
@@ -1252,7 +1640,7 @@ async function verifyCanvasBranching() {
   await page.waitForFunction(() => document.activeElement?.id === "ask-text", null, { timeout: 5000 })
     .catch(() => { throw new Error("the selection bar must focus its input on open"); });
   await page.keyboard.type("Why does this matter?");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Control+Enter");
   await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
   // No flight wait here: the .pending state is transient and the tile must be
   // caught before the mock provider finishes streaming.
@@ -1374,7 +1762,7 @@ async function verifyCanvasBranching() {
   await page.waitForFunction(() => window.__markDiveFlashed === true);
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "Enter on a canvas mark must stay in canvas and dive to the card");
   await page.waitForTimeout(400);
-  await page.click("#t-frame"); // the dive moved the parent's mark off-screen — refit first
+  await zoomToFit(page); // the dive moved the parent's mark off-screen — refit first
   await page.waitForTimeout(400);
   await armFlashProbe();
   await branchMark.click();
@@ -1382,7 +1770,7 @@ async function verifyCanvasBranching() {
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "clicking a canvas mark must stay in canvas and dive to the card");
 
   await page.waitForSelector("body.mode-canvas");
-  await page.click("#t-frame"); // leave the mark-dive zoom behind so popover geometry is measured from a neutral view
+  await zoomToFit(page); // leave the mark-dive zoom behind so popover geometry is measured from a neutral view
   await page.waitForTimeout(400);
   const childDelete = page.locator('.node:not(.root)', { hasText: "Euler identity connects rotation" }).locator('.node-btn.danger');
   await childDelete.focus();
@@ -1456,7 +1844,7 @@ async function verifyCanvasBranching() {
   await page.evaluate(() => document.querySelector(".node.current [aria-label=\'Expand document\']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.fill("#composer-text", "Go one layer deeper.");
-  await page.click("#composer-send");
+  await page.click('#composer-actions [data-commit="ask"]');
   const followupRailCard = page.locator("#margin-notes .side-item", { hasText: "Go one layer deeper." });
   await followupRailCard.waitFor();
   await followupRailCard.click();
@@ -1486,6 +1874,34 @@ async function verifyCanvasBranching() {
   assert(external.length > 0, "provider and key validation should have been called");
   assert(external.every((url) => url === PROVIDER_URL || url === KEY_URL || url === MODEL_URL || url === LOCAL_MODEL_URL), `unexpected external request(s): ${external.join(", ")}`);
   await context.close();
+}
+
+// The composer action row's rest/draft swap, read from computed styles.
+async function composerRowState(page, selector) {
+  return page.locator(selector).evaluate((row) => ({
+    lensesVisible: Array.from(row.querySelectorAll(".lens")).every((button) => getComputedStyle(button).display !== "none"),
+    commitsHidden: Array.from(row.querySelectorAll(".ask-commit")).every((button) => getComputedStyle(button).display === "none"),
+  }));
+}
+
+async function zoomToFit(page) {
+  await page.keyboard.press("Control+K");
+  await page.fill("#pal-text", "Zoom to fit");
+  await page.press("#pal-text", "Enter");
+  await page.waitForSelector("#palette", { state: "hidden" });
+}
+
+async function findCanvasBackground(page) {
+  return page.evaluate(() => {
+    const viewport = document.getElementById("viewport");
+    for (let y = innerHeight - 70; y >= 90; y -= 70) {
+      for (let x = innerWidth - 70; x >= 70; x -= 70) {
+        const target = document.elementFromPoint(x, y);
+        if (target && viewport.contains(target) && !target.closest(".node")) return { x, y };
+      }
+    }
+    throw new Error("No empty canvas point found");
+  });
 }
 
 async function createDocument(page, markdown) {

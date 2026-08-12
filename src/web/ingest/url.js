@@ -5,7 +5,7 @@ import { ingestPdfToStoredHole } from "./pdf.js";
 const URL_FETCH_CAP_BYTES = 25 * 1024 * 1024;
 const PASTE_FALLBACK = "Try another link or open a PDF file instead.";
 
-export async function openUrlToStoredHole({ rawUrl, store, title = "", proxyBaseUrl = "", transformMarkdown = null, onProgress = null } = {}) {
+export async function openUrlToStoredHole({ rawUrl, store, title = "", proxyBaseUrl = "", onProgress = null } = {}) {
   const inputUrl = normalizeInputUrl(rawUrl);
   const preferred = preferredHtmlUrl(inputUrl) || inputUrl;
   onProgress?.({ phase: "fetch", url: preferred.href, via: "direct" });
@@ -34,10 +34,7 @@ export async function openUrlToStoredHole({ rawUrl, store, title = "", proxyBase
     throw new Error(`Couldn't extract readable article content from that URL. ${PASTE_FALLBACK}`);
   }
   const holeTitle = title || extracted.title || titleFromUrl(fetched.url) || "Web Document";
-  const markdown = typeof transformMarkdown === "function"
-    ? await transformMarkdown({ markdown: extracted.markdown, title: holeTitle, baseUrl: fetched.url.href })
-    : extracted.markdown;
-  const hole = createHoleFromMarkdown({ title: holeTitle, markdown, baseUrl: fetched.url.href });
+  const hole = createHoleFromMarkdown({ title: holeTitle, markdown: extracted.markdown, baseUrl: fetched.url.href });
   await store.saveHole(hole);
   return { hole, result: { title: holeTitle, url: fetched.url.href, via: fetched.via } };
 }

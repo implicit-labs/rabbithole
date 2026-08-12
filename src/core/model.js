@@ -12,6 +12,12 @@ import { validateAssetName } from "./assets.js";
 export const BRANCH_SELECTION = "selection";
 export const BRANCH_FOLLOWUP = "followup";
 
+/** @param {{ origin?: unknown } | null | undefined} node */
+export function isNoteNode(node) {
+  return !!node && !!node.origin && typeof node.origin === "object" && !Array.isArray(node.origin)
+    && /** @type {{ kind?: unknown }} */ (node.origin).kind === "note";
+}
+
 /** @type {Readonly<Record<PropertyKey, { label: string, q: string }>>} */
 export const LENSES = Object.freeze({
   explain: Object.freeze({
@@ -56,11 +62,15 @@ function normalizeBranchType(type, selectedText = "") {
   return selectedText ? BRANCH_SELECTION : BRANCH_FOLLOWUP;
 }
 
-/** @param {{ origin?: { branch_type?: unknown, selected_text?: unknown } | null, parent_id?: unknown } | null | undefined} node */
+/** @param {{ origin?: { kind?: unknown, branch_type?: unknown, selected_text?: unknown, anchor?: unknown } | null, parent_id?: unknown } | null | undefined} node */
 export function branchTypeOfNode(node) {
   if (!node || (!node.origin && !node.parent_id)) return null;
   const type = node.origin?.branch_type;
-  return type === BRANCH_SELECTION || type === BRANCH_FOLLOWUP ? type : null;
+  if (type === BRANCH_SELECTION || type === BRANCH_FOLLOWUP) return type;
+  if (node.parent_id && node.origin?.kind === "note") {
+    return node.origin.anchor || node.origin.selected_text ? BRANCH_SELECTION : BRANCH_FOLLOWUP;
+  }
+  return null;
 }
 
 /** @param {unknown} pos @returns {Position} */
@@ -241,6 +251,46 @@ export function lineageNodesFromMap(nodes, nodeId) {
     current = current.parent_id ? getNode(nodes, current.parent_id) : null;
   }
   return path.reverse();
+}
+
+/** @param {ModelHoleNode} node */
+function noteEntry(node) {
+  return {
+    note_id: node.id,
+    on_node_id: node.parent_id,
+    on_selected_text: (/** @type {{ selected_text?: string } | null | undefined} */ (node.origin))?.selected_text || null,
+    content: node.markdown,
+    created_at: node.created_at,
+  };
+}
+
+/* Standalone (hole-wide) notes lead, anchored notes follow, oldest first. */
+/** @param {ModelHoleNode} a @param {ModelHoleNode} b */
+function standaloneFirstByAge(a, b) {
+  const scope = Number(a.parent_id !== null) - Number(b.parent_id !== null);
+  return scope || String(a.created_at || "").localeCompare(String(b.created_at || ""));
+}
+
+/** @param {NodeCollection} nodes */
+export function collectAllNotes(nodes) {
+  return [...valuesOfNodes(nodes)].filter(isNoteNode).sort(standaloneFirstByAge).map(noteEntry);
+}
+
+/** @param {NodeCollection} nodes @param {string} parentId @param {{ includeLineage?: boolean }} [options] */
+export function collectRelevantNotes(nodes, parentId, options = {}) {
+  const lineage = lineageNodesFromMap(nodes, parentId);
+  const lineageIds = new Set(lineage.map((node) => node.id));
+  const ambient = [...valuesOfNodes(nodes)]
+    .filter((node) => isNoteNode(node)
+      && !lineageIds.has(node.id)
+      && (node.parent_id === null || (typeof node.parent_id === "string" && lineageIds.has(node.parent_id))))
+    .sort(standaloneFirstByAge)
+    .map(noteEntry);
+  if (!options.includeLineage) return ambient;
+  const thread = lineage
+    .filter(isNoteNode)
+    .map((node) => ({ ...noteEntry(node), on_lineage: true }));
+  return [...thread, ...ambient];
 }
 
 /** @param {NodeCollection} nodes @param {string} nodeId */

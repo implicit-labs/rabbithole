@@ -35,18 +35,6 @@ body {
 .tool-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .tool-btn svg { display: block; width: 16px; height: 16px; flex-shrink: 0; }
 
-/* One send button everywhere a question leaves the page: neutral while there's
-   nothing to send, accent the moment there is. */
-.send-btn { width: var(--control-h-sm); height: var(--control-h-sm); border-radius: var(--radius-pill); border: none; flex-shrink: 0; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;
-  background: color-mix(in srgb, var(--fg) 9%, transparent); color: var(--fg-faint);
-  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-out); }
-.send-btn:disabled { cursor: default; }
-.send-btn:not(:disabled) { background: var(--accent); color: var(--accent-contrast); }
-.send-btn:not(:disabled):hover { filter: brightness(1.07); }
-/* optical: circular send button press feedback */
-.send-btn:not(:disabled):active { transform: scale(0.97); }
-.send-btn svg { display: block; }
-
 /* ---------- shared document typography (em-based so text zoom scales it) ---------- */
 .md { font-family: var(--font-doc); line-height: 1.72; color: var(--fg); font-kerning: normal; overflow-wrap: break-word; }
 .md h1, .md h2, .md h3 { font-family: var(--font-ui); font-weight: 600; color: var(--fg-bold); line-height: 1.3; }
@@ -151,6 +139,8 @@ html[data-theme="dark"] .rh-lightbox-img { padding: 8px; background: #f4f4f1; bo
 .doc-content mark.mark-pending { border-bottom: 2px dotted color-mix(in srgb, var(--accent) 55%, transparent); }
 .doc-content mark.mark-ready { border-bottom: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); }
 .doc-content mark.mark-ready:hover, .doc-content mark.mark-pending:hover, .doc-content mark.mark-hover, .doc-content mark.mark-dom-focus, .doc-content mark.mark-focus { background: var(--hl-strong); border-bottom-color: var(--accent); }
+.doc-content mark.mark-note { background: var(--note-hl); border-bottom-color: color-mix(in srgb, var(--note-ink) 65%, transparent); }
+.doc-content mark.mark-note:hover, .doc-content mark.mark-note.mark-hover, .doc-content mark.mark-note.mark-dom-focus, .doc-content mark.mark-note.mark-focus { background: var(--note-hl-strong); border-bottom-color: var(--note-ink); }
 .doc-content mark.hl:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 /* Landing flash when a jump (FROM strip, ⌘K) brings you to a mark. */
 .doc-content mark.mark-flash::after { opacity: 1; }
@@ -194,7 +184,7 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
   .loading-bunny, .stream-caret { animation: none; }
   .math-pending::after, .viz-pending::after { animation: none; }
   .rh-lightbox, .rh-lightbox-viewport { animation: none; }
-  .send-btn, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.danger, .node-font-btn,
+  .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.danger, .node-font-btn,
   .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, #sharemenu, #confirm { transition: none !important; }
   #ask, #sharemenu, #confirm, .node.node-enter { transform: none; }
   .node.node-enter { opacity: 1; }
@@ -285,12 +275,12 @@ body.mode-canvas #tb-restore-pill { display: none; }
    column pixel-aligned with the document text even when a classic scrollbar
    narrows the scroller above. */
 #composer { flex-shrink: 0; padding: 10px 48px 16px; background: var(--bg); border-top: 1px solid var(--border); overflow: hidden; scrollbar-gutter: stable; }
-.composer-inner { max-width: var(--reader-column); margin: 0 auto; display: flex; align-items: flex-end; gap: var(--space-4); background: var(--node-bg); border: var(--border-default); border-radius: var(--radius-conversation); padding: var(--space-4) var(--space-4) var(--space-4) var(--space-8); transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard); }
-.composer-inner:focus-within { border-color: var(--accent); box-shadow: var(--focus-field-shadow); }
+/* The reader composer is the popover's composer surface mounted in flow: same
+   .ask-input + .ask-actions structure, same paddings, wider column. The shell
+   itself carries no padding — symmetry comes from the shared inner parts. */
+.composer-inner { max-width: var(--reader-column); margin: 0 auto; display: block; background: var(--node-bg); border: var(--border-default); border-radius: var(--radius-popover); padding: 0; overflow: hidden; transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard); }
+.composer-inner:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .composer-inner.disabled { opacity: 0.6; }
-#composer textarea { flex: 1; border: none; outline: none; resize: none; background: transparent; color: var(--fg); font-family: var(--font-ui); font-size: 13.5px; line-height: 1.5; max-height: 140px; padding: 4px 0; }
-#composer textarea::placeholder { color: var(--fg-faint); }
-
 /* Compact screens keep one uninterrupted reading surface. Inline marks remain
    the branch affordance there; the full branch rail starts when both surfaces
    have enough room to stay useful. */
@@ -305,9 +295,9 @@ body.mode-canvas #tb-restore-pill { display: none; }
   .rh-origin-crop { max-width: 100%; }
   #composer { padding: 8px max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     overflow: hidden; scrollbar-gutter: auto; }
-  .composer-inner { width: 100%; padding: 6px 6px 6px 12px; }
-  #composer textarea { min-height: 32px; font-size: 16px; line-height: 1.4; }
-  #composer .send-btn { width: 44px; height: 44px; }
+  .composer-inner { width: 100%; }
+  .followup-composer .ask-input textarea { min-height: 32px; font-size: 16px; line-height: 1.4; }
+  .followup-composer .lens, .followup-composer .ask-commit { min-height: 44px; }
 }
 @media (min-width: 761px) and (max-width: 879px) {
   #reader-rail, #margin-notes { display: none; }
@@ -342,7 +332,8 @@ body.mode-flight #viewport { display: block; }
 #edges circle.edge-hl { fill: color-mix(in srgb, var(--accent) 60%, var(--edge)); }
 /* overflow stays visible so the follow-up drawer can slide out below the card;
    the head carries its own top radius instead. */
-.node { position: absolute; display: flex; flex-direction: column; background: var(--node-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.node { --card-head-bg: var(--node-head); position: absolute; display: flex; flex-direction: column; background: var(--node-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.node.node-note { --card-head-bg: color-mix(in srgb, var(--note-ink) 7%, var(--node-head)); }
 .node${""}::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: 0; pointer-events: none; transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .node.node-enter { opacity: 0; transform: translateY(8px); transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .node.node-enter.entered { opacity: 1; transform: translateY(0); }
@@ -351,12 +342,13 @@ body.mode-flight #viewport { display: block; }
 .node.current { border-color: var(--border-focus); }
 /* The head stays minimal — just the title — so the card reads like a document.
    Controls sit in a right-edge overlay with secondary text sizing de-emphasized. */
-.node-head { position: relative; display: flex; align-items: center; padding: var(--space-4) var(--space-6); background: var(--node-head); border-bottom: var(--border-default); border-radius: var(--radius-card) var(--radius-card) 0 0; cursor: grab; user-select: none; flex-shrink: 0; }
+.node-head { position: relative; display: flex; align-items: center; padding: var(--space-4) var(--space-6); background: var(--card-head-bg); border-bottom: var(--border-default); border-radius: var(--radius-card) var(--radius-card) 0 0; cursor: grab; user-select: none; flex-shrink: 0; }
 .node-head:active { cursor: grabbing; }
 .node-title { font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; color: var(--fg-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.node-title[contenteditable] { outline: none; cursor: text; user-select: text; -webkit-user-select: text; }
 .node-badge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-right: 7px; flex: 0 0 14px; color: var(--fg-dim); cursor: default; }
 .node-badge svg { display: block; width: 14px; height: 14px; }
-.node-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 0; padding: 0 7px 0 30px; pointer-events: none; background: linear-gradient(90deg, transparent, var(--node-head) 28%); border-radius: 0 var(--radius-card) 0 0; }
+.node-acts { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 0; padding: 0 7px 0 30px; pointer-events: none; background: linear-gradient(90deg, transparent, var(--card-head-bg) 28%); border-radius: 0 var(--radius-card) 0 0; }
 @media (hover: none) { .node-acts { position: static; padding: 0 0 0 8px; background: none; } }
 .node-act-divider { width: 1px; height: 14px; margin: 0 3px; background: var(--border); flex-shrink: 0; opacity: 0; transition: opacity 150ms ease; }
 .tool-icon, .node-btn { appearance: none; width: var(--control-h-xs); height: var(--control-h-xs); padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius-control); flex-shrink: 0; background-color: transparent; color: var(--fg-faint); cursor: pointer; pointer-events: auto; font-family: var(--font-ui); font-size: var(--text-ui); font-weight: var(--weight-medium); line-height: 1; transition: var(--transition-color); }
@@ -371,6 +363,7 @@ body.mode-flight #viewport { display: block; }
 @media (hover: none) { .node-btn.danger, .node-font-btn, .node-act-divider { opacity: 1; } }
 .node-body { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
 .node-resize:hover { opacity: 1; }
 .node.collapsed .node-body, .node.collapsed .node-resize, .node.collapsed .node-composer { display: none; }
@@ -406,16 +399,12 @@ body.mode-flight #viewport { display: block; }
 /* a parked draft marks the handle with a small accent dot */
 .node-composer.nc-draft .nc-handle::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
 .node-composer.open .nc-handle { opacity: 0; pointer-events: none; }
-.nc-inner { display: flex; align-items: flex-end; gap: var(--control-gap); margin-top: 5px; background: var(--node-bg); border: var(--border-default); border-radius: var(--radius-card); padding: 5px 5px 5px var(--space-6); box-shadow: var(--shadow-card); pointer-events: auto;
+.nc-inner { display: block; margin-top: 5px; background: var(--node-bg); border: var(--border-default); border-radius: var(--radius-popover); padding: 0; overflow: hidden; box-shadow: var(--shadow-card); pointer-events: auto;
   transform: translateY(calc(-100% - 34px)); opacity: 0;
   transition: transform var(--duration-slow) var(--ease-spring), opacity var(--duration-enter) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard); }
 .node-composer.open .nc-inner { transform: translateY(0); opacity: var(--nc-op, 1); }
-.nc-inner:focus-within { border-color: var(--accent); box-shadow: var(--focus-field-shadow), var(--shadow-card); }
+.nc-inner:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .nc-inner.disabled { --nc-op: 0.55; }
-.nc-inner textarea { flex: 1; border: none; outline: none; resize: none; background: transparent; color: var(--fg); font-family: var(--font-ui); font-size: 12px; line-height: 1.45; max-height: 90px; padding: 3px 0; }
-.nc-inner textarea::placeholder { color: var(--fg-faint); }
-.nc-inner .send-btn { width: 22px; height: 22px; }
-.nc-inner .send-btn svg { width: 12px; height: 12px; }
 @media (hover: none), (pointer: coarse) { .nc-handle { opacity: 1; pointer-events: auto; transition: none; } .node-composer.open .nc-handle { opacity: 0; pointer-events: none; } }
 .origin-quote { font-family: var(--font-doc); font-size: 12px; color: var(--fg-dim); border-left: 2px solid var(--border-focus); padding-left: 9px; margin-bottom: 12px; font-style: italic; }
 .rh-origin-crop { display: block; width: fit-content; max-width: 58%; overflow: hidden; box-sizing: border-box; margin: 0 0 14px; padding: 0; border: 1px solid color-mix(in srgb, var(--border-focus) 42%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--node-bg) 94%, var(--fg) 6%); box-shadow: 0 1px 1px color-mix(in srgb, var(--fg) 8%, transparent); cursor: zoom-in; line-height: 0; }
@@ -483,10 +472,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 }
 
 /* ---------- ask popup — a small command palette for the selection ----------
-   Two rows, nothing else: a borderless input with the shared circular send, and
-   the four lenses behind a hairline. The selection stays lit in the document
-   itself (Custom Highlight), so the popup repeats no context. Blank + ↵ =
-   Explain, so the send stays armed. */
+   A borderless input sits above one action row. The row starts as four lenses,
+   then swaps to explicit Note/Ask commits once there is text. The selection
+   stays lit in the document itself (Custom Highlight), so the popup repeats no
+   context. */
 #ask { position: fixed; z-index: 80; width: 372px; visibility: hidden; opacity: 0; pointer-events: none;
   background: color-mix(in srgb, var(--bar-bg) 88%, transparent);
   -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
@@ -500,31 +489,49 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    a filled pill but vanishes as a 1px line, so the same presence needs more of the
    accent mixed into the border. */
 #ask:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
-.ask-input { display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 14px; }
+/* 14px inline on both sides: the textarea's text edge lands exactly where the
+   first lens label starts below it (5px row padding + 9px pill padding) — one
+   shared alignment edge, and no legacy right-side slot for a send button. */
+.ask-input { display: flex; align-items: flex-end; gap: 8px; padding: 8px 14px; }
 .ask-input textarea { flex: 1; border: none; outline: none; resize: none; background: transparent; color: var(--fg);
   font-family: var(--font-ui); font-size: 13px; line-height: 1.5; padding: 3px 0; min-height: 20px; max-height: 110px; }
 .ask-input textarea::placeholder { color: var(--fg-faint); }
-.ask-input .send-btn { width: 26px; height: 26px; }
 /* The four labels are wildly different lengths ("ELI5" vs "Go Deeper"), so equal
    flex columns produce unequal gaps between the words — the short label floats in
    a pool of space while the long one nearly touches its neighbour. Size each pill
    to its own text with identical padding and let space-between hand out the slack:
    every word-to-word distance is then the same, and the row still runs edge to edge. */
-.ask-lenses { display: flex; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
-.lens { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
+.ask-actions { display: flex; flex-wrap: wrap; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
+.commit-actions { position: relative; display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; }
+.commit-actions::before { content: ""; position: absolute; z-index: 1; top: 6px; bottom: 6px; left: 50%; width: 1px; transform: translateX(-0.5px); background: var(--border); pointer-events: none; }
+.lens, .ask-commit { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
   color: var(--fg-dim); background: none; border: none; border-radius: 8px; padding: 5.5px 9px; cursor: pointer; white-space: nowrap;
   transition: color 0.12s, background 0.12s; }
-.lens:hover { color: var(--fg-bold); background: var(--hl); }
-.lens:active { background: var(--hl-strong); }
+.lens:hover, .ask-commit:hover { color: var(--fg-bold); background: var(--hl); }
+.lens:active, .ask-commit:active { background: var(--hl-strong); }
+.ask-commit:disabled { cursor: default; opacity: 0.5; }
+.ask-commit:disabled:hover, .ask-commit:disabled:active { color: var(--fg-dim); background: none; }
 /* A 2px ring floating outside a bare pill collides with the popover's own hairline
    in a 5px gutter. Draw the keyboard state inside the pill instead: the hover fill
    plus a tinted edge on the exact same 8px radius — unmistakable, never loud. */
-.lens:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
+.lens:focus-visible, .ask-commit:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
-#ask .send-btn:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
-.lens kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
-  background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 4px; padding: 1px 4.5px; line-height: 1.6; }
-.lens:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
+/* Every chip — 1 2 3 4 ↵ ⌘↵ — is the same fixed block, flex-centered so the
+   glyph sits optically dead-center regardless of its own metrics (↵ carries
+   its ink low-left; a text box with line-height centering never looks right). */
+.lens kbd, .ask-commit kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
+  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline);
+  background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.lens:hover kbd, .ask-commit:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
+.ask-commit { flex: 1 1 50%; }
+/* The row swap: lenses at rest, the commit pair once the surface (#ask or a
+   .followup-composer) carries has-draft. Buttons hide individually alongside
+   their container so each button's own computed display tells the truth. */
+.ask-actions .commit-actions, .ask-actions .ask-commit { display: none; }
+.has-draft .lens { display: none; }
+.has-draft .commit-actions { display: flex; }
+.has-draft .ask-commit { display: inline-flex; }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */
@@ -535,12 +542,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 #ask.mobile-sheet.visible { transform: translateY(0); }
 #ask.mobile-sheet .ask-input { align-items: center; gap: 10px; padding: 10px 10px 10px 14px; }
 #ask.mobile-sheet .ask-input textarea { min-height: 24px; max-height: 96px; font-size: 16px; line-height: 1.45; }
-#ask.mobile-sheet .ask-input .send-btn { width: 40px; height: 40px; flex: 0 0 40px; }
-#ask.mobile-sheet .ask-lenses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+#ask.mobile-sheet .ask-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
   padding: 8px 8px max(8px, env(safe-area-inset-bottom)); }
-#ask.mobile-sheet .lens { min-height: 46px; padding: 10px 8px; font-size: 13px;
+#ask.mobile-sheet .commit-actions { grid-column: 1 / -1; gap: 6px; }
+#ask.mobile-sheet .lens, #ask.mobile-sheet .ask-commit { min-height: 46px; padding: 10px 8px; font-size: 13px;
   color: var(--fg); background: color-mix(in srgb, var(--fg) 5%, transparent); }
-#ask.mobile-sheet .lens:active { background: var(--hl-strong); }
+#ask.mobile-sheet .lens:active, #ask.mobile-sheet .ask-commit:active { background: var(--hl-strong); }
 #ask.mobile-sheet .lens kbd { display: none; }
 
 /* ---------- ⌘K palette — search the whole hole ---------- */
@@ -643,6 +650,8 @@ body:not(.mode-canvas) #hint.flash { bottom: 84px; }
 .doc-content .rh-pdf-mark polygon { pointer-events: all; fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: color-mix(in srgb, var(--accent) 32%, transparent); stroke-width: .75; vector-effect: non-scaling-stroke; transition: fill 0.15s, stroke 0.15s; }
 .doc-content .rh-pdf-mark.mark-pending polygon { fill: color-mix(in srgb, var(--accent) 9%, transparent); stroke-dasharray: 3 2; }
 .doc-content .rh-pdf-mark:hover polygon, .doc-content .rh-pdf-mark.mark-hover polygon, .doc-content .rh-pdf-mark.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-focus polygon { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
+.doc-content .rh-pdf-mark.mark-note polygon { fill: var(--note-hl); stroke: color-mix(in srgb, var(--note-ink) 48%, transparent); }
+.doc-content .rh-pdf-mark.mark-note:hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-note.mark-focus polygon { fill: var(--note-hl-strong); stroke: var(--note-ink); }
 .rh-pdf-textlayer span::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .rh-pdf-box-mode .rh-pdf-page, .rh-pdf-box-mode .rh-pdf-textlayer { cursor: crosshair; user-select: none; }
 .rh-pdf-box-draft { position: absolute; z-index: 4; border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: none;

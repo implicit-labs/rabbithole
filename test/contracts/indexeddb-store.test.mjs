@@ -51,6 +51,36 @@ await runStoreContract(store, {
   },
 });
 
+{
+  const host = new DirectRabbitholeHost({
+    store,
+    hole: {
+      hole_id: "web-note-create",
+      title: "Web note create",
+      root_id: "root",
+      created_at: "2026-08-11T00:00:00.000Z",
+      view_state: null,
+      nodes: [{ id: "root", parent_id: null, title: "Root", markdown: "Root body", status: "answered" }],
+    },
+  });
+  const result = await host.handleBrowserEvent({
+    type: "node_create",
+    id: "standalone-note",
+    markdown: "Durable browser note",
+    position: { x: -80, y: 220 },
+    origin: { kind: "note" },
+  });
+  assert.deepEqual(result, { ok: true, node_id: "standalone-note" });
+  assert.equal(host.hydration().nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "web hydration includes standalone notes");
+  assert.equal((await store.loadHole("web-note-create")).nodes.find((node) => node.id === "standalone-note")?.markdown, "Durable browser note", "web node_create must persist to IndexedDB before returning");
+
+  await host.handleBrowserEvent({ type: "delete_node", node_id: "standalone-note" });
+  await host.flushSave();
+  assert.equal((await store.loadHole("web-note-create")).nodes.some((node) => node.id === "standalone-note"), false, "web host deletes and persists standalone notes");
+  await host.dispose();
+}
+console.log("ok IndexedDB notes: web node_create persists, hydrates, and deletes standalone notes");
+
 async function verifyFreshDatabaseInitialization() {
   const store = new IdbStore({ dbName: `rabbithole-indexeddb-initialization-${Date.now()}` });
   assert.deepEqual(await store.listHoles(), [], "a fresh browser database should start empty");

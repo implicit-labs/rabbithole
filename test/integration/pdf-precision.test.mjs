@@ -347,7 +347,7 @@ try {
   await page.mouse.up();
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", "Real pointer target");
-  await page.click("#ask-go");
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   await page.waitForFunction(() => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= 1);
   const pointerState = await portableState(page);
   const pointerChild = pointerState.hole.nodes.find((node) => node.origin?.question === "Real pointer target");
@@ -464,7 +464,7 @@ try {
     for (let index = 0; index < 4; index++) assert(Math.abs(pending.bounds[index] - desiredBounds[index]) <= 0.35, `pending CropBox coordinate ${index} drifted at ${pendingZoom}x: ${pending.bounds[index]} vs ${desiredBounds[index]}`);
   }
   await page.fill("#ask-text", "Crop box exact region");
-  await page.click("#ask-go");
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   await page.waitForFunction(() => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= 6);
   const regionState = await portableState(page);
   const region = regionState.hole.nodes.find((node) => node.origin?.question === "Crop box exact region");
@@ -483,7 +483,18 @@ try {
   assert(dimensions.height >= 1137 && dimensions.height <= 1139, `Figure 2 crop must render its exact 273-point padded height at 300dpi: ${JSON.stringify(dimensions)}`);
   assert(Math.abs(dimensions.width / dimensions.height - 420 / 273) < 0.003, `crop dimensions must preserve the exact paper-space box plus 12-point padding: ${JSON.stringify(dimensions)}`);
 
-  const expectedReaderBranches = regionState.hole.nodes.filter((node) => node.parent_id === root.id).length;
+  const answerCountBeforeNote = answerBodies.length;
+  await selectAndNote(page, "Attention Is All You Need", 10, 12, "PDF marginalia");
+  const noteState = await portableState(page);
+  const pdfNote = noteState.hole.nodes.find((node) => node.origin?.kind === "note");
+  assert(pdfNote, "PDF note creation must persist a first-class note node");
+  assert.equal(pdfNote.origin.anchor.pdf.kind, "text");
+  assert.equal(pdfNote.status, "answered");
+  assert.equal(answerBodies.length, answerCountBeforeNote, "PDF notes must not invoke the model provider");
+  assert.equal(await page.locator(`.node .rh-pdf-mark.mark-ready.mark-note[data-child="${pdfNote.id}"]`).count(), 1,
+    "a PDF note should paint an SVG mark-note group immediately");
+
+  const expectedReaderBranches = noteState.hole.nodes.filter((node) => node.parent_id === root.id).length;
   await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
@@ -509,6 +520,8 @@ try {
 
   const pointerReaderMark = page.locator(`#reader-main .rh-pdf-mark[data-child="${pointerChild.id}"]`);
   await pointerReaderMark.waitFor();
+  assert.equal(await page.locator(`#reader-main .rh-pdf-mark.mark-note[data-child="${pdfNote.id}"]`).count(), 1,
+    "PDF note marks should rebuild with note ink in Reader");
   await pointerReaderMark.focus();
   await page.keyboard.press("Enter");
   await page.locator("#reader-main", { hasText: "Coordinate-safe response." }).waitFor();
@@ -523,7 +536,7 @@ try {
   await page.locator("#reader-main", { hasText: "Coordinate-safe response." }).waitFor();
 
   assert.deepEqual(pageErrors, [], `browser emitted PDF runtime errors:\n${pageErrors.join("\n")}`);
-  console.log("ok PDF precision/performance (Attention paper): native trackpad scrolling, inert single-click and exact drag selection, flicker-free local zoom, stable text DOM, bounded reusable tiles, zoom-invariant pending regions and Poppler coordinates, multi-line quads, exact Figure 2 crop, and source fidelity");
+  console.log("ok PDF precision/performance (Attention paper): native trackpad scrolling, inert single-click and exact drag selection, flicker-free local zoom, stable text DOM, bounded reusable tiles, zoom-invariant pending regions and Poppler coordinates, multi-line quads, PDF note ink, exact Figure 2 crop, and source fidelity");
 } finally {
   await browser.close();
   await new Promise((resolve) => server.close(resolve));
@@ -573,7 +586,9 @@ async function pendingRegionBounds(page) {
   });
 }
 
-async function selectAndAsk(page, itemText, start, end, question) {
+// Select [start, end) of one PDF text item, open the popover, and fill the box.
+// Returns the node count a single commit should reach.
+async function selectAndFill(page, itemText, start, end, text) {
   const picked = await page.evaluate(({ itemText, start, end }) => {
     const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
     if (!span?.firstChild) throw new Error(`Text item not found: ${itemText}`);
@@ -584,11 +599,22 @@ async function selectAndAsk(page, itemText, start, end, question) {
   }, { itemText, start, end });
   assert.equal(picked, itemText.slice(start, end));
   await page.waitForSelector("#ask.visible");
-  await page.fill("#ask-text", question);
-  const expected = await page.locator(".node").count() + 1;
-  await page.click("#ask-go");
+  await page.fill("#ask-text", text);
+  return await page.locator(".node").count() + 1;
+}
+
+async function selectAndAsk(page, itemText, start, end, question) {
+  const expected = await selectAndFill(page, itemText, start, end, question);
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
   await page.waitForFunction((count) => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= count, expected - 1);
+}
+
+async function selectAndNote(page, itemText, start, end, markdown) {
+  const expected = await selectAndFill(page, itemText, start, end, markdown);
+  await page.click('#ask .ask-commit[data-commit="note"]');
+  await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
+  await page.waitForSelector(".node .rh-pdf-mark.mark-note");
 }
 
 async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, lastOffset, question }) {
@@ -611,7 +637,7 @@ async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, last
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", question);
   const expected = await page.locator(".node").count() + 1;
-  await page.click("#ask-go");
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
   await page.waitForFunction((count) => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }

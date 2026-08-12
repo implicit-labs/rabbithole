@@ -256,14 +256,6 @@ function compareSummaries(a, b) {
   return String(b.updated_at).localeCompare(String(a.updated_at));
 }
 
-async function getAllForHole(store, holeId, IDBKeyRangeCtor) {
-  if (!IDBKeyRangeCtor) {
-    const rows = await requestToPromise(store.getAll());
-    return rows.filter((row) => row.hole_id === holeId);
-  }
-  return requestToPromise(store.getAll(IDBKeyRangeCtor.bound([holeId, ""], [holeId, "\uffff"])));
-}
-
 async function getAllForIngest(store, ingestId, IDBKeyRangeCtor) {
   if (!IDBKeyRangeCtor) {
     const rows = await requestToPromise(store.getAll());

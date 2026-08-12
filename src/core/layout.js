@@ -7,6 +7,7 @@ import { BRANCH_FOLLOWUP, BRANCH_SELECTION, branchTypeOfNode } from "./model.js"
 
 export const DEFAULT_ROOT = Object.freeze({ w: 480, h: 580 });
 export const DEFAULT_CHILD = Object.freeze({ w: 420, h: 460 });
+export const DEFAULT_STANDALONE_NOTE = Object.freeze({ w: 300, h: 180 });
 export const TREE_PARENT_GAP = 70;
 export const TREE_STACK_GAP = 30;
 

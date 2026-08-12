@@ -5,6 +5,10 @@ import {
   applyNodeUpdateFields,
   collectSubtreeIds,
   createPendingBranchNode,
+  isNoteNode,
+  normalizeAnchor,
+  normalizePosition,
+  normalizeSize,
   normalizeViewState,
 } from "./model.js";
 
@@ -15,6 +19,7 @@ import {
 /** @typedef {import("./contracts/engine.js").ReduceEffects} ReduceEffects */
 /** @typedef {import("./contracts/engine.js").ReduceOptions} ReduceOptions */
 /** @typedef {import("./contracts/engine.js").BranchRequestEvent} BranchRequestEvent */
+/** @typedef {import("./contracts/engine.js").NodeCreateEvent} NodeCreateEvent */
 /** @typedef {import("./contracts/engine.js").NodeProgressEvent} NodeProgressEvent */
 /** @typedef {import("./contracts/engine.js").NodeAnsweredEvent} NodeAnsweredEvent */
 /** @typedef {import("./contracts/engine.js").DeleteNodeEvent} DeleteNodeEvent */
@@ -85,6 +90,8 @@ export function reduceHoleEvent(state, event, options = {}) {
   switch (type) {
     case "branch_request":
       return reduceBranchRequest(state, /** @type {BranchRequestEvent} */ (event), options);
+    case "node_create":
+      return reduceNodeCreate(state, /** @type {NodeCreateEvent} */ (event), options);
     case "node_progress":
       return reduceNodeProgress(state, /** @type {NodeProgressEvent} */ (event), options);
     case "node_answered":
@@ -160,6 +167,47 @@ function reduceBranchRequest(state, event, options) {
   if (!node.id) throw new Error("Branch request node_id is required");
   const nodes = cloneNodes(state, options);
   nodes.set(node.id, node);
+  return withState({ ...state, nodes }, { createdNode: node });
+}
+
+/** @param {HoleState} state @param {NodeCreateEvent} event @param {ReduceOptions} options */
+function reduceNodeCreate(state, event, options) {
+  const nodeId = String(event.id ?? "").trim();
+  if (!nodeId) throw new Error("Node create id is required");
+  if (state.nodes.has(nodeId)) throw new Error(`Node ${nodeId} already exists`);
+  if (!event.origin || typeof event.origin !== "object" || Array.isArray(event.origin)
+    || /** @type {{ kind?: unknown }} */ (event.origin).kind !== "note") {
+    throw new Error('Node create origin.kind must be "note"');
+  }
+  if (typeof event.markdown !== "string" || !event.markdown.trim()) {
+    throw new Error("Note markdown is required");
+  }
+  const parentId = event.parent_id == null ? null : String(event.parent_id);
+  if (parentId !== null && !state.nodes.has(parentId)) throw new Error(`Parent node ${parentId} not found`);
+  const rawOrigin = /** @type {Record<string, any>} */ (event.origin);
+  const origin = parentId !== null && rawOrigin.anchor
+    ? { kind: "note", selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection" }
+    : { kind: "note" };
+
+  const node = /** @type {HoleNode} */ ({
+    id: nodeId,
+    parent_id: parentId,
+    title: typeof event.title === "string" ? (event.title.trim() || "Note") : "Note",
+    markdown: normalizeBlockIds(event.markdown, { idFactory: options.idFactory }).markdown,
+    base_url: null,
+    base_url_source: null,
+    origin,
+    position: normalizePosition(event.position),
+    size: normalizeSize(event.size),
+    font_scale: 1,
+    collapsed: false,
+    status: "answered",
+    read: true,
+    created_at: options.now ?? new Date().toISOString(),
+    extensions: {},
+  });
+  const nodes = cloneNodes(state, options);
+  nodes.set(nodeId, node);
   return withState({ ...state, nodes }, { createdNode: node });
 }
 
@@ -271,7 +319,12 @@ function reduceNodeUpdate(state, event, options) {
   const node = state.nodes.get(nodeId);
   if (!node) return withState(state);
   const nodes = cloneNodes(state, options);
-  nodes.set(nodeId, applyNodeUpdateFields(node, event));
+  const next = applyNodeUpdateFields(node, event);
+  if (typeof event.title === "string" && event.title.trim()) next.title = event.title.trim();
+  if (isNoteNode(node) && typeof event.markdown === "string" && event.markdown.trim()) {
+    next.markdown = normalizeBlockIds(event.markdown, { idFactory: options.idFactory }).markdown;
+  }
+  nodes.set(nodeId, next);
   return withState({ ...state, nodes }, { node_id: nodeId });
 }
 

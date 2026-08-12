@@ -5,7 +5,7 @@ import {
   nodes,
 } from "./core.js";
 import { focusedMark, jumpToOrigin, openNode, stepMark } from "./reader.js";
-import { frameAll, setMode, tidy } from "./canvas-view.js";
+import { setMode, tidy } from "./canvas-view.js";
 import { togglePalette } from "./palette.js";
 import { hydrateInitialState } from "./hydrate.js";
 import { createCleanupScope } from "./lifecycle.js";
@@ -45,14 +45,13 @@ function onGlobalKeydown(e){
     if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
     if (e.key === "?"){
       flashHint(mode === "canvas"
-        ? "space — open the current card · f frame · t tidy · ⌘K search"
+        ? "space — open the current card · t tidy · ⌘K search and commands"
         : "j / k — walk the highlights · ↵ open · ⌫ up a level · esc — back to canvas · ⌘K search");
       return;
     }
     // Esc always collapses the focused state back onto the canvas — the same
     // muscle memory as leaving full screen. Popovers get first claim on it.
     if (e.key === "Escape" && mode === "reader" && !overlayOpen()){ setMode("canvas"); return; }
-    if ((e.key === "f" || e.key === "F") && mode === "canvas"){ frameAll(true, "keyboard"); return; }
     if ((e.key === "t" || e.key === "T") && mode === "canvas"){ tidy("keyboard"); return; }
     // Quick Look: space expands the current card into the reader.
     if (e.key === " " && mode === "canvas"){

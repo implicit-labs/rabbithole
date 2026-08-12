@@ -166,7 +166,7 @@ try {
   });
   assert.equal(selected, "Attention");
   await page.waitForSelector("#ask.visible");
-  await page.click('#ask-lenses .lens[data-lens="explain"]');
+  await page.click('#ask-actions .lens[data-lens="explain"]');
   const mark = page.locator(".node .rh-pdf-mark.mark-ready").first();
   await mark.waitFor();
   assert.equal(await page.locator(".node .rh-pdf-convert").count(), 0, "creating the first branch should immediately remove the text-version action");
@@ -211,7 +211,7 @@ try {
   await page.mouse.up();
   await page.waitForSelector("#ask.visible");
   holdNextAnswer = true;
-  await page.click('#ask-lenses .lens[data-lens="explain"]');
+  await page.click('#ask-actions .lens[data-lens="explain"]');
   await page.waitForFunction(() => document.querySelectorAll(".node").length >= 3);
   const pendingBoxClip = await page.evaluate(async () => {
     const hole = await window.__rabbitholeTest.readStoredHole();
@@ -254,7 +254,7 @@ try {
   rejectNextInheritedImage = true;
   await boxCard.locator(".nc-handle").evaluate((el) => el.click());
   await boxCard.locator(".nc-inner textarea").fill("What follows from this clip?");
-  await boxCard.locator(".send-btn").evaluate((el) => el.click());
+  await boxCard.locator('.ask-commit[data-commit="ask"]').evaluate((el) => el.click());
   await page.waitForFunction(() => window.__rabbitholeTest && document.querySelectorAll(".node").length >= 4);
   for (let i = 0; i < 100 && answerBodies.length < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert(Array.isArray(answerBodies[3].messages.at(-1).content), "follow-up from a clip card must inherit its image");
@@ -273,7 +273,7 @@ try {
   }, boxClip.id);
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", "What does this wording mean?");
-  await page.click("#ask-go");
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   for (let i = 0; i < 100 && answerBodies.length < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert(Array.isArray(answerBodies[5].messages.at(-1).content), "text selection from a clip card must inherit its image");
   assert.equal(answerBodies[5].messages.at(-1).content[1].image_url.url, boxImageUrl);
@@ -435,7 +435,7 @@ try {
   });
   assert.equal(askSelected, "Attention");
   await page.waitForSelector("#ask.visible");
-  await page.click('#ask-lenses .lens[data-lens="explain"]');
+  await page.click('#ask-actions .lens[data-lens="explain"]');
   await page.locator(".node .rh-pdf-mark.mark-ready").first().waitFor();
   await reloadReadyApp(page);
   assert.equal(await page.locator(".node .rh-pdf-convert").count(), 0, "the text-version action must stay absent after reloading a branched PDF");

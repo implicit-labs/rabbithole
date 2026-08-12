@@ -35,6 +35,37 @@ await runStoreContract(store, {
   },
 });
 
+{
+  const session = new RabbitHoleSession({
+    holeId: "mcp-note-create",
+    title: "MCP note create",
+    rootId: "root",
+    createdAt: "2026-08-11T00:00:00.000Z",
+    nodes: [{ id: "root", parent_id: null, title: "Root", markdown: "Root body", status: "answered" }],
+    assetNames: new Set(),
+    isResume: false,
+    renderPage: () => "",
+  });
+  const result = await session.handleBrowserEvent({
+    type: "node_create",
+    id: "standalone-note",
+    markdown: "Durable MCP note",
+    position: { x: 140, y: -20 },
+    origin: { kind: "note" },
+  });
+  assert.deepEqual(result, { ok: true, node_id: "standalone-note" });
+  assert.deepEqual(session.queue, [], "node_create must not queue an agent-facing MCP event");
+  assert.equal(session.buildHydration().nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "standalone notes hydrate outside the root tree");
+  const saved = await store.loadHole("mcp-note-create");
+  assert.equal(saved.nodes.find((node) => node.id === "standalone-note")?.markdown, "Durable MCP note", "MCP node_create must be durable before returning");
+
+  await session.handleBrowserEvent({ type: "delete_node", node_id: "standalone-note" });
+  await session.flushSave();
+  assert.equal((await store.loadHole("mcp-note-create")).nodes.some((node) => node.id === "standalone-note"), false, "MCP host deletes and persists standalone notes");
+  await session.close("filesystem_note_test_complete");
+}
+console.log("ok filesystem notes: MCP node_create persists and hydrates standalone notes without agent-facing events");
+
 const concurrentBase = { hole_id: "concurrent-hole", root_id: "root", nodes: [{ id: "root", markdown: "body" }] };
 await Promise.all([
   store.saveHole({ ...concurrentBase, title: "First" }),

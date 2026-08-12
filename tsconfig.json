@@ -20,7 +20,6 @@
     "src/core/contracts/content.d.ts",
     "test/fixtures/contracts/artifact-fixture.js",
     "test/fixtures/contracts/store-fixture.js",
-    "test/fixtures/contracts/engine-fixture.js",
     "test/fixtures/contracts/generation-fixture.js",
     "test/fixtures/contracts/content-fixture.js"
   ]

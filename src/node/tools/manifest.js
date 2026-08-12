@@ -89,7 +89,6 @@ export const toolDefinitions = [
       }),
       hole_id: str("Resume a saved hole instead of starting a new one", { optional: true, maxLength: 200 }),
     }),
-    resultKind: "json",
     validateInput: validateOpen,
     run: ({ title, content, file_path, base_url, hole_id, assets }, extra) =>
       openRabbithole({
@@ -134,7 +133,6 @@ export const toolDefinitions = [
         optional: true,
       },
     }),
-    resultKind: "json",
     validateInput: validateAnswer,
     run: ({ session_id, request_id, title, content, base_url, assets, partial }, extra) =>
       answerBranch({
@@ -154,7 +152,6 @@ export const toolDefinitions = [
       "List saved Rabbitholes (most recently updated first) so you can resume one by hole_id via " +
       "open_rabbithole. Returns id, title, last-updated time, and node count for each.",
     input: obj({}),
-    resultKind: "json",
     run: () => listRabbitholes(),
   },
 ];

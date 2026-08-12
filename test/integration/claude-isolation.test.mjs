@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  claudeHardeningArgs,
+  HARDENING_ARGS,
   parseClaudeEvent,
 } from "../../src/node/bridge/claude.js";
 import { buildClaudeInput } from "../../src/node/bridge/messages.js";
@@ -39,7 +39,7 @@ const args = [
   "low",
   "--system-prompt",
   "",
-  ...claudeHardeningArgs(),
+  ...HARDENING_ARGS,
 ];
 
 let child;

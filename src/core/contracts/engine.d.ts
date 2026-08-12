@@ -75,6 +75,16 @@ export interface BranchRequestEvent extends NodePresentationFields {
   /** Optional durable crop asset prepared by a host for a PDF region ask. */
   crop_asset?: unknown;
 }
+export interface NodeCreateEvent {
+  type: "node_create";
+  id?: unknown;
+  parent_id?: unknown;
+  title?: unknown;
+  markdown?: unknown;
+  position?: unknown;
+  size?: unknown;
+  origin?: unknown;
+}
 export interface NodeProgressEvent extends NodeTarget, BaseUrlFields {
   type: "node_progress";
   markdown?: unknown;
@@ -98,7 +108,12 @@ export interface DeleteNodeEvent extends NodeTarget {
   type: "delete_node" | "node_deleted";
   node_ids?: unknown;
 }
-export interface NodeUpdateEvent extends NodeTarget, NodePresentationFields { type: "node_update"; }
+export interface NodeUpdateEvent extends NodeTarget, NodePresentationFields {
+  type: "node_update";
+  /** Titles are editable on every node; markdown remains human-authored note content only. */
+  title?: unknown;
+  markdown?: unknown;
+}
 export interface NodesUpdateEvent { type: "nodes_update"; nodes?: unknown; }
 export interface ViewStateEvent { type: "view_state"; state?: unknown; }
 /** Internal engine event; not part of the MCP/SSE wire vocabulary. */
@@ -117,7 +132,7 @@ export interface BlockStateEvent extends NodeTarget {
    */
 }
 
-export type DocEvent = BranchRequestEvent | NodeProgressEvent | NodeAnsweredEvent |
+export type DocEvent = BranchRequestEvent | NodeCreateEvent | NodeProgressEvent | NodeAnsweredEvent |
   DeleteNodeEvent | NodeUpdateEvent | NodesUpdateEvent | ViewStateEvent |
   HoleTitleEvent | NodeOriginEvent | NodeExtensionsPatchEvent | BlockStateEvent;
 

@@ -31,7 +31,7 @@ function endFlight(flight){
   document.dispatchEvent(new CustomEvent("rh-reader-flight-end"));
 }
 
-export function cancelReaderFlight(){
+function cancelReaderFlight(){
   var flight = activeFlight;
   if (!flight) return;
   try { flight.animation.cancel(); } catch (e) { endFlight(flight); }

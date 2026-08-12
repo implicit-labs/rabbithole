@@ -170,9 +170,113 @@ async function runSavedAskRequeueFixture() {
   console.log("ok rearm: live reattach does not duplicate saved-ask requeues");
 }
 
+// The wire entry a note node should produce (standalone by default; anchored
+// entries override on_node_id/on_selected_text, lineage entries add the flag).
+function noteEntry(session, id, content, extra = {}) {
+  return { note_id: id, on_node_id: null, on_selected_text: null, content, created_at: session.nodes.get(id).created_at, ...extra };
+}
+
+async function runNotesContextFixture() {
+  const opened = await openRabbithole({ title: "MCP notes context", content: "Root note target" });
+  const session = getSession(opened.session_id);
+  assert(session);
+
+  await session.handleBrowserEvent({
+    type: "node_create",
+    id: "replied-note",
+    markdown: "Keep the target caveat in mind.",
+    origin: { kind: "note" },
+  });
+  await session.handleBrowserEvent({
+    type: "node_create",
+    id: "ambient-note-one",
+    markdown: "Relate this to the broader argument.",
+    origin: { kind: "note" },
+  });
+  await session.handleBrowserEvent({
+    type: "node_create",
+    id: "ambient-note-two",
+    markdown: "Compare this with the appendix.",
+    origin: { kind: "note" },
+  });
+  assert.deepEqual(session.queue, [], "note creation must remain pull-only for the agent");
+
+  await session.handleBrowserEvent({
+    type: "branch_request",
+    request_id: "notes-request",
+    node_id: "notes-branch",
+    parent_id: "replied-note",
+    selected_text: "",
+    question: "Expand on this note",
+  });
+  const branch = await openRabbithole({ holeId: session.holeId });
+  const expectedNotes = [
+    noteEntry(session, "replied-note", "Keep the target caveat in mind.", { on_lineage: true }),
+    noteEntry(session, "ambient-note-one", "Relate this to the broader argument."),
+    noteEntry(session, "ambient-note-two", "Compare this with the appendix."),
+  ];
+  assert.deepEqual(branch.notes, expectedNotes, "a live follow-up inside one of three notes delivers all three with the replied-to note flagged first");
+  const expectedAllNotes = [
+    noteEntry(session, "replied-note", "Keep the target caveat in mind."),
+    ...expectedNotes.slice(1),
+  ];
+
+  const holeId = session.holeId;
+  await session.close("notes_context_cold_resume");
+  const resumed = await openRabbithole({ holeId });
+  assert.equal(resumed.status, "branch_request");
+  assert.equal(resumed.saved, true);
+  assert.deepEqual(resumed.notes, expectedNotes, "saved branch delivery recomputes lineage-aware note context after cold resume");
+  assert.deepEqual(resumed.rehydration.notes, expectedAllNotes, "cold resume carries all active notes without lineage presentation flags");
+  assert.equal(resumed.rehydration.nodes.find((node) => node.id === "replied-note")?.kind, "note");
+  assert.equal(resumed.rehydration.nodes.find((node) => node.id === "ambient-note-one")?.kind, "note");
+  assert.equal(resumed.rehydration.nodes.find((node) => node.id === "ambient-note-two")?.kind, "note");
+  assert.equal(Object.hasOwn(resumed.rehydration.nodes.find((node) => node.id === session.rootId), "kind"), false, "non-note rehydration nodes stay untagged");
+
+  console.log("ok rearm notes: three-note reply thread, lineage flag, and cold-resume note rehydration");
+}
+
+async function runDoneNotesDeliveryFixture() {
+  const opened = await openRabbithole({ title: "MCP notes on Done", content: "Root feedback target" });
+  const session = getSession(opened.session_id);
+  assert(session);
+
+  await session.handleBrowserEvent({
+    type: "node_create",
+    id: "done-anchored-note",
+    parent_id: session.rootId,
+    markdown: "Tighten this paragraph.",
+    origin: { kind: "note", selected_text: "feedback target", anchor: { offset_start: 5, offset_end: 20 } },
+  });
+  await session.handleBrowserEvent({
+    type: "node_create",
+    id: "done-standalone-note",
+    markdown: "Check the conclusion too.",
+    origin: { kind: "note" },
+  });
+
+  const blocked = session.waitForEvent();
+  assert.equal(session.waiters.length, 1, "the agent call should be blocked before Done");
+  assert.deepEqual(await session.handleBrowserEvent({ type: "done" }), { ok: true });
+  assert.deepEqual(await blocked, {
+    status: "session_closed",
+    session_id: session.id,
+    notes: [
+      noteEntry(session, "done-standalone-note", "Check the conclusion too."),
+      noteEntry(session, "done-anchored-note", "Tighten this paragraph.", { on_node_id: session.rootId, on_selected_text: "feedback target" }),
+    ],
+  }, "Done resolves the blocked agent call with every note in the hole");
+  assert.equal(session.watchdogTimer, null, "session_closed delivery must not arm the answer watchdog");
+  assert.equal(session.inFlightBranchRequests.size, 0, "session_closed delivery must not enter branch request tracking");
+
+  console.log("ok rearm notes: Done delivers all notes without arming branch lifecycle state");
+}
+
 try {
   await runKeepListeningAndLiveReattachFixture();
   await runSavedAskRequeueFixture();
+  await runNotesContextFixture();
+  await runDoneNotesDeliveryFixture();
 } finally {
   await closeAllSessions("mcp_rearm_test_complete");
 }

@@ -31,8 +31,19 @@ function abortAfter(ms) {
 {
   const session = await openPdfSession("convert-full.pdf");
   const original = session.nodes.get(session.rootId).markdown;
+  const note = await session.handleBrowserEvent({
+    type: "node_create",
+    id: "pdf-note",
+    parent_id: session.rootId,
+    title: "PDF note",
+    markdown: "This marginalia must not retire conversion.",
+    origin: { kind: "note", selected_text: "Attention", anchor: { offset_start: 0, offset_end: 9 }, branch_type: "selection" },
+    position: { x: 700, y: 0 },
+  });
+  assert.equal(note.ok, true);
+  assert.deepEqual(session.queue, [], "a PDF note must not create an agent-facing event");
   const started = await session.handleBrowserEvent({ type: "convert_pdf", node_id: session.rootId });
-  assert.equal(started.ok, true);
+  assert.equal(started.ok, true, "a note child must not block MCP PDF conversion");
 
   const request = await session.waitForEvent();
   assert.equal(request.status, "convert_request");
@@ -134,4 +145,4 @@ function abortAfter(ms) {
   assert.equal(persistedRoot.extensions.pdf.converted, true);
 }
 
-console.log("ok node conversion: convert_request loop, redelivery, ask lock, figures, disconnect restore, and saved-convert rehydration");
+console.log("ok node conversion: note-child gate, convert_request loop, redelivery, ask lock, figures, disconnect restore, and saved-convert rehydration");

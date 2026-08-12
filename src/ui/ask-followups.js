@@ -1,12 +1,12 @@
 import {
+  postBrowserEvent,
   ask,
-  askGo,
   askText,
   canvasBuilt,
   childrenOf,
   closed,
+  composerActions,
   composerInner,
-  composerSend,
   composerText,
   currentNodeId,
   flashHint,
@@ -48,21 +48,10 @@ import { charOffset, mountPdfRectMark, wrapInContainer } from "./text-marks.js";
 import { easeOutMotion } from "./easing.js";
 import { openAnchoredSurface } from "./overlay/anchor.js";
 import { cancelFrame, createModuleLifecycle, nextFrame } from "./lifecycle.js";
-import { applyComposerState } from "./composer-state.js";
+import { applyComposerState, wireComposerActions } from "./composer-state.js";
 import { teardownNode } from "./node-teardown.js";
-import { ENTER_SEND_HINT, isComposingText, isSubmitEnter } from "./input-intent.js";
 
-function defaultAskHooks(){
-  return {
-    post: function(){ return Promise.resolve({ ok: true }); },
-  };
-}
-
-var askLifecycle = createModuleLifecycle({ defaults: defaultAskHooks });
-
-export function registerAskHooks(hooks) {
-  askLifecycle.register(hooks);
-}
+var askLifecycle = createModuleLifecycle({ defaults: function(){ return {}; } });
 
   // ===========================================================================
   // ASK (shared by both views)
@@ -70,8 +59,9 @@ export function registerAskHooks(hooks) {
 export function initAskFollowups(){
   disposeAskFollowupResources(false);
   var askScope = askLifecycle.beginInit();
-  composerSend.title = ENTER_SEND_HINT;
-  askGo.title = ENTER_SEND_HINT;
+  // wireComposerActions takes a bare function — keep scope ownership explicit.
+  function scopeListen(target, type, handler){ askScope.listen(target, type, handler); }
+  function composerSource(e){ return e && e.type === "keydown" ? "keyboard" : motionSourceFromEvent(e); }
   askScope.listen(document, "mouseup", function(e){
     if (inAsk(e)) return;
     if (usesMobileAskSurface()) queueMobileAsk(80);
@@ -83,19 +73,18 @@ export function initAskFollowups(){
   askScope.listen(document, "touchend", function(e){
     if (!inAsk(e) && usesMobileAskSurface()) queueMobileAsk(80);
   }, { passive: true });
-  askScope.listen(askGo, "click", function(e){ submitAsk(null, motionSourceFromEvent(e)); });
-  askScope.listen(document.getElementById("ask-lenses"), "click", function(e){
-    var b = e.target.closest ? e.target.closest(".lens") : null;
-    if (b) submitAsk(b.getAttribute("data-lens"), motionSourceFromEvent(e));
+  wireComposerActions({ text: askText, actions: document.getElementById("ask-actions"), listen: scopeListen,
+    onCommit: function(kind, e){ if (kind === "note") submitNote(composerSource(e)); else submitAsk(null, composerSource(e)); },
+    onLens: function(lens, e){ submitAsk(lens, composerSource(e)); } });
+  askScope.listen(askText, "input", function(){
+    autoGrowEl(askText, 110);
+    updateSelectionDraftSurface();
   });
-  askScope.listen(askText, "input", function(){ autoGrowEl(askText, 110); });
-  askScope.listen(askText, "keydown", onAskTextKeydown);
   askScope.listen(ask, "transitionend", function(e){ if (e.target === ask && askPosition) askPosition.update(); });
   askScope.listen(composerText, "input", function(){ autoGrowComposer(); updateComposerState(); });
-  askScope.listen(composerText, "keydown", function(e){
-    if (isSubmitEnter(e)){ e.preventDefault(); submitFollowup("keyboard"); }
-  });
-  askScope.listen(composerSend, "click", function(e){ submitFollowup(motionSourceFromEvent(e)); });
+  wireComposerActions({ text: composerText, actions: composerActions, listen: scopeListen,
+    onCommit: function(kind, e){ submitReaderFollowup(kind, composerSource(e)); },
+    onLens: function(lens, e){ submitReaderLens(lens, composerSource(e)); } });
   askScope.listen(readerMain, "wheel", interruptScrollAnimation, { passive: true });
   askScope.listen(readerMain, "touchstart", interruptScrollAnimation, { passive: true });
   askScope.listen(readerMain, "pointerdown", interruptScrollAnimation, { passive: true });
@@ -158,14 +147,14 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
     var endOff = charOffset(dc, range.endContainer, range.endOffset);
     if (endOff <= startOff) return;
     if (ask.classList.contains("visible")) hideAsk();
-    pendingAsk = { parentId: parentId, container: dc, selectedText: sel.toString().trim(),
+    selectionDraft = { parentId: parentId, container: dc, selectedText: sel.toString().trim(),
                    startOff: startOff, endOff: endOff, range: range.cloneRange() };
-    paintAskHighlight(pendingAsk.range);
     askText.value = "";
-    askText.placeholder = "Ask about this…";
+    updateSelectionDraftSurface();
+    paintSelectionHighlight(selectionDraft.range);
     ask.classList.add("visible");
     var owner = selectionOwner(dc);
-    var virtualAnchor = { getBoundingClientRect: function(){ return pendingAsk.range.getBoundingClientRect(); }, contextElement: dc };
+    var virtualAnchor = { getBoundingClientRect: function(){ return selectionDraft.range.getBoundingClientRect(); }, contextElement: dc };
     askTabOwner = owner;
     askOwnerCleanup = askLifecycle.scope
       ? askLifecycle.scope.listen(document, "keydown", onAskOwnerKeydown)
@@ -175,7 +164,7 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
     // painted highlight carry it, and Escape puts the selection back.
     openAskSurface(virtualAnchor, owner);
   }
-  var pendingAsk = null;
+  var selectionDraft = null;
 export function showAskFromSelection(options){
     var parentId = options && options.parentId;
     var parent = parentId && nodes[parentId];
@@ -188,14 +177,14 @@ export function showAskFromSelection(options){
     var anchorEl = options.anchorRectEl;
     // Virtual anchors (a selection range) carry their element as contextElement.
     var anchorNode = anchorEl && anchorEl.closest ? anchorEl : anchorEl && anchorEl.contextElement ? anchorEl.contextElement : null;
-    pendingAsk = { parentId: parentId, container: anchorNode && anchorNode.closest ? anchorNode.closest(".doc-content") : null,
+    selectionDraft = { parentId: parentId, container: anchorNode && anchorNode.closest ? anchorNode.closest(".doc-content") : null,
       selectedText: String(options.selectedText || "").trim(), startOff: options.mdStart,
       endOff: options.mdEnd, pdfAnchor: options.pdfAnchor || null, range: options.range || null };
-    if (pendingAsk.range) paintAskHighlight(pendingAsk.range);
     askText.value = "";
-    askText.placeholder = "Ask about this…";
+    updateSelectionDraftSurface();
+    if (selectionDraft.range) paintSelectionHighlight(selectionDraft.range);
     ask.classList.add("visible");
-    var owner = selectionOwner(pendingAsk.container);
+    var owner = selectionOwner(selectionDraft.container);
     askTabOwner = owner;
     askOwnerCleanup = askLifecycle.scope
       ? askLifecycle.scope.listen(document, "keydown", onAskOwnerKeydown)
@@ -206,14 +195,13 @@ export function showAskFromSelection(options){
   function openAskSurface(anchor, owner){
     var mobile = usesMobileAskSurface();
     ask.classList.toggle("mobile-sheet", mobile);
-    askText.placeholder = "Ask about this…";
     var surfaceAnchor = mobile ? mobileViewportAnchor(owner) : anchor;
     askPosition = openAnchoredSurface({ surface: ask, anchor: surfaceAnchor,
       placement: mobile ? "top-center" : "bottom-start", restoreFocus: false, preventOutsidePointerDefault: false,
       ignoreOutsidePointer: function(event){ return !!(event.target?.closest?.(".rh-pdf-zoom-control")); },
       onClose: function(reason){
         var escapeOwner = reason === "escape" ? owner : null;
-        var keepRange = reason === "escape" && pendingAsk ? pendingAsk.range : null;
+        var keepRange = reason === "escape" && selectionDraft ? selectionDraft.range : null;
         hideAsk();
         if (escapeOwner) focusAskOwner(escapeOwner);
         restoreSelectionRange(keepRange);
@@ -242,7 +230,7 @@ export function hideAsk(){
     if (askPosition){ askPosition.dispose(); askPosition = null; }
     if (askOwnerCleanup){ var cleanup = askOwnerCleanup; askOwnerCleanup = null; cleanup(); }
     askTabOwner = null;
-    ask.classList.remove("visible"); pendingAsk = null; clearAskHighlight();
+    ask.classList.remove("visible", "has-draft"); selectionDraft = null; clearSelectionHighlight();
   }
 
 export function disposeAskFollowups(){
@@ -253,7 +241,7 @@ export function disposeAskFollowups(){
     hideAsk();
     cancelScrollAnimation();
     askLifecycle.dispose(resetHooks);
-    pendingAsk = null;
+    selectionDraft = null;
     askTabOwner = null;
     askOwnerCleanup = null;
     if (mobileSelectionTimer) clearTimeout(mobileSelectionTimer);
@@ -265,23 +253,17 @@ export function disposeAskFollowups(){
     composerText.value = "";
   }
   // Custom Highlight API — keeps the selected text visibly marked while the popup
-  // has focus. Best-effort: browsers without it just fall back to today's look.
-  function paintAskHighlight(range){
+  // has focus. One steady wash for the popup's whole lifetime: the commit
+  // buttons say what Enter does, so the selection never changes color under
+  // the typist. Best-effort: browsers without it fall back to today's look.
+  function paintSelectionHighlight(range){
     try { if (window.Highlight && window.CSS && CSS.highlights) CSS.highlights.set("rh-ask", new Highlight(range)); } catch(e){}
   }
-  function clearAskHighlight(){
+  function clearSelectionHighlight(){
     try { if (window.CSS && CSS.highlights) CSS.highlights.delete("rh-ask"); } catch(e){}
   }
-
-  var LENS_KEYS = { "1": "explain", "2": "eli5", "3": "example", "4": "deeper" };
-  function onAskTextKeydown(e){
-    if (isSubmitEnter(e)){ e.preventDefault(); submitAsk(null, "keyboard"); }
-    // Number keys are lens shortcuts only while the box is empty — once the
-    // human starts typing a question, digits are just digits.
-    else if (!isComposingText(e) && askText.value === "" && !e.metaKey && !e.ctrlKey && !e.altKey && LENS_KEYS[e.key]){
-      e.preventDefault();
-      submitAsk(LENS_KEYS[e.key], "keyboard");
-    }
+  function updateSelectionDraftSurface(){
+    ask.classList.toggle("has-draft", !!askText.value.trim());
   }
 
   function retirePdfConversionAction(parent){
@@ -293,29 +275,29 @@ export function disposeAskFollowups(){
   }
 
   function submitAsk(lensKey, source){
-    if (!pendingAsk || closed) return;
-    var parent = nodes[pendingAsk.parentId];
+    if (!selectionDraft || closed) return;
+    var parent = nodes[selectionDraft.parentId];
     if (!parent){ hideAsk(); return; }
     var lens = (lensKey && LENSES[lensKey]) ? lensKey : null;
     var question = lens ? LENSES[lens].q : askText.value.trim();
     var requestId = uuid(), childId = uuid();
     var pos = placeChild(parent, BRANCH_SELECTION);
-    var anchor = { offset_start: pendingAsk.startOff, offset_end: pendingAsk.endOff };
-    if (pendingAsk.pdfAnchor) anchor.pdf = pendingAsk.pdfAnchor;
+    var anchor = { offset_start: selectionDraft.startOff, offset_end: selectionDraft.endOff };
+    if (selectionDraft.pdfAnchor) anchor.pdf = selectionDraft.pdfAnchor;
     var node = {
-	      id: childId, parent_id: parent.id,
-	      title: lens ? lensLabel(lens) : (question ? truncate(question, 48) : "…"),
-	      html: "", md: "",
-	      base_url: parent.base_url || null,
-	      base_url_source: parent.base_url ? "inherited" : null,
-	      read: false,
-      origin: { selected_text: pendingAsk.selectedText, question: question, lens: lens, anchor: anchor, branch_type: BRANCH_SELECTION },
+      id: childId, parent_id: parent.id,
+      title: lens ? lensLabel(lens) : (question ? truncate(question, 48) : "…"),
+      html: "", md: "",
+      base_url: parent.base_url || null,
+      base_url_source: parent.base_url ? "inherited" : null,
+      read: false,
+      origin: { selected_text: selectionDraft.selectedText, question: question, lens: lens, anchor: anchor, branch_type: BRANCH_SELECTION },
       x: pos.x, y: pos.y, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
       status: "pending", _order: nextOrder(), _startTs: Date.now()
     };
     registerNode(node);
     retirePdfConversionAction(parent);
-    var isPdfRegion = !!pendingAsk.pdfAnchor;
+    var isPdfRegion = !!selectionDraft.pdfAnchor;
     function revealCreatedBranch(response){
       if (response && response.crop_asset) node.origin.crop_asset = response.crop_asset;
       if (canvasBuilt && !node.el){ createNodeEl(node, true); renderVisibility(); drawEdges(); }
@@ -339,7 +321,7 @@ export function disposeAskFollowups(){
 
     var sel = window.getSelection(); if (sel) sel.removeAllRanges();
     hideAsk();
-    var request = askLifecycle.hooks.post({ type: "branch_request", request_id: requestId, node_id: childId, parent_id: parent.id,
+    var request = postBrowserEvent({ type: "branch_request", request_id: requestId, node_id: childId, parent_id: parent.id,
            selected_text: node.origin.selected_text, question: question, lens: lens, anchor: anchor,
            branch_type: BRANCH_SELECTION,
            position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } });
@@ -354,19 +336,74 @@ export function disposeAskFollowups(){
     }
   }
 
+  function submitNote(source){
+    if (!selectionDraft || closed) return;
+    var markdown = askText.value.trim();
+    if (!markdown) return;
+    var draft = selectionDraft, parent = nodes[draft.parentId];
+    if (!parent){ hideAsk(); return; }
+    var anchor = { offset_start: draft.startOff, offset_end: draft.endOff };
+    if (draft.pdfAnchor) anchor.pdf = draft.pdfAnchor;
+    var node = sendNote(parent, markdown, { anchor: anchor, selectedText: draft.selectedText });
+    if (!node) return;
+    var sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    hideAsk();
+    revealNode(node, source);
+  }
+
+  // One optimistic note path serves anchored selection notes and anchor-less
+  // follow-up notes. The anchor alone determines marks and branch placement;
+  // the durable origin stays the reducer's canonical bare {kind:"note"} for
+  // a document-level follow-up.
+export function sendNote(parent, markdown, options){
+    options = options || {};
+    markdown = String(markdown || "").trim();
+    if (!parent || !markdown || closed || parent.extensions?.pdf?.converting) return null;
+    var anchor = options.anchor || null;
+    var branchType = anchor ? BRANCH_SELECTION : BRANCH_FOLLOWUP;
+    var childId = uuid(), pos = placeChild(parent, branchType);
+    var origin = anchor
+      ? { kind: "note", selected_text: options.selectedText || "", anchor: anchor, branch_type: BRANCH_SELECTION }
+      : { kind: "note" };
+    var node = {
+      id: childId, parent_id: parent.id, title: "Note", html: "", md: markdown,
+      base_url: null, base_url_source: null, read: true,
+      origin: origin,
+      x: pos.x, y: pos.y, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
+      status: "answered", _order: nextOrder(), _startTs: 0, extensions: {}
+    };
+    registerNode(node);
+    if (canvasBuilt){ createNodeEl(node, true); renderVisibility(); drawEdges(); }
+    if (anchor?.pdf) {
+      if (mode === "reader") mountPdfRectMark(readerMain.querySelector('.doc-content[data-node-id="' + parent.id + '"]'), anchor, childId, "rh-pdf-mark mark-ready mark-note");
+      if (parent.bodyEl) mountPdfRectMark(parent.bodyEl.querySelector(".doc-content"), anchor, childId, "rh-pdf-mark mark-ready mark-note");
+    } else if (anchor) {
+      if (mode === "reader") wrapInContainer(readerMain.querySelector('.doc-content[data-node-id="' + parent.id + '"]'), anchor, childId, "hl mark-ready mark-note");
+      if (parent.bodyEl) wrapInContainer(parent.bodyEl.querySelector(".doc-content"), anchor, childId, "hl mark-ready mark-note");
+    }
+    scheduleEdges();
+    if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
+    postBrowserEvent({ type: "node_create", id: childId, parent_id: parent.id,
+      markdown: markdown, origin: node.origin, position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } })
+      .then(function(res){ if (!res || !res.ok) rollbackNote(node); });
+    return node;
+  }
+
   // ---------- follow-up composer ----------
 export function updateComposerState(){
     var current = nodes[currentNodeId];
+    composerInner.classList.toggle("has-draft", !!composerText.value.trim());
     // A missing agent doesn't disable asking — questions queue server-side and
     // are answered when it returns. Only a closed session (server gone) does.
     applyComposerState(
-      { text: composerText, send: composerSend, wrap: composerInner },
+      { text: composerText, commits: composerActions.querySelectorAll(".ask-commit"),
+        lenses: composerActions.querySelectorAll(".lens"), wrap: composerInner },
       { phase: sessionPhase(), pending: !current || current.status === "pending" || !!current.extensions?.pdf?.converting },
       { frozen: "Read-only snapshot — open the live Rabbithole to keep asking",
         closed: "Session ended — reopen this Rabbithole from your terminal; saved questions are answered there",
         pending: "This answer is still being written…",
         away: "The agent is away — questions are saved and answered when it returns…",
-        live: "Ask a follow-up about this document…" }
+        live: "Ask or note…" }
     );
   }
   function autoGrowComposer(){ autoGrowEl(composerText, 140); }
@@ -378,12 +415,12 @@ export function sendFollowup(parent, question, lens){
     var requestId = uuid(), childId = uuid();
     var pos = placeChild(parent, BRANCH_FOLLOWUP);
     var node = {
-	      id: childId, parent_id: parent.id,
-	      title: lens ? lensLabel(lens) : truncate(question, 48),
-	      html: "", md: "",
-	      base_url: parent.base_url || null,
-	      base_url_source: parent.base_url ? "inherited" : null,
-	      read: false,
+      id: childId, parent_id: parent.id,
+      title: lens ? lensLabel(lens) : truncate(question, 48),
+      html: "", md: "",
+      base_url: parent.base_url || null,
+      base_url_source: parent.base_url ? "inherited" : null,
+      read: false,
       origin: { selected_text: "", question: question, lens: lens, anchor: null, branch_type: BRANCH_FOLLOWUP },
       x: pos.x, y: pos.y, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
       status: "pending", _order: nextOrder(), _startTs: Date.now()
@@ -396,7 +433,7 @@ export function sendFollowup(parent, question, lens){
            selected_text: "", question: question, lens: lens, anchor: null,
            branch_type: BRANCH_FOLLOWUP,
            position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } };
-    askLifecycle.hooks.post(payload).then(function(res){ if (!res || !res.ok) rollbackBranch(node); });
+    postBrowserEvent(payload).then(function(res){ if (!res || !res.ok) rollbackBranch(node); });
     return node;
   }
 
@@ -440,16 +477,33 @@ export function animateScroll(el, target, source){
     scheduleScrollFrame(step);
   }
   function interruptScrollAnimation(){ cancelScrollAnimation(); }
-  function submitFollowup(source){
-    if (closed){ flashHint(frozen ? "This is a read-only snapshot." : "Session ended — reopen this Rabbithole from your terminal to continue."); return; }
+  // The reader composer's submit gate: null when the session or the current
+  // document can't take a new branch (a closed session says so out loud).
+  function readerComposerParent(){
+    if (closed){ flashHint(frozen ? "This is a read-only snapshot." : "Session ended — reopen this Rabbithole from your terminal to continue."); return null; }
     var parent = nodes[currentNodeId];
-    if (!parent || parent.status === "pending" || parent.extensions?.pdf?.converting) return;
+    if (!parent || parent.status === "pending" || parent.extensions?.pdf?.converting) return null;
+    return parent;
+  }
+  function submitReaderFollowup(commit, source){
+    var parent = readerComposerParent();
     var question = composerText.value.trim();
-    if (!question) return;
-    sendFollowup(parent, question, null);
+    if (!parent || !question) return;
+    var node = commit === "note" ? sendNote(parent, question) : sendFollowup(parent, question, null);
+    if (!node) return;
     composerText.value = "";
     autoGrowComposer();
     updateComposerState();
+    scrollReaderRail(source);
+  }
+  // A lens on the reader composer is a whole-document ask — the canned lens
+  // question, same as tapping a lens with nothing selected in the popover.
+  function submitReaderLens(lens, source){
+    var parent = readerComposerParent();
+    if (!parent || !sendFollowup(parent, LENSES[lens].q, lens)) return;
+    scrollReaderRail(source);
+  }
+  function scrollReaderRail(source){
     var notes = document.getElementById("margin-notes");
     if (notes) animateScroll(notes, notes.scrollHeight, source);
   }
@@ -464,6 +518,14 @@ function rollbackBranch(node){
     if (canvasBuilt) drawEdges();
     if (mode === "reader" && currentNodeId === node.parent_id) renderMarginNotes();
     flashHint("Couldn't reach the agent — that ask was undone.");
+  }
+
+function rollbackNote(node){
+    if (nodes[node.id] !== node) return;
+    teardownNode(node.id);
+    if (canvasBuilt) drawEdges();
+    if (mode === "reader" && currentNodeId === node.parent_id) renderMarginNotes();
+    flashHint("Couldn't save that note — it was undone.");
   }
 
 function subtreeBounds(node){

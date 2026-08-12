@@ -1,4 +1,4 @@
-import { buttonMarkup, iconButtonMarkup } from "./button-markup.js";
+import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "./button-markup.js";
 import { iconSvg } from "./icons.js";
 
 /*
@@ -27,7 +27,6 @@ export const CANVAS_SHELL = `
         ${buttonMarkup({ id: "zoom-label", title: "Zoom to 100%", ariaLabel: "Zoom to 100%", label: "100%" })}
         ${iconButtonMarkup({ id: "t-zin", title: "Zoom in", ariaLabel: "Zoom in", svgIconHtml: iconSvg("zoom-in") })}
       </span>
-      ${iconButtonMarkup({ id: "t-frame", title: "Frame everything · F", ariaLabel: "Frame everything · F", svgIconHtml: iconSvg("frame") })}
       ${iconButtonMarkup({ id: "t-tidy", title: "Tidy up layout · T", ariaLabel: "Tidy up layout · T", svgIconHtml: iconSvg("tidy") })}
     </span>
   </div>
@@ -54,9 +53,9 @@ export const CANVAS_SHELL = `
     <div id="reader-document">
       <div id="reader-main"></div>
       <div id="composer">
-        <div class="composer-inner" id="composer-inner">
-          <textarea id="composer-text" rows="1" placeholder="Ask a follow-up about this document…"></textarea>
-          <button id="composer-send" class="send-btn" title="Send (Enter) · New line (Shift+Enter)" aria-label="Send follow-up" disabled>${iconSvg("send")}</button>
+        <div class="composer-inner followup-composer" id="composer-inner">
+          <div class="ask-input"><textarea id="composer-text" rows="1" placeholder="Ask or note…"></textarea></div>
+          ${composerActionsMarkup({ id: "composer-actions" })}
         </div>
       </div>
     </div>
@@ -71,15 +70,9 @@ export const CANVAS_SHELL = `
 
 <div id="ask">
   <div class="ask-input">
-    <textarea id="ask-text" rows="1" placeholder="Ask about this…"></textarea>
-    ${iconButtonMarkup({ bare: true, className: "send-btn", id: "ask-go", title: "Send (Enter) · New line (Shift+Enter)", ariaLabel: "Ask", svgIconHtml: iconSvg("send") })}
+    <textarea id="ask-text" rows="1" placeholder="Ask or note…"></textarea>
   </div>
-  <div class="ask-lenses" id="ask-lenses">
-    ${buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" })}
-    ${buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" })}
-    ${buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "example" }, label: "Example ", kbdHint: "3" })}
-    ${buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "deeper" }, label: "Go Deeper ", kbdHint: "4" })}
-  </div>
+  ${composerActionsMarkup({ id: "ask-actions" })}
 </div>
 
 <div id="palette" hidden><div id="palette-panel">

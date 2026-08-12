@@ -103,17 +103,17 @@ async function verifyExistingWebUserUpgrade() {
     await page.waitForTimeout(180);
 
     assert.equal(localModelRequests, 1, "opening setup should probe the explicitly chosen Local provider");
-    assert.equal(await page.getAttribute('[data-provider="local"]', "aria-pressed"), "true", "setup must preserve an explicitly chosen incomplete provider");
+    assert.equal(await page.getAttribute('[data-provider="local"]', "aria-checked"), "true", "setup must preserve an explicitly chosen incomplete provider");
     assert.equal(await page.locator("#api-key").count(), 0, "Local setup must not be reset to the OpenRouter key form");
     assert.equal(await page.locator("#local-model-setup").count(), 1);
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "opening setup must not force users into the Local guide");
-    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
+    assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
 
     await page.route("http://127.0.0.1:41414/bridge/ping", (route) => route.abort());
-    await page.click('[data-provider="subscriptions"]');
+    await page.click('[data-provider="claude"]');
     await page.waitForSelector('.bridge-surface[data-state="re_pair"] .bridge-command code');
     assert.equal(await page.locator('.bridge-surface[data-state="re_pair"] .bridge-command code').innerText(), "npx @shlokkhemani/rabbithole bridge", "first-run must show the command, not ask for a token from nowhere");
-    assert.equal(await page.getAttribute('[data-provider="subscriptions"]', "aria-pressed"), "true", "Subscriptions must be reachable from pre-bridge preferences");
+    assert.equal(await page.getAttribute('[data-provider="claude"]', "aria-checked"), "true", "Claude Code must be reachable from pre-bridge preferences");
     await page.click('[data-provider="openrouter"]');
     assert.equal(await page.locator("#api-key").count(), 1);
     await page.click('[data-provider="local"]');
@@ -149,7 +149,7 @@ async function verifyLocalFailureRequiresTroubleshootChoice() {
     await selectText(page, "opt-in troubleshooting");
     await page.waitForSelector("#ask.visible");
     await page.fill("#ask-text", "Explain this");
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("Control+Enter");
     await page.waitForSelector("#web-toast.visible");
 
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "a Local generation failure must not auto-open diagnostics");
@@ -329,12 +329,12 @@ async function verifyLandingAndComposer() {
   })), { role: "tooltip", opacity: "1", visibility: "visible", transitionDuration: "0s", transitionDelay: "0s" }, "New Rabbithole setup guidance should appear immediately as a tooltip");
   await page.click("#blank-start-new");
   await page.waitForSelector("#web-settings-popover");
-  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
-  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true", "setup should select OpenRouter by default");
+  assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
+  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true", "setup should select OpenRouter by default");
   assert.equal(await page.locator("#api-key").count(), 1, "setup should open the full OpenRouter form immediately");
   assert.equal(await page.locator(".transcription-model-section").count(), 0, "first-run setup should defer PDF transcription");
   assert.equal(await page.locator("#transcribe-model").count(), 0, "first-run setup should have no transcription control");
-  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
+  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true");
   assert.equal(await page.locator("#composer-modal").isVisible(), false, "New Rabbithole should open setup, not the composer, before readiness");
   await page.fill("#api-key", MOCK_KEY);
   await page.waitForSelector("#api-key-status.valid");
@@ -1000,7 +1000,7 @@ async function verifySubscriptionsPanelStates() {
     // Clicking the pairing link is the setup: the panel opens by itself on the
     // live bridge state instead of leaving the user on a silent blank canvas.
     await page.waitForSelector("#web-settings-popover");
-    assert.equal(await page.getAttribute('[data-provider="subscriptions"]', "aria-pressed"), "true", "the auto-opened panel lands on the paired provider");
+    assert.equal(await page.getAttribute('[data-provider="claude"]', "aria-checked"), "true", "the auto-opened panel lands on the paired provider's agent row");
     await pushBridgeState(page, bridgeStateFixture("starting"));
     await page.waitForSelector('.bridge-surface[data-state="starting"]');
     assert.match(await page.locator(".bridge-starting").innerText(), /Connecting/);
@@ -1018,31 +1018,30 @@ async function verifySubscriptionsPanelStates() {
       assert.equal(await page.locator(".bridge-agent-body .bridge-command code").innerText(), testCase.command);
     }
 
-    // Neither CLI on the machine: one combined screen, not two dead ends
-    // discovered one switch-click at a time.
+    // Neither CLI on the machine: each agent row shows its own install path,
+    // and the unselected row says "Not installed" from the list itself.
     await pushBridgeState(page, bridgeStateFixture("missing", "missing"));
-    await page.waitForSelector('.bridge-surface[data-state="none_installed"]');
-    assert.equal(await page.locator(".bridge-agent-choice").count(), 0, "no tool switch when there is nothing to switch to");
-    assert.match(await page.locator(".bridge-none-installed").innerText(), /Neither Claude Code nor Codex is installed/);
-    assert.deepEqual(
-      await page.locator(".bridge-none-installed .bridge-command code").allTextContents(),
-      ["npm install -g @anthropic-ai/claude-code", "npm install -g @openai/codex"],
-      "both install commands offered, routed by plan",
+    await page.waitForSelector('.bridge-surface[data-state="missing"]');
+    assert.match(await page.locator(".bridge-agent-body").innerText(), /Claude Code isn’t installed on this computer\./);
+    assert.equal(await page.locator(".bridge-agent-body .bridge-command code").innerText(), "npm install -g @anthropic-ai/claude-code");
+    assert.equal(
+      await page.locator('[data-provider-item="codex"] .provider-chip').innerText(),
+      "Not installed",
+      "the other agent's absence reads from its row, no switch-click needed",
     );
-    assert.match(await page.locator(".bridge-none-installed").innerText(), /Claude plan[\s\S]*ChatGPT plan/, "commands are labeled by the plan the user pays for");
 
-    // One CLI installed: the working agent is selected, the absent one stays
-    // in the switch as a dimmed invitation whose body is the install path.
+    // One CLI installed: the working agent's row is selected, the absent one
+    // stays in the list as an invitation whose body is the install path.
     await pushBridgeState(page, bridgeStateFixture("ready", "missing"));
-    await page.waitForSelector('[data-bridge-agent="codex"][data-agent-state="missing"]');
-    assert.equal(await page.getAttribute('[data-bridge-agent="claude"]', "data-agent-state"), "ready");
-    assert.equal(await page.getAttribute('[data-bridge-agent="claude"]', "aria-pressed"), "true", "the installed agent wins selection");
-    await page.click('[data-bridge-agent="codex"]');
+    await page.waitForFunction(() => document.querySelector('[data-provider-item="claude"] .provider-chip')?.textContent === "Ready");
+    assert.equal(await page.locator('[data-provider-item="codex"] .provider-chip').innerText(), "Not installed");
+    assert.equal(await page.getAttribute('[data-provider="claude"]', "aria-checked"), "true", "the installed agent wins selection");
+    await page.click('[data-provider="codex"]');
     await page.waitForSelector('.bridge-surface[data-state="missing"]');
     assert.match(await page.locator(".bridge-agent-body").innerText(), /Codex isn’t installed on this computer\./);
     assert.equal(await page.locator(".bridge-agent-body .bridge-command code").innerText(), "npm install -g @openai/codex");
     assert.match(await page.locator(".bridge-agent-body").innerText(), /notices by itself — no restart needed/, "the missing-agent body promises the self-healing the bridge actually does");
-    await page.click('[data-bridge-agent="claude"]');
+    await page.click('[data-provider="claude"]');
     await page.waitForSelector('.bridge-surface[data-state="ready"]');
 
     const readyState = bridgeStateFixture("ready", "ready");
@@ -1054,8 +1053,8 @@ async function verifySubscriptionsPanelStates() {
     assert.ok(stored.generation_setup, "link pairing completes setup once an agent is ready — no Finish click required");
     assert.match(await page.locator("#web-toast").innerText(), /Connected — answers come from Claude Code \(Max\)\./, "pairing must confirm out loud");
     assert.equal(await page.locator("#complete-model-setup").innerText(), "Done", "the completed panel offers Done, not a redundant Finish setup");
-    assert.equal(await page.locator('[data-bridge-agent="claude"]').innerText(), "Claude Code", "the switch names tools, never plan tiers");
-    assert.equal(await page.locator(".bridge-plan-badge").count(), 0, "plan badges stay out of the switch — the toast said it once");
+    assert.equal(await page.locator('[data-provider-item="claude"] .provider-copy strong').innerText(), "Claude Code", "the row names tools, never plan tiers");
+    assert.equal(await page.locator(".bridge-plan-badge").count(), 0, "plan badges stay out of the list — the toast said it once");
 
     await page.evaluate(() => {
       window.__bridgeMutationCount = 0;
@@ -1088,30 +1087,30 @@ async function verifySubscriptionsPanelStates() {
 
     await pushBridgeState(page, readyState);
     await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
-    await page.locator('[data-bridge-agent="codex"]').focus();
+    await page.locator('[data-provider="codex"]').focus();
     const changedPlanState = bridgeStateFixture("ready", "ready", { claude: { plan: "FutureTier" } });
     await pushBridgeState(page, changedPlanState);
-    await page.waitForFunction(() => document.activeElement?.dataset?.bridgeAgent === "codex");
-    assert.equal(await page.locator('[data-bridge-agent="claude"]').innerText(), "Claude Code", "a plan change alone must not alter the switch");
+    await page.waitForFunction(() => document.activeElement?.dataset?.provider === "codex");
+    assert.equal(await page.locator('[data-provider-item="claude"] .provider-copy strong').innerText(), "Claude Code", "a plan change alone must not alter the row");
 
     const beforeAgentSignOut = await page.evaluate(() => ({
-      claude: document.querySelector('[data-bridge-agent="claude"]').outerHTML,
-      codex: document.querySelector('[data-bridge-agent="codex"]').outerHTML,
+      claudeChip: document.querySelector('[data-provider-item="claude"] .provider-chip').textContent,
+      codexChip: document.querySelector('[data-provider-item="codex"] .provider-chip').textContent,
       body: document.querySelector(".bridge-agent-body").innerHTML,
     }));
     await page.click("#bridge-model");
     await page.waitForSelector(".combobox-surface");
     await pushBridgeState(page, bridgeStateFixture("ready", "signed_out"));
-    await page.waitForSelector('[data-bridge-agent="codex"][data-agent-state="signed_out"]');
+    await page.waitForFunction(() => document.querySelector('[data-provider-item="codex"] .provider-chip')?.textContent === "Signed out");
     const afterAgentSignOut = await page.evaluate(() => ({
-      claude: document.querySelector('[data-bridge-agent="claude"]').outerHTML,
-      codex: document.querySelector('[data-bridge-agent="codex"]').outerHTML,
+      claudeChip: document.querySelector('[data-provider-item="claude"] .provider-chip').textContent,
+      codexChip: document.querySelector('[data-provider-item="codex"] .provider-chip').textContent,
       body: document.querySelector(".bridge-agent-body").innerHTML,
       focusedId: document.activeElement?.id || "",
       popupCount: document.querySelectorAll(".combobox-surface").length,
     }));
-    assert.equal(afterAgentSignOut.claude, beforeAgentSignOut.claude, "sign-out must not change the other agent row");
-    assert.notEqual(afterAgentSignOut.codex, beforeAgentSignOut.codex, "only the signed-out agent row changes");
+    assert.equal(afterAgentSignOut.claudeChip, beforeAgentSignOut.claudeChip, "sign-out must not change the other agent's row status");
+    assert.notEqual(afterAgentSignOut.codexChip, beforeAgentSignOut.codexChip, "only the signed-out agent's row status changes");
     assert.equal(afterAgentSignOut.body, beforeAgentSignOut.body, "a background-agent sign-out must not change the selected agent body");
     assert.equal(afterAgentSignOut.focusedId, "bridge-model", "focus returns to the equivalent selected-agent control");
     assert.equal(afterAgentSignOut.popupCount, 0, "transition disposal leaves no orphan combobox popup");
@@ -1161,7 +1160,7 @@ async function verifySubscriptionsPanelStates() {
 
     await page.evaluate(() => window.__bridgeStub.denyNextConnection());
     await page.click('[data-provider="openrouter"]');
-    await page.click('[data-provider="subscriptions"]');
+    await page.click('[data-provider="claude"]');
     await page.waitForSelector('.bridge-surface[data-state="re_pair"]');
     assert.equal(
       await page.locator('.bridge-surface[data-state="re_pair"] .bridge-command code').innerText(),
@@ -1225,7 +1224,7 @@ async function verifyCrossTabPairing() {
     await pageA.waitForSelector("#blank-start:not([hidden])");
     await pageA.click("#blank-start-setup");
     await pageA.waitForSelector("#web-settings-popover");
-    await pageA.click('[data-provider="subscriptions"]');
+    await pageA.click('[data-provider="claude"]');
     await pageA.waitForSelector('.bridge-surface[data-state="re_pair"]');
 
     const pageB = await context.newPage();
@@ -1428,7 +1427,7 @@ async function verifyAskKeyUxAndRail() {
     portableProjection.hole.nodes.map((node) => node.created_at),
     "canonical node timestamps must survive snapshot projection"
   );
-  assert(!snapshotHtml.includes('var hydration = {"session_id"'), "new snapshots must not execute an embedded document hydration object");
+  assert(!snapshotHtml.includes("var hydration = {"), "new snapshots must not execute an embedded document hydration object");
   assert.match(snapshotHtml, /startPortableSnapshot\(JSON\.parse\(payload\.textContent\)\)/, "bootstrap should derive hydration from inert DOM text");
   const rawJson = JSON.stringify(hole);
   assert(!rawJson.includes(MOCK_KEY), "IndexedDB hole record must not contain provider key");
@@ -1443,11 +1442,12 @@ async function verifyAskKeyUxAndRail() {
     return popover && !popover.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
   }, null, { timeout: 5000 });
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
-  assert.equal(await page.locator(".settings-section").first().getAttribute("class"), "settings-section provider-section", "provider should be the first settings decision");
-  assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
-  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-pressed"), "true");
+  assert.equal(await page.locator(".settings-section").first().getAttribute("class"), "settings-section provider-list-section", "provider should be the first settings decision");
+  assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
+  assert.equal(await page.getAttribute(".provider-list", "role"), "radiogroup", "one exclusive choice, expressed as one radiogroup");
+  assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true");
   await page.click('[data-provider="local"]');
-  assert.equal(await page.getAttribute('[data-provider="local"]', "aria-pressed"), "true");
+  assert.equal(await page.getAttribute('[data-provider="local"]', "aria-checked"), "true");
   await page.waitForSelector(".local-model-section .field-hint");
   await page.waitForFunction(() => document.querySelector(".local-model-section .field-hint")?.textContent.includes("installed models"));
   assert.equal(await page.locator("#provider-base").count(), 1, "Local endpoint should remain available in Connection settings");

@@ -25,7 +25,7 @@ const MCP_CONFIG = '{"mcpServers":{}}';
 const INSTALL_FIX = "npm install -g @anthropic-ai/claude-code";
 const LOGIN_FIX = "claude /login";
 
-const HARDENING_ARGS = [
+export const HARDENING_ARGS = [
   "--tools",
   "",
   "--disable-slash-commands",
@@ -35,10 +35,6 @@ const HARDENING_ARGS = [
   "--mcp-config",
   MCP_CONFIG,
 ];
-
-export function claudeHardeningArgs() {
-  return [...HARDENING_ARGS];
-}
 
 const LIST_MODEL_ARGS = [
   "-p",

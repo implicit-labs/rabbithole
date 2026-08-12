@@ -82,8 +82,8 @@
   {
     "name": "node_update and nodes_update normalize supported fields and ignore unknown nodes",
     "initial": { "root_id": "root", "nodes": [{ "id": "root", "position": { "x": 0, "y": 0 }, "size": null, "collapsed": false, "font_scale": 1, "read": false }, { "id": "a", "position": { "x": 1, "y": 1 }, "size": null, "collapsed": false, "font_scale": 1, "read": false }] },
-    "events": [{ "event": { "type": "node_update", "node_id": "root", "position": { "x": "5", "y": null }, "size": { "w": 20, "h": 30 }, "collapsed": true, "font_scale": 1.25, "read": true, "title": "ignored" } }, { "event": { "type": "node_update", "node_id": "ghost", "position": { "x": 99, "y": 99 } } }, { "event": { "type": "nodes_update", "nodes": [{ "node_id": "a", "position": { "x": 8, "y": 9 }, "size": { "w": 0, "h": 2 }, "collapsed": true }, { "node_id": "ghost", "read": true }] } }],
-    "expected": { "hole_id": "", "title": "Untitled", "root_id": "root", "created_at": null, "view_state": null, "nodes": [{ "id": "root", "position": { "x": 5, "y": 0 }, "size": { "w": 20, "h": 30 }, "collapsed": true, "font_scale": 1.25, "read": true }, { "id": "a", "position": { "x": 8, "y": 9 }, "size": null, "collapsed": true, "font_scale": 1, "read": false }] },
+    "events": [{ "event": { "type": "node_update", "node_id": "root", "position": { "x": "5", "y": null }, "size": { "w": 20, "h": 30 }, "collapsed": true, "font_scale": 1.25, "read": true, "title": "Renamed" } }, { "event": { "type": "node_update", "node_id": "ghost", "position": { "x": 99, "y": 99 } } }, { "event": { "type": "nodes_update", "nodes": [{ "node_id": "a", "position": { "x": 8, "y": 9 }, "size": { "w": 0, "h": 2 }, "collapsed": true }, { "node_id": "ghost", "read": true }] } }],
+    "expected": { "hole_id": "", "title": "Untitled", "root_id": "root", "created_at": null, "view_state": null, "nodes": [{ "id": "root", "title": "Renamed", "position": { "x": 5, "y": 0 }, "size": { "w": 20, "h": 30 }, "collapsed": true, "font_scale": 1.25, "read": true }, { "id": "a", "position": { "x": 8, "y": 9 }, "size": null, "collapsed": true, "font_scale": 1, "read": false }] },
     "expected_effects": {}
   },
   {

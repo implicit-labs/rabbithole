@@ -1,6 +1,6 @@
 import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../core/reducer.js";
 import { normalizeBlockIds } from "../../core/blocks.js";
-import { lineageNodesFromMap, normalizePdfAnchor, truncate } from "../../core/model.js";
+import { collectRelevantNotes, isNoteNode, lineageNodesFromMap, truncate } from "../../core/model.js";
 import { extractNodeAssetRefs } from "../../core/assets.js";
 import { GenerationRun } from "../../core/generation-run.js";
 import { applyPersistedBrowserEvent, assetsOrphanedByDeletion, buildNodeAnsweredEvent, createSaveChain, dispatchBrowserEvent } from "../../core/hole-host.js";
@@ -57,8 +57,6 @@ export class DirectRabbitholeHost {
 
   hydration() {
     return {
-      session_id: `web-${this.holeId}`,
-      hole_id: this.holeId,
       title: this.title,
       root_id: this.state.root_id,
       last_event_id: this.lastEventId,
@@ -108,6 +106,7 @@ export class DirectRabbitholeHost {
       return await dispatchBrowserEvent(payload, {
         handlers: {
           branch_request: (event) => this.handleBranchRequest(event),
+          node_create: (event) => this.handleNodeCreate(event),
           retry_branch: (event) => this.handleRetry(event),
           node_update: (event) => this.applyPersistedBrowserEvent(event),
           nodes_update: (event) => this.applyPersistedBrowserEvent(event),
@@ -138,6 +137,13 @@ export class DirectRabbitholeHost {
     return { ok: true, node_id: node.id, request_id: payload.request_id };
   }
 
+  async handleNodeCreate(payload) {
+    const effects = this.dispatch({ ...payload, type: "node_create" }, { now: new Date().toISOString() });
+    this.scheduleSave();
+    await this.flushSave();
+    return { ok: true, node_id: effects.createdNode.id };
+  }
+
   handleConvertCancel(payload) {
     this.abortByNode.get(String(payload.node_id || ""))?.abort();
     return { ok: true };
@@ -146,7 +152,7 @@ export class DirectRabbitholeHost {
   handleConvertPdf(payload) {
     const nodeId = String(payload.node_id || ""), node = this.state.nodes.get(nodeId), pdf = normalizePdfExtension(node);
     if (!pdf) throw new Error("This node is not a native PDF.");
-    if ([...this.state.nodes.values()].some((candidate) => candidate.parent_id === nodeId)) throw new Error("Create a text version before asking follow-ups.");
+    if ([...this.state.nodes.values()].some((candidate) => candidate.parent_id === nodeId && !isNoteNode(candidate))) throw new Error("Create a text version before asking follow-ups.");
     if (pdf.converting || this.abortByNode.has(nodeId)) throw new Error("Conversion is already running.");
     const capability = this.getPdfTranscriptionCapability?.();
     if (capability?.available === false) throw new Error(capability.reason || "Set up a vision-capable PDF transcription model before converting.");
@@ -619,14 +625,17 @@ export class DirectRabbitholeHost {
     const root = this.state.nodes.get(this.state.root_id);
     const lineage = parent ? lineageNodesFromMap(this.state.nodes, parent.id) : [];
     const ancestors = lineage.filter((entry) => entry.id !== parent?.id).map((entry) => ({
+      id: entry.id,
       title: entry.title,
       markdown: entry.markdown,
     }));
     return {
       root_title: root?.title || this.state.title || "Untitled",
+      parent_id: parent?.id || null,
       parent_title: parent?.title || "Untitled",
       parent_markdown: parent?.markdown || "",
       ancestors,
+      notes: collectRelevantNotes(this.state.nodes, node.parent_id),
       selected_text: node.origin?.selected_text || "",
       question: node.origin?.question || "",
       lens: node.origin?.lens || null,
@@ -705,15 +714,6 @@ function branchAnsweredFields(node) {
 
 function defaultGenerationRunId() {
   return randomId("generation");
-}
-
-async function blobDataUrl(blob) {
-  if (!blob) throw new Error("PDF page asset is missing.");
-  const buffer = typeof blob.arrayBuffer === "function" ? await blob.arrayBuffer() : blob;
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
 }
 
 export function createHoleFromMarkdown({ title, markdown, baseUrl = null } = {}) {

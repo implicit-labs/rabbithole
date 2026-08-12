@@ -150,6 +150,17 @@ async function runRendererGoldenFixtures() {
   console.log("ok MCP markdown wire: shared renderer golden/security fixtures and bundle sentinel");
 }
 
+async function runEmptySessionClosedFixture() {
+  const opened = await openRabbithole({ title: "Empty close wire", content: "No notes" });
+  const session = getSession(opened.session_id);
+  assert(session);
+  await session.close("empty_close_wire_done");
+  const closed = await session.waitForEvent();
+  assertSessionClosedShape(closed, session.id);
+  assert.equal(Object.hasOwn(closed, "notes"), false, "an empty session_closed result must omit notes");
+  console.log("ok MCP markdown wire: empty session_closed omits notes");
+}
+
 async function runMarkdownWireFixture() {
   const sourceDir = await fs.mkdtemp(path.join(process.env.RABBITHOLE_DIR, "assets-"));
   const imagePath = path.join(sourceDir, "diagram-1.png");
@@ -229,6 +240,7 @@ async function runMarkdownWireFixture() {
 
   const branch = await openRabbithole({ holeId: session.holeId });
   assertBranchRequestShape(branch, session, requestId, nodeId);
+  assert.equal(Object.hasOwn(branch, "notes"), false, "empty note context must not change the branch_request wire");
 
   const partialOne = await answerBranch({
     sessionId: session.id,
@@ -269,6 +281,73 @@ async function runMarkdownWireFixture() {
   const persistedAfterAnswer = await new FsStore().loadHole(session.holeId);
   assert.equal(persistedAfterAnswer.nodes.find((node) => node.id === nodeId).markdown, answered.markdown);
 
+  await postEvent(session, {
+    type: "node_create",
+    id: "anchored-wire-note",
+    parent_id: session.rootId,
+    markdown: "Remember the root definition.",
+    origin: { kind: "note", selected_text: "Root", anchor: { offset_start: 2, offset_end: 6 } },
+  });
+  await postEvent(session, {
+    type: "node_create",
+    id: "standalone-wire-note",
+    markdown: "Compare this with the appendix.",
+    origin: { kind: "note" },
+  });
+  const standaloneNoteEntry = {
+    note_id: "standalone-wire-note",
+    on_node_id: null,
+    on_selected_text: null,
+    content: "Compare this with the appendix.",
+    created_at: session.nodes.get("standalone-wire-note").created_at,
+  };
+  const anchoredNoteEntry = {
+    note_id: "anchored-wire-note",
+    on_node_id: session.rootId,
+    on_selected_text: "Root",
+    content: "Remember the root definition.",
+    created_at: session.nodes.get("anchored-wire-note").created_at,
+  };
+  const notesRequestId = "req-notes-wire";
+  const notesNodeId = "node-notes-wire";
+  await postEvent(session, {
+    type: "branch_request",
+    request_id: notesRequestId,
+    node_id: notesNodeId,
+    parent_id: session.rootId,
+    selected_text: "definition",
+    question: "How should I read this?",
+  });
+  const notesBranch = await openRabbithole({ holeId: session.holeId });
+  assert.deepEqual(notesBranch.notes, [standaloneNoteEntry, anchoredNoteEntry],
+    "branch_request carries exactly the standalone-first relevant note entries");
+  assertKeepListeningShape(await answerBranch({
+    sessionId: session.id,
+    requestId: notesRequestId,
+    title: "Reading the definition",
+    content: "Read it in context.",
+  }), session);
+
+  const noteThreadRequestId = "req-note-thread-wire";
+  const noteThreadNodeId = "node-note-thread-wire";
+  await postEvent(session, {
+    type: "branch_request",
+    request_id: noteThreadRequestId,
+    node_id: noteThreadNodeId,
+    parent_id: "anchored-wire-note",
+    selected_text: "",
+    question: "Can you expand on my note?",
+  });
+  const noteThreadBranch = await openRabbithole({ holeId: session.holeId });
+  assert.deepEqual(noteThreadBranch.notes, [{ ...anchoredNoteEntry, on_lineage: true }, standaloneNoteEntry],
+    "a branch_request inside a note carries that note body first with on_lineage: true");
+  assertKeepListeningShape(await answerBranch({
+    sessionId: session.id,
+    requestId: noteThreadRequestId,
+    title: "Expanding the note",
+    content: "Here is the expansion.",
+  }), session);
+
   const reloaded = await fetch(session.url);
   const rehydration = parseHydration(await reloaded.text());
   assertNoContentHtml(rehydration, "reloaded hydration");
@@ -306,13 +385,22 @@ async function runMarkdownWireFixture() {
   const importedHole = await importStore.loadHole(imported.hole_id);
   assert.equal(importedHole.nodes.find((node) => node.id === nodeId).markdown, answered.markdown, "web import should restore the MCP-authored branch");
 
+  const blockedClose = session.waitForEvent();
   session.close("markdown_wire_done");
+  const closedWithNotes = await blockedClose;
+  assert.deepEqual(closedWithNotes, {
+    status: "session_closed",
+    session_id: session.id,
+    notes: [standaloneNoteEntry, anchoredNoteEntry],
+  }, "a blocked agent call receives all hole notes on session_closed without lineage flags");
+  assert.deepEqual(await session.waitForEvent(), closedWithNotes, "post-close waitForEvent uses the same notes-enriched delivery seam");
   assertSessionClosedShape(await answerBranch({ sessionId: session.id, requestId, content: "late" }), session.id);
-  console.log("ok MCP markdown wire: markdown-only hydration/SSE, tool shapes, streaming, canonical export, and web-import round trip");
+  console.log("ok MCP markdown wire: markdown-only hydration/SSE, note-thread and close delivery, streaming, canonical export, and web-import round trip");
 }
 
 try {
   await runRendererGoldenFixtures();
+  await runEmptySessionClosedFixture();
   await runMarkdownWireFixture();
   await fs.writeFile(path.join(process.env.RABBITHOLE_DIR, "future-mcp.json"), JSON.stringify({ schema_version: 3 }));
   await assert.rejects(

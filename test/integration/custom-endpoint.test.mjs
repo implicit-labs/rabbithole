@@ -62,13 +62,11 @@ async function openSettingsOnCustom(page) {
   await page.waitForSelector("#provider-base");
 }
 
-/* Custom endpoints live inside the Local surface as a connection mode. */
+/* Custom endpoint is a first-class row in the flat provider list. */
 async function clickCustomEndpointMode(page) {
-  if (await page.getAttribute('[data-provider="local"]', "aria-pressed") !== "true") {
-    await page.click('[data-provider="local"]');
+  if (await page.getAttribute('[data-provider="custom_endpoint"]', "aria-checked") !== "true") {
+    await page.click('[data-provider="custom_endpoint"]');
   }
-  await page.waitForSelector('[data-local-mode="custom_endpoint"]');
-  await page.click('[data-local-mode="custom_endpoint"]');
 }
 
 async function fillEndpoint(page, value) {
@@ -95,9 +93,12 @@ async function verifyConnectStatesAndAuth() {
     await routeEndpoint(page, { requireKey: true });
     await openSettingsOnCustom(page);
 
-    assert.deepEqual(await page.locator(".provider-choice button").allTextContents(), ["OpenRouter", "CC/Codex", "Local"]);
-    assert.deepEqual(await page.locator(".local-mode-choice button").allTextContents(), ["Ollama", "Custom endpoint"]);
-    assert.equal(await page.getAttribute('[data-local-mode="custom_endpoint"]', "aria-pressed"), "true");
+    assert.deepEqual(
+      await page.locator(".provider-row .provider-copy strong").allTextContents(),
+      ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"],
+      "the provider list must offer all five choices as flat rows",
+    );
+    assert.equal(await page.getAttribute('[data-provider="custom_endpoint"]', "aria-checked"), "true");
     assert.equal(await page.locator("#api-key").count(), 1, "a custom endpoint must be able to authenticate");
     assert.equal(await page.locator("#api-key-status").innerText(), "Optional. Stored only in this browser, sent only to your endpoint.");
     assert.equal(await page.locator("#local-model").count(), 0, "the Ollama model picker belongs to Local");
@@ -259,7 +260,7 @@ async function verifySettingsSurviveProviderSwitching() {
     await page.waitForSelector("#endpoint-status.valid");
     assert.equal(localModelCalls, probesBeforeConfiguring, "configuring a custom endpoint must never probe Ollama");
 
-    await page.click('[data-local-mode="local"]');
+    await page.click('[data-provider="local"]');
     await page.waitForSelector("#local-model");
     assert.equal(await page.locator("#provider-base").inputValue(), "http://localhost:11434/v1", "Local keeps its own endpoint");
     assert.equal(await page.locator("#endpoint-status").count(), 0, "the Custom status line belongs to Custom");

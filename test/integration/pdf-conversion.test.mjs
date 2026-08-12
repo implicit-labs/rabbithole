@@ -45,8 +45,18 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   const brain = { async *transcribePages({ pages, tail }) { assert.equal(pages.length, 2); assert.equal(tail, ""); yield { type: "text", delta: "# Converted\n\nFaithful text." }; } };
   const host = new DirectRabbitholeHost({ store, hole: fixture(), brain }), rootId = host.state.root_id, events = [];
   host.onEvent = (event) => events.push(event);
+  const note = await host.handleBrowserEvent({
+    type: "node_create",
+    id: "pdf-note",
+    parent_id: rootId,
+    title: "PDF note",
+    markdown: "This marginalia must not retire conversion.",
+    origin: { kind: "note", selected_text: "Original", anchor: { offset_start: 7, offset_end: 15 }, branch_type: "selection" },
+    position: { x: 700, y: 0 },
+  });
+  assert.equal(note.ok, true);
   const start = await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
-  assert.equal(start.ok, true, start.error);
+  assert.equal(start.ok, true, `a note child must not block web PDF conversion: ${start.error || ""}`);
   await settle(() => host.state.nodes.get(rootId).extensions.pdf.converted);
   const node = host.state.nodes.get(rootId);
   assert.equal(node.markdown, "# Converted\n\nFaithful text.");
@@ -127,4 +137,4 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   assert.equal(restored.extensions.pdf.pages.length, 2);
 }
 
-console.log("ok PDF conversion: streamed commit, one halved payload retry, failure/cancel restore, and clean/dirty hydration restore");
+console.log("ok PDF conversion: note-child gate, streamed commit, one halved payload retry, failure/cancel restore, and clean/dirty hydration restore");

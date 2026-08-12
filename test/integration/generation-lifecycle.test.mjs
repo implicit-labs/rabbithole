@@ -314,6 +314,27 @@ assert.deepEqual(disposalEvents, [], "disposed hosts must detach browser subscri
 assert.equal(lifecycleHost.subscriptions.size, 0);
 console.log("ok generation lifecycle: direct-host subscriptions close and host disposal is idempotent");
 
+const notesContextHost = new DirectRabbitholeHost({
+  store: { saveHole: async () => {} },
+  hole: {
+    hole_id: "web-notes-context",
+    root_id: "root",
+    title: "Root",
+    nodes: [
+      { id: "root", parent_id: null, title: "Root", markdown: "Root body", created_at: "2026-08-11T00:00:00.000Z" },
+      { id: "parent", parent_id: "root", title: "Parent", markdown: "Parent body", created_at: "2026-08-11T00:00:01.000Z" },
+      { id: "ask", parent_id: "parent", title: "Ask", markdown: "", status: "pending", origin: { question: "Why?", selected_text: "Parent" } },
+      { id: "anchored", parent_id: "root", title: "Note", markdown: "Remember the root.", created_at: "2026-08-11T00:00:02.000Z", origin: { kind: "note", selected_text: "Root body" } },
+      { id: "standalone", parent_id: null, title: "Note", markdown: "Whole-canvas thought.", created_at: "2026-08-11T00:00:03.000Z", origin: { kind: "note" } },
+    ],
+  },
+});
+assert.deepEqual(notesContextHost.buildBranchContext(notesContextHost.state.nodes.get("ask")).notes, [
+  { note_id: "standalone", on_node_id: null, on_selected_text: null, content: "Whole-canvas thought.", created_at: "2026-08-11T00:00:03.000Z" },
+  { note_id: "anchored", on_node_id: "root", on_selected_text: "Root body", content: "Remember the root.", created_at: "2026-08-11T00:00:02.000Z" },
+]);
+console.log("ok generation lifecycle notes: direct-host branch context uses shared note relevance");
+
 const pendingNode = { id: "branch", status: "pending", markdown: "", title: "Fallback" };
 const oldRun = mintHost.createGenerationRun(pendingNode);
 const retryRun = mintHost.createGenerationRun(pendingNode);

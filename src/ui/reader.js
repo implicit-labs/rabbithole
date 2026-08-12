@@ -53,7 +53,6 @@ function defaultReaderHooks(){
     updateComposerState: function(){},
     scheduleViewSave: function(){},
     setMode: function(){},
-    post: function(){ return Promise.resolve({ ok: true }); },
     mountDocImages: null,
     persistNode: function(){},
     animateScroll: function(){}

@@ -318,9 +318,7 @@ body.blank-dragging #viewport::after {
 
 .rail-open,
 .rail-actions,
-.settings-actions,
-.web-toast,
-.secret-input {
+.web-toast {
   display: flex;
   align-items: center;
 }
@@ -812,8 +810,8 @@ body.blank-dragging .composer-card {
   border-top: 1px solid var(--border);
 }
 
-.provider-section {
-  padding-top: 0;
+.provider-list-section {
+  padding: 2px 18px 18px;
 }
 
 /* The key belongs to the endpoint above it, so they read as one block rather than two
@@ -904,9 +902,204 @@ body.blank-dragging .composer-card {
   visibility: visible;
 }
 
-.provider-choice,
-.local-mode-choice,
-.bridge-agent-choice,
+/*
+ * The flat provider list: five exclusive rows, the selected one expands in
+ * place. One radiogroup replaces the old provider segments and both nested
+ * switches; the segmented control below now belongs to parameters only.
+ */
+.provider-list {
+  border: 1px solid color-mix(in srgb, var(--fg) 9%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  overflow: hidden;
+}
+
+.provider-item + .provider-item {
+  border-top: 1px solid var(--border);
+}
+
+.provider-row {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 11px 12px;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.provider-item:not(.selected) .provider-row:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.provider-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-control);
+}
+
+.provider-dot {
+  position: relative;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid color-mix(in srgb, var(--fg) 34%, transparent);
+  border-radius: 50%;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.provider-row:hover .provider-dot {
+  border-color: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+
+/* 15px ring − 1.5px borders = 12px box; a 6px dot with 3px insets keeps every
+   edge on a whole pixel, so the dot stays optically concentric at any DPR. */
+.provider-dot::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: scale(0);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.provider-item.selected .provider-dot {
+  border-color: var(--accent);
+}
+
+.provider-item.selected .provider-dot::after {
+  transform: scale(1);
+}
+
+.provider-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.provider-copy strong {
+  color: var(--fg);
+  font: var(--weight-semibold) var(--text-body)/1.25 var(--font-ui);
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.provider-item.selected .provider-copy strong {
+  color: var(--fg-bold);
+}
+
+.provider-copy small {
+  color: var(--fg-dim);
+  font: var(--text-sm)/1.35 var(--font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-chip {
+  color: var(--fg-faint);
+  font: var(--weight-medium) var(--text-sm)/1.25 var(--font-ui);
+  white-space: nowrap;
+}
+
+.provider-chip.ok {
+  color: color-mix(in srgb, var(--success) 86%, var(--fg));
+}
+
+.provider-chip.warn {
+  color: var(--warn);
+}
+
+.provider-chip.ok::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-inline-end: 6px;
+  vertical-align: 1.5px;
+}
+
+/* Interruptible expand/collapse: grid-template-rows retargets mid-flight. */
+.provider-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease-out);
+}
+
+.provider-item.selected .provider-body {
+  grid-template-rows: 1fr;
+}
+
+.provider-body-slot {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--duration-enter) var(--ease-standard);
+}
+
+.provider-item.selected .provider-body-slot {
+  opacity: 1;
+}
+
+/* Section internals are unchanged; inside a row they lose their dividers
+   (the row provides the grouping) and align to the title's leading edge
+   (12px row padding + 15px dot + 10px gap). */
+.provider-body .settings-section {
+  border-top: 0;
+  padding: 4px 14px 14px 37px;
+}
+
+.provider-body .settings-section + .settings-section {
+  border-top: 0;
+}
+
+.provider-body .settings-recovery {
+  margin: 4px 14px 10px 37px;
+  padding: 10px 11px;
+}
+
+.provider-body .endpoint-section {
+  padding-bottom: 6px;
+}
+
+.provider-body .endpoint-section + .key-section {
+  padding-top: 6px;
+}
+
+.provider-body .model-section > .settings-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.provider-body .settings-advanced {
+  border-top: 0;
+}
+
+.provider-body .settings-advanced summary {
+  padding: 8px 14px 8px 37px;
+}
+
+.provider-body .settings-advanced-grid {
+  padding: 2px 14px 14px 37px;
+}
+
+.provider-body .settings-complete-section {
+  padding-top: 2px;
+}
+
+.provider-body .bridge-agent-body {
+  min-height: 0;
+}
+
 .reasoning-choice {
   display: grid;
   grid-auto-flow: column;
@@ -921,9 +1114,6 @@ body.blank-dragging .composer-card {
   background: color-mix(in srgb, var(--fg) 5%, transparent);
 }
 
-.provider-choice button,
-.local-mode-choice button,
-.bridge-agent-choice button,
 .reasoning-choice button {
   display: inline-flex;
   box-sizing: border-box;
@@ -934,71 +1124,26 @@ body.blank-dragging .composer-card {
   background: transparent;
   color: var(--fg-dim);
   min-width: 0;
-  min-height: 30px;
-  padding: 6px 10px;
-  font: var(--weight-semibold) var(--text-body)/1.2 var(--font-ui);
+  min-height: 26px;
+  padding: 4px 6px;
+  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
   cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.provider-choice button[aria-pressed="true"],
-.local-mode-choice button[aria-pressed="true"],
-.bridge-agent-choice button[aria-pressed="true"],
 .reasoning-choice button[aria-pressed="true"] {
   background: color-mix(in srgb, var(--fg) 11%, var(--node-bg));
   color: var(--fg-bold);
   box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
 }
 
-.provider-choice button:not([aria-pressed="true"]):hover,
-.local-mode-choice button:not([aria-pressed="true"]):hover,
-.bridge-agent-choice button:not([aria-pressed="true"]):hover,
 .reasoning-choice button:not([aria-pressed="true"]):hover {
   background: color-mix(in srgb, var(--fg) 5%, transparent);
   color: var(--fg);
 }
 
-.local-mode-section {
-  margin-top: -4px;
-}
-
-.local-mode-choice button,
-.bridge-agent-choice button,
-.reasoning-choice button {
-  min-height: 26px;
-  padding: 4px 6px;
-  font: var(--weight-semibold) var(--text-sm)/1.2 var(--font-ui);
-}
-
-.reasoning-choice {
-  margin-top: 8px;
-}
-
 .bridge-surface {
   overflow: hidden;
-}
-
-.bridge-agent-section {
-  margin-top: -4px;
-}
-
-.bridge-agent-choice {
-  margin-top: 0;
-}
-
-.bridge-agent-choice button:not([aria-pressed="true"]) {
-  color: var(--fg);
-}
-
-/* A CLI that isn't on this machine reads as a lesser option before it is
-   clicked; it stays clickable because activating it shows how to install. */
-.bridge-agent-choice button:not([aria-pressed="true"])[data-agent-state="missing"] {
-  color: var(--fg-faint);
-}
-
-.bridge-agent-choice button:not([aria-pressed="true"]):focus-visible {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  color: var(--fg-bold);
 }
 
 .bridge-setup-section h3,
@@ -1037,24 +1182,6 @@ body.blank-dragging .composer-card {
 .bridge-agent-state .field-hint {
   display: block;
   margin-top: 8px;
-}
-
-.bridge-install-option {
-  margin-top: 10px;
-}
-
-/* The closing hint governs both install options, so it needs more distance
-   from the last option than the options keep between themselves — otherwise
-   it reads as a caption on the ChatGPT command alone. */
-.bridge-none-installed > .field-hint {
-  margin-top: 14px;
-}
-
-.bridge-install-plan {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--fg-dim);
-  font: var(--weight-semibold) var(--text-xs)/var(--leading-ui) var(--font-ui);
 }
 
 .bridge-setup-why {
@@ -1329,31 +1456,6 @@ body.blank-dragging .composer-card {
   backdrop-filter: var(--surface-popover-blur);
   box-shadow: var(--surface-popover-shadow);
 }
-
-.select-listbox {
-  position: fixed;
-  z-index: var(--layer-popover);
-  min-width: var(--surface-width-menu);
-  padding: var(--panel-padding-inline);
-  border: var(--surface-popover-border);
-  border-radius: var(--surface-popover-radius);
-  background: var(--surface-popover-bg);
-  -webkit-backdrop-filter: var(--surface-popover-blur);
-  backdrop-filter: var(--surface-popover-blur);
-  box-shadow: var(--surface-popover-shadow);
-}
-
-.select-option {
-  border-radius: var(--radius-control);
-  color: var(--fg-bold);
-  padding: var(--row-padding-block) var(--share-item-padding-inline);
-  font: var(--weight-semibold) var(--text-body)/1.2 var(--font-ui);
-  cursor: pointer;
-}
-
-.select-option:hover,
-.select-option:focus,
-.select-option[aria-selected="true"] { background: var(--hl); outline: none; }
 
 .combobox-search-wrap {
   display: flex;
@@ -1754,7 +1856,6 @@ body.blank-dragging .composer-card {
   padding: 4px 18px 16px;
 }
 
-.model-hint,
 .field-hint {
   color: var(--fg-dim);
   font: var(--text-sm)/1.45 var(--font-ui);
@@ -1797,15 +1898,6 @@ body.blank-dragging .composer-card {
 
 .key-status.busy {
   color: var(--fg);
-}
-
-.key-status .key-switch {
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--hl);
-  color: var(--fg-bold);
-  padding: 4px 6px;
-  cursor: pointer;
 }
 
 .shake-once {
@@ -2164,14 +2256,10 @@ body.blank-dragging .composer-card {
 .composer-back:focus-visible,
 .rail-open:focus-visible,
 .rail-icon:focus-visible,
-.key-status .key-switch:focus-visible,
 .blank-start-new:focus-visible,
 .blank-start-setup:focus-visible,
 .toolbar-brand:focus-visible,
 .project-menu-item:focus-visible,
-.provider-choice button:focus-visible,
-.local-mode-choice button:focus-visible,
-.bridge-agent-choice button:focus-visible,
 .reasoning-choice button:focus-visible,
 .settings-text-action:focus-visible,
 .settings-select:focus-visible,
@@ -2203,7 +2291,12 @@ body.blank-dragging .composer-card {
   .composer-path-arrow,
   .blank-start,
   .settings-select svg,
-  .settings-advanced summary::after {
+  .settings-advanced summary::after,
+  .provider-row,
+  .provider-dot,
+  .provider-dot::after,
+  .provider-body,
+  .provider-body-slot {
     animation: none;
     transition: none;
   }
@@ -2242,16 +2335,16 @@ body.blank-dragging .composer-card {
     min-height: var(--control-h-lg);
   }
 
-  .provider-choice button,
-  .local-mode-choice button,
-  .bridge-agent-choice button,
   .reasoning-choice button,
   .settings-select,
   .settings-complete-section .web-primary {
     min-height: var(--control-h-lg);
   }
 
-  .provider-choice button,
+  .provider-row {
+    min-height: var(--control-h-lg);
+  }
+
   .settings-select {
     font-size: var(--text-base);
   }

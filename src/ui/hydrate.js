@@ -1,7 +1,6 @@
 import {
   MAX_SCALE,
   MIN_SCALE,
-  currentNodeId,
   frozen,
   hydration,
   nextOrder,
@@ -13,7 +12,8 @@ import {
   setViewAdjusted,
   view
 } from "./core.js";
-import { DEFAULT_CHILD, DEFAULT_ROOT } from "../core/layout.js";
+import { DEFAULT_CHILD, DEFAULT_ROOT, DEFAULT_STANDALONE_NOTE } from "../core/layout.js";
+import { isNoteNode } from "../core/model.js";
 import { setMode } from "./canvas-view.js";
 import { setRendererAssetData } from "./renderer.js";
 
@@ -22,8 +22,8 @@ export function hydrateInitialState({ connectSse = null, refreshStatus = null } 
   if (frozen) document.body.classList.add("frozen");
   (hydration.nodes || []).forEach(function(raw){
     var isRoot = raw.id === rootId;
-    var size = raw.size || (isRoot ? DEFAULT_ROOT : DEFAULT_CHILD);
-    var node = registerNode({
+    var size = raw.size || (isRoot ? DEFAULT_ROOT : (isNoteNode(raw) && raw.parent_id == null ? DEFAULT_STANDALONE_NOTE : DEFAULT_CHILD));
+    registerNode({
       id: raw.id, parent_id: raw.parent_id, title: raw.title,
       html: "", md: raw.markdown || "",
       base_url: raw.base_url || null, base_url_source: raw.base_url_source || null,

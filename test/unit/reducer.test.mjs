@@ -97,6 +97,129 @@ function assertGoldens(results, environment) {
 const nodeResults = runCorpus({ createHoleState, holeStateToHole, reduceHoleEvent }, cases);
 assertGoldens(nodeResults, "node");
 
+// First-class note creation is intentionally stricter than the reducer's
+// tolerant presentation updates: a note is born complete or not inserted.
+{
+  const initial = createHoleState({
+    hole_id: "notes",
+    title: "Notes",
+    root_id: "root",
+    nodes: [{ id: "root", parent_id: null, title: "Root", markdown: "Root body" }],
+  });
+  const anchoredOrigin = {
+    kind: "note",
+    selected_text: "  exact phrase  ",
+    anchor: { offset_start: -3, offset_end: 15 },
+    branch_type: "ignored",
+    unknown: "drop me",
+  };
+  const anchored = reduceHoleEvent(initial, {
+    type: "node_create",
+    id: "anchored-note",
+    parent_id: "root",
+    title: "  Margin note  ",
+    markdown: "Remember **this**.",
+    position: { x: 50, y: 75 },
+    size: { w: 320, h: 180 },
+    origin: anchoredOrigin,
+  }, { now: "2026-08-11T00:00:00.000Z" });
+  assert.deepEqual(anchored.state.nodes.get("anchored-note"), {
+    id: "anchored-note",
+    parent_id: "root",
+    title: "Margin note",
+    markdown: "Remember **this**.",
+    base_url: null,
+    base_url_source: null,
+    origin: {
+      kind: "note",
+      selected_text: "exact phrase",
+      anchor: { offset_start: 0, offset_end: 15 },
+      branch_type: "selection",
+    },
+    position: { x: 50, y: 75 },
+    size: { w: 320, h: 180 },
+    font_scale: 1,
+    collapsed: false,
+    status: "answered",
+    read: true,
+    created_at: "2026-08-11T00:00:00.000Z",
+    extensions: {},
+  }, "node_create creates a complete anchored note");
+  assert.equal(anchored.effects.createdNode.id, "anchored-note");
+
+  const standalone = reduceHoleEvent(anchored.state, {
+    type: "node_create",
+    id: "standalone-note",
+    markdown: "A hole-wide thought.",
+    position: { x: -20, y: 10 },
+    origin: { kind: "note", unknown: "drop me", anchor: { offset_start: 1, offset_end: 2 } },
+  }, { now: "2026-08-11T00:00:01.000Z" });
+  assert.equal(standalone.state.nodes.get("standalone-note").parent_id, null, "node_create permits a standalone note");
+  assert.equal(standalone.state.nodes.get("standalone-note").status, "answered");
+  assert.equal(standalone.state.nodes.get("standalone-note").title, "Note");
+  assert.equal(standalone.state.nodes.get("standalone-note").read, true, "human-authored notes are born read");
+  assert.deepEqual(standalone.state.nodes.get("standalone-note").origin, { kind: "note" }, "standalone note origins drop unknown and anchored-only keys");
+
+  assert.throws(
+    () => reduceHoleEvent(standalone.state, { type: "node_create", id: "standalone-note", markdown: "Duplicate", origin: { kind: "note" } }),
+    /Node standalone-note already exists/,
+    "node_create rejects duplicate ids",
+  );
+  for (const markdown of [undefined, "   "]) {
+    assert.throws(
+      () => reduceHoleEvent(initial, { type: "node_create", id: `empty-${String(markdown)}`, markdown, origin: { kind: "note" } }),
+      /Note markdown is required/,
+      "node_create rejects missing or empty note markdown",
+    );
+  }
+  assert.throws(
+    () => reduceHoleEvent(initial, { type: "node_create", id: "orphan", parent_id: "missing", markdown: "Orphan", origin: { kind: "note" } }),
+    /Parent node missing not found/,
+    "node_create rejects a missing parent",
+  );
+  for (const origin of [null, {}, { kind: "answer" }]) {
+    assert.throws(
+      () => reduceHoleEvent(initial, { type: "node_create", id: `bad-origin-${JSON.stringify(origin)}`, markdown: "Nope", origin }),
+      /origin\.kind must be "note"/,
+      "node_create rejects every non-note origin",
+    );
+  }
+  assert.throws(
+    () => reduceHoleEvent(initial, { type: "node_create", markdown: "Missing id", origin: { kind: "note" } }),
+    /Node create id is required/,
+    "node_create rejects a missing id",
+  );
+
+  const edited = reduceHoleEvent(standalone.state, {
+    type: "node_update",
+    node_id: "standalone-note",
+    title: "  Revised thought  ",
+    markdown: "Revised **note** body.",
+  });
+  assert.equal(edited.state.nodes.get("standalone-note").title, "Revised thought", "node_update accepts note titles");
+  assert.equal(edited.state.nodes.get("standalone-note").markdown, "Revised **note** body.", "node_update accepts note markdown");
+  const emptyEdit = reduceHoleEvent(edited.state, {
+    type: "node_update",
+    node_id: "standalone-note",
+    markdown: "   ",
+  });
+  assert.equal(emptyEdit.state.nodes.get("standalone-note").markdown, "Revised **note** body.", "node_update ignores empty note markdown");
+
+  const answerTitleEdited = reduceHoleEvent(edited.state, {
+    type: "node_update",
+    node_id: "root",
+    title: "  Renamed root  ",
+    markdown: "Must stay Root body",
+    position: { x: 9, y: 4 },
+  });
+  assert.equal(answerTitleEdited.state.nodes.get("root").title, "Renamed root", "node_update accepts title patches for non-notes");
+  assert.equal(answerTitleEdited.state.nodes.get("root").markdown, "Root body", "node_update ignores markdown patches for non-notes");
+  assert.deepEqual(answerTitleEdited.state.nodes.get("root").position, { x: 9, y: 4 }, "non-note presentation updates retain existing semantics");
+  const emptyTitle = reduceHoleEvent(answerTitleEdited.state, { type: "node_update", node_id: "root", title: "   " });
+  assert.equal(emptyTitle.state.nodes.get("root").title, "Renamed root", "node_update ignores empty title patches");
+}
+console.log("ok reducer notes: note creation, all-node title patches, and note-only markdown patches");
+
 // Immutability is an engine contract: changed nodes are replaced while unchanged
 // nodes may remain shared. Frozen input makes mutation fail immediately.
 const priorState = createHoleState({ root_id: "root", nodes: [{ id: "root", markdown: "before" }] });

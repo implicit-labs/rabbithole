@@ -26,6 +26,7 @@ import {
   viewAdjusted
 } from "./core.js";
 import { DEFAULT_CHILD } from "../core/layout.js";
+import { isNoteNode } from "../core/model.js";
 import {
   renderBreadcrumb,
   renderReaderBody,
@@ -97,12 +98,17 @@ export function scheduleViewSave(){
     }, 600);
   }
   var saveTimers = {};
+  function nodeUpdatePayload(node){
+    var payload = { type:"node_update", node_id: node.id, title: node.title, position:{x:node.x,y:node.y}, size:{w:node.w,h:node.h}, collapsed: node.collapsed, font_scale: node.font_scale };
+    if (isNoteNode(node)) payload.markdown = node.md;
+    return payload;
+  }
 export function persistNode(node){
-    if (transportDisposed) return;
+    if (transportDisposed || node._ephemeral) return;
     if (saveTimers[node.id]) clearTimeout(saveTimers[node.id]);
     saveTimers[node.id] = setTimeout(function(){
       delete saveTimers[node.id];
-      post({ type:"node_update", node_id: node.id, position:{x:node.x,y:node.y}, size:{w:node.w,h:node.h}, collapsed: node.collapsed, font_scale: node.font_scale });
+      post(nodeUpdatePayload(node));
     }, 350);
   }
 export function flushPendingSaves(){
@@ -115,7 +121,7 @@ export function flushPendingSaves(){
       clearTimeout(pending[id]);
       var node = nodes[id];
       if (!node) return Promise.resolve();
-      return postPending({ type:"node_update", node_id: node.id, position:{x:node.x,y:node.y}, size:{w:node.w,h:node.h}, collapsed: node.collapsed, font_scale: node.font_scale });
+      return postPending(nodeUpdatePayload(node));
     });
     if (viewSaveTimer){
       clearTimeout(viewSaveTimer);

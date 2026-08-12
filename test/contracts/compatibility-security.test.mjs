@@ -122,7 +122,7 @@ async function verifyFrozen(snapshot) {
   await page.setContent(snapshot, { waitUntil: "load" });
   await page.waitForSelector(".doc-content #safe-show", { state: "attached" });
   await page.waitForTimeout(250);
-  assert.equal(await page.locator("#taskbar button").count(), 12, "frozen snapshots should render the shared taskbar buttons");
+  assert.equal(await page.locator("#taskbar button").count(), 11, "frozen snapshots should render the shared taskbar buttons");
   assert.equal(await page.locator("#tb-done").isVisible(), false, "frozen snapshots should suppress Done");
   assert.equal(await page.locator("#t-new, #t-rail").count(), 0, "only the web app can create or browse holes, so its chrome must not ship in the shared shell");
   const frozenAssets = await page.evaluate(() => [...document.querySelectorAll(".doc-content img[alt='offline asset']")].map((img) => ({ src: img.getAttribute("src"), complete: img.complete, width: img.naturalWidth })));

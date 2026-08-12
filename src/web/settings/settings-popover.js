@@ -37,6 +37,24 @@ const chevron = iconSvg("chevron");
 const infoIcon = iconSvg("info");
 const searchIcon = iconSvg("search", { size: 13 });
 
+/*
+ * The five leaf choices a user can actually make, flattened into one exclusive
+ * list. Claude Code and Codex share the `subscriptions` preset (one bridge,
+ * one transport) but are separate identities to the user, so they are separate
+ * rows; the row — not a nested switch — carries the agent choice.
+ */
+const PROVIDER_ROWS = Object.freeze([
+  Object.freeze({ id: "openrouter", preset: "openrouter", label: "OpenRouter", detail: "Hundreds of models · your API key" }),
+  Object.freeze({ id: "claude", preset: "subscriptions", agent: "claude", label: "Claude Code", detail: "Your Claude plan" }),
+  Object.freeze({ id: "codex", preset: "subscriptions", agent: "codex", label: "Codex", detail: "Your ChatGPT plan" }),
+  Object.freeze({ id: "local", preset: "local", label: "Ollama", detail: "Models on this computer" }),
+  Object.freeze({ id: "custom_endpoint", preset: "custom_endpoint", label: "Custom endpoint", detail: "Any OpenAI-compatible server" }),
+]);
+
+function providerRowMarkup(row, selected) {
+  return `<div class="provider-item${selected ? " selected" : ""}" data-provider-item="${row.id}"><button type="button" class="provider-row" role="radio" data-provider="${row.id}" aria-checked="${selected}" tabindex="${selected ? 0 : -1}"><span class="provider-dot" aria-hidden="true"></span><span class="provider-copy"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.detail)}</small></span><span class="provider-chip" data-provider-chip hidden></span></button><div class="provider-body"><div class="provider-body-slot"></div></div></div>`;
+}
+
 function eyeSvg(open) {
   return iconSvg(open ? "eye-off" : "eye");
 }
@@ -83,6 +101,8 @@ export function createSettingsPopover({
   let pairingSetupPending = false;
   let pairingSetupComplete = null;
   let conditionalComboboxes = [];
+  let openrouterKeyValid = false;
+  let lastKeyCommit = { value: null, result: false };
 
   function applyPatch(patch) {
     const current = loadSettings();
@@ -91,10 +111,6 @@ export function createSettingsPopover({
     const apiKey = Object.prototype.hasOwnProperty.call(patch, "api_key") ? patch.api_key : getApiKey(changedProvider ? merged : current);
     saveSettings({ ...merged, api_key: apiKey });
     onSettingsChange();
-  }
-
-  function modelDisplayName(id) {
-    return modelCatalogCache?.find((model) => model.id === id)?.name || prettyModelId(id);
   }
 
   function loadCatalog() {
@@ -157,9 +173,7 @@ export function createSettingsPopover({
     }
     if (!element) return null;
     if (element.id) return { kind: "id", value: element.id };
-    for (const name of ["bridgeAgent", "reasoning"]) {
-      if (element.dataset?.[name]) return { kind: name, value: element.dataset[name] };
-    }
+    if (element.dataset?.reasoning) return { kind: "reasoning", value: element.dataset.reasoning };
     return null;
   }
 
@@ -170,9 +184,6 @@ export function createSettingsPopover({
   function restoreTransitionFocus(host, key) {
     let target = null;
     if (key?.kind === "id") target = host.querySelector(`#${key.value}`);
-    if (key?.kind === "bridgeAgent") {
-      target = [...host.querySelectorAll("[data-bridge-agent]")].find((element) => element.dataset.bridgeAgent === key.value);
-    }
     if (key?.kind === "reasoning") {
       target = [...host.querySelectorAll("[data-reasoning]")].find((element) => element.dataset.reasoning === key.value);
     }
@@ -240,12 +251,6 @@ export function createSettingsPopover({
       setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="starting">${bridgeStartingMarkup()}</div>`);
       return;
     }
-    const claudeAgent = bridgeAgent(bridgeState, "claude");
-    const codexAgent = bridgeAgent(bridgeState, "codex");
-    if (claudeAgent?.state === "missing" && codexAgent?.state === "missing") {
-      setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="none_installed">${bridgeNoneInstalledMarkup(claudeAgent, codexAgent)}</div>`);
-      return;
-    }
 
     const models = bridgeModelsFor(agentId);
     const body = state === "ready"
@@ -257,13 +262,14 @@ export function createSettingsPopover({
     const finish = ready && (purpose !== "settings" || !getGenerationSetupStatus(settings).ready)
       ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button">${getGenerationSetupStatus(settings).ready ? "Done" : "Finish setup"}</button></div>`
       : "";
-    setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="${escapeHtml(state)}">
-      ${bridgeAgentChoiceMarkup(settings)}<div class="bridge-agent-body">${body}</div>
-    </div>${finish}`);
+    setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="${escapeHtml(state)}"><div class="bridge-agent-body">${body}</div></div>${finish}`);
   }
 
   function renderConditionalSections() {
-    const host = surface?.querySelector("#settings-conditional-sections");
+    if (!surface) return;
+    mountConditionalHost();
+    updateProviderRows();
+    const host = surface.querySelector("#settings-conditional-sections");
     if (!host) return;
     const settings = loadSettings();
     const preset = providerFor(settings.preset);
@@ -297,15 +303,11 @@ export function createSettingsPopover({
       : preset.id === "custom_endpoint"
         ? `<div class="settings-section endpoint-section">${fieldMarkup({ id: "provider-base", label: "Endpoint", value: settings.base_url || "", placeholder: "https://api.example.com/v1", autocomplete: "off", autocapitalize: "none", autocorrect: "off", inputmode: "url", enterkeyhint: "done", spellcheck: "false", status: { id: "endpoint-status", className: `key-status ${endpointStatusTone()} visible`, text: endpointStatusCopy() || ENDPOINT_HINT } })}</div>`
         : "";
-    const localModeSection = preset.id === "local" || preset.id === "custom_endpoint"
-      ? `<div class="settings-section local-mode-section"><div class="local-mode-choice" role="group" aria-label="Local connection"><button type="button" data-local-mode="local" aria-pressed="${preset.id === "local"}">Ollama</button><button type="button" data-local-mode="custom_endpoint" aria-pressed="${preset.id === "custom_endpoint"}">Custom endpoint</button></div></div>`
-      : "";
     const transcriptionSection = purpose === "setup"
       ? ""
       : `<div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(preset)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: preset.id === "local" ? "transcribe-model-status" : "", value: transcribeDisabled ? "" : transcribeModel, label: transcribeLabel, title: transcribeDisabled ? localCapability.reason : transcribeModel, iconHtml: chevron, disabled: transcribeDisabled })}</div>${preset.id === "local" ? `<small id="transcribe-model-status" class="field-hint transcription-status ${escapeHtml(localCapability.status)}">${escapeHtml(transcriptionStatusCopy(localCapability))}${localDiscovery === "success" && !localCapability.available && localCapability.status !== "checking" ? ` <button id="local-vision-retry" class="settings-text-action" type="button">Recheck</button>` : ""}</small>` : ""}</div>`;
     const typed = textBeingTyped(host);
     setConditionalHtml(host, `${recoveryStatus ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>` : ""}
-      ${localModeSection}
       ${preset.id === "custom_endpoint" ? `${endpointSection}${keySection}${modelSection}` : `${modelSection}${keySection}${endpointSection}`}
       ${transcriptionSection}
       ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`);
@@ -410,15 +412,19 @@ export function createSettingsPopover({
     applyPatch({ ...patch, agent: agentId, agents });
   }
 
-  function switchBridgeAgent(agentId) {
-    const settings = loadSettings();
-    if (agentId !== "claude" && agentId !== "codex") return;
+  // Park the outgoing agent's per-agent settings and select the new one.
+  function applyAgentSwitch(settings, agentId) {
     const currentAgent = selectedBridgeAgent(settings);
-    if (agentId === currentAgent) return;
+    if (agentId === currentAgent) return false;
     const agents = { ...(settings.agents || {}) };
     agents[currentAgent] = bridgeAgentSnapshot(settings, currentAgent, agents);
     applyBridgeSelection(settings, agentId, agents);
-    renderConditionalSections();
+    return true;
+  }
+
+  function switchBridgeAgent(agentId) {
+    if (agentId !== "claude" && agentId !== "codex") return;
+    if (applyAgentSwitch(loadSettings(), agentId)) renderConditionalSections();
   }
 
   /* Paired but the stream is down — the returning user only needs the command. */
@@ -460,14 +466,6 @@ export function createSettingsPopover({
     return `<div class="bridge-command"><code>${escapeHtml(command)}</code><button data-copy-command="${escapeHtml(command)}" data-state-action class="settings-text-action" type="button">Copy</button></div>`;
   }
 
-  function bridgeAgentChoiceMarkup(settings) {
-    const selected = selectedBridgeAgent(settings);
-    return `<div class="settings-section bridge-agent-section"><div class="bridge-agent-choice" role="group" aria-label="Claude Code or Codex">${["claude", "codex"].map((agentId) => {
-      const state = bridgeAgent(bridgeState, agentId)?.state || "starting";
-      return `<button type="button" data-bridge-agent="${escapeHtml(agentId)}" data-agent-state="${escapeHtml(state)}" aria-pressed="${agentId === selected}">${escapeHtml(BRIDGE_AGENT_LABELS[agentId])}</button>`;
-    }).join("")}</div></div>`;
-  }
-
   function bridgeAgentStateMarkup(agent) {
     const label = BRIDGE_AGENT_LABELS[agent?.id] || "Subscription agent";
     const copy = agent?.state === "missing"
@@ -481,15 +479,6 @@ export function createSettingsPopover({
       ? `<small class="field-hint">Rabbithole notices by itself — no restart needed.</small>`
       : "";
     return `<div class="settings-section bridge-agent-state"><p>${escapeHtml(copy)}</p>${agent?.detail ? `<small class="field-hint">${escapeHtml(agent.detail)}</small>` : ""}${bridgeCommandMarkup(agent?.fix || BRIDGE_COMMAND)}${followUp}</div>`;
-  }
-
-  /*
-   * Both CLIs are absent. A Claude Code/Codex switch over two identical
-   * dead ends would make the user discover the same failure twice — one
-   * screen states it once and routes by the plan they already pay for.
-   */
-  function bridgeNoneInstalledMarkup(claudeAgent, codexAgent) {
-    return `<div class="settings-section bridge-agent-state bridge-none-installed"><p>Neither Claude Code nor Codex is installed on this computer.</p><div class="bridge-install-option"><small class="bridge-install-plan">Claude plan</small>${bridgeCommandMarkup(claudeAgent.fix)}</div><div class="bridge-install-option"><small class="bridge-install-plan">ChatGPT plan</small>${bridgeCommandMarkup(codexAgent.fix)}</div><small class="field-hint">Install the one whose plan you pay for and sign in — Rabbithole notices by itself.</small></div>`;
   }
 
   function bridgeReadyMarkup(settings, agentId) {
@@ -842,35 +831,99 @@ export function createSettingsPopover({
         setTimeout(() => { if (button.isConnected) button.textContent = "Copy"; }, 1400);
       }).catch(() => {});
     }));
-    host.querySelectorAll("[data-bridge-agent]").forEach((button) => button.addEventListener("click", () => switchBridgeAgent(button.dataset.bridgeAgent)));
     host.querySelectorAll("[data-reasoning]").forEach((button) => button.addEventListener("click", () => {
       if (button.getAttribute("aria-pressed") === "true") return;
       if (providerFor(loadSettings().preset).id === "subscriptions") patchSelectedBridgeAgent({ reasoning: button.dataset.reasoning });
       else applyPatch({ reasoning: button.dataset.reasoning });
       button.closest(".reasoning-choice")?.querySelectorAll("button").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
     }));
-    host.querySelectorAll("[data-local-mode]").forEach((button) => button.addEventListener("click", () => {
-      const id = button.dataset.localMode;
-      if (providerFor(loadSettings().preset).id !== id) switchProvider(id);
-    }));
   }
 
-  function pressedProviderId(presetId) {
-    return presetId === "custom_endpoint" ? "local" : presetId;
+  function selectedRowId(settings = loadSettings()) {
+    const presetId = providerFor(settings.preset).id;
+    return presetId === "subscriptions" ? selectedBridgeAgent(settings) : presetId;
   }
 
-  function switchProvider(id) {
+  /*
+   * One conditional host, moved into the selected row's body. Every section
+   * renderer keeps writing to #settings-conditional-sections; the list only
+   * decides where that host lives.
+   */
+  function mountConditionalHost() {
+    const host = surface?.querySelector("#settings-conditional-sections");
+    const slot = surface?.querySelector(`[data-provider-item="${selectedRowId()}"] .provider-body-slot`);
+    if (host && slot && host.parentElement !== slot) slot.append(host);
+  }
+
+  function rowStatus(rowId, settings) {
+    const presetId = providerFor(settings.preset).id;
+    if (rowId === "claude" || rowId === "codex") {
+      if (presetId !== "subscriptions" || bridgeView !== "stream") return null;
+      const state = bridgeAgent(bridgeState, rowId)?.state;
+      if (state === "ready") return { text: "Ready", tone: "ok" };
+      if (state === "missing") return { text: "Not installed", tone: "" };
+      if (state === "signed_out") return { text: "Signed out", tone: "" };
+      if (state === "error") return { text: "Needs attention", tone: "warn" };
+      return null;
+    }
+    if (rowId === "openrouter") return openrouterKeyValid ? { text: "Connected", tone: "ok" } : null;
+    if (rowId === "local") {
+      if (presetId !== "local") return null;
+      if (localDiscovery === "success") return { text: `${localModels.length} model${localModels.length === 1 ? "" : "s"}`, tone: "ok" };
+      if (localDiscovery === "empty") return { text: "No models", tone: "" };
+      return null;
+    }
+    if (rowId === "custom_endpoint") {
+      if (presetId !== "custom_endpoint") return null;
+      if (endpointDiscovery === "success" || endpointDiscovery === "empty") return { text: "Connected", tone: "ok" };
+      return null;
+    }
+    return null;
+  }
+
+  function updateProviderRows() {
+    if (!surface) return;
+    const settings = loadSettings();
+    const activeRow = selectedRowId(settings);
+    surface.querySelectorAll("[data-provider-item]").forEach((item) => {
+      const rowId = item.dataset.providerItem;
+      const selected = rowId === activeRow;
+      item.classList.toggle("selected", selected);
+      const radio = item.querySelector(".provider-row");
+      radio.setAttribute("aria-checked", selected ? "true" : "false");
+      radio.tabIndex = selected ? 0 : -1;
+      const chip = item.querySelector("[data-provider-chip]");
+      const status = rowStatus(rowId, settings);
+      chip.hidden = !status;
+      chip.textContent = status?.text || "";
+      chip.classList.toggle("ok", status?.tone === "ok");
+      chip.classList.toggle("warn", status?.tone === "warn");
+    });
+  }
+
+  function selectRow(rowId) {
+    const row = PROVIDER_ROWS.find((entry) => entry.id === rowId);
+    if (!row) return;
+    const settings = loadSettings();
+    if (row.preset !== providerFor(settings.preset).id) {
+      switchProvider(row.preset, row.agent || "");
+      return;
+    }
+    if (row.agent && row.agent !== selectedBridgeAgent(settings)) switchBridgeAgent(row.agent);
+  }
+
+  function switchProvider(id, agentId = "") {
     const current = loadSettings();
     if (!id || id === providerFor(current.preset).id) return;
     localDiscoveryToken += 1; endpointDiscoveryToken += 1;
+    lastKeyCommit = { value: null, result: false };
     if (id !== "subscriptions") {
       stopBridgeStream();
       stopBridgeProbe();
     }
     saveSettings({ ...current, api_key: getApiKey(current) });
     applyPatch(settingsForProvider(id, current));
-    const pressed = pressedProviderId(id);
-    surface.querySelectorAll("[data-provider]").forEach((choice) => choice.setAttribute("aria-pressed", choice.dataset.provider === pressed ? "true" : "false"));
+    if (agentId) applyAgentSwitch(loadSettings(), agentId);
     recoveryStatus = ""; localModels = null; localDiscovery = "idle";
     endpointModels = null; endpointDiscovery = "idle"; endpointDiscoveryMessage = "";
     bridgeState = null; bridgeView = "idle"; lastBridgeFrameKey = ""; lastBridgeRenderKey = ""; bridgeUnauthorized = false;
@@ -881,11 +934,22 @@ export function createSettingsPopover({
   }
 
   function wireProviderControl() {
-    surface.querySelectorAll("[data-provider]").forEach((button) => button.addEventListener("click", () => {
-      const id = button.dataset.provider;
-      if (!id || id === pressedProviderId(providerFor(loadSettings().preset).id)) return;
-      switchProvider(id);
-    }));
+    const list = surface.querySelector(".provider-list");
+    const rows = [...list.querySelectorAll(".provider-row")];
+    rows.forEach((button) => button.addEventListener("click", () => selectRow(button.dataset.provider)));
+    list.addEventListener("keydown", (event) => {
+      const index = rows.indexOf(document.activeElement);
+      if (index < 0) return;
+      let next = -1;
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % rows.length;
+      else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + rows.length) % rows.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = rows.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectRow(rows[next].dataset.provider);
+      rows[next].focus({ preventScroll: true });
+    });
   }
 
   function endpointConnected(settings) {
@@ -1196,34 +1260,47 @@ export function createSettingsPopover({
     const input = surface?.querySelector("#api-key"); const status = surface?.querySelector("#api-key-status");
     if (!input || !status) return false;
     const value = input.value.trim(); const preset = providerFor(loadSettings().preset); const token = ++keyToken;
+    /*
+     * A blur with an unchanged key re-states a verdict the status line already
+     * shows — and rewriting it mid-click shifts the controls underneath the
+     * pointer. Nothing changed, so say nothing and touch nothing.
+     */
+    if (!required && value && value === lastKeyCommit.value) return lastKeyCommit.result;
     if (!value) {
+      lastKeyCommit = { value: "", result: false };
+      if (preset.id === "openrouter") openrouterKeyValid = false;
       if (getApiKey(loadSettings())) {
         applyPatch({ api_key: "" });
         setKeyStatus(status, "Key removed.", "hint");
         if (preset.id === "custom_endpoint") void runEndpointDiscovery();
       } else setKeyStatus(status, required ? "Enter a key first." : keyIdleWhisper(preset), required ? "invalid" : "idle");
+      updateProviderRows();
       return false;
     }
     const previousKey = getApiKey(loadSettings());
     const result = await validateKeyForPreset({ key: value, presetId: preset.id, statusEl: status, required, onShake: () => input.classList.add("shake-once") });
     if (token !== keyToken) return false;
+    lastKeyCommit = { value, result: !!result };
     if (result) applyPatch({ api_key: value });
     if (result && preset.id === "custom_endpoint" && value !== previousKey) void runEndpointDiscovery();
+    if (preset.id === "openrouter") {
+      openrouterKeyValid = !!result;
+      updateProviderRows();
+    }
     return result;
   }
 
-  function open({ focusKey = false, focusSelector = "", trigger = defaultTrigger, purpose: nextPurpose = "settings", status = "", onReady = null } = {}) {
+  function open({ focusKey = false, trigger = defaultTrigger, purpose: nextPurpose = "settings", status = "", onReady = null } = {}) {
     if (surface) {
       purpose = nextPurpose;
       recoveryStatus = status;
       readyCallback = onReady;
       lastBridgeRenderKey = "";
       renderConditionalSections();
-      const target = focusSelector ? surface.querySelector(focusSelector) : null;
-      target?.focus({ preventScroll: true });
       return;
     }
     activeTrigger = trigger || defaultTrigger; purpose = nextPurpose; readyCallback = onReady; recoveryStatus = status;
+    lastKeyCommit = { value: null, result: false };
     const settings = loadSettings();
     if (purpose === "setup" && !getGenerationSetupStatus(settings).ready) {
       localDiscoveryToken += 1;
@@ -1232,9 +1309,11 @@ export function createSettingsPopover({
     const preset = providerFor(settings.preset);
     surface = document.createElement("div"); surface.id = "web-settings-popover"; surface.className = "web-settings-dialog popover-surface"; surface.tabIndex = -1; surface.setAttribute("aria-label", "Model settings");
     const title = purpose === "recovery" ? "Reconnect AI" : purpose === "setup" ? "Set up AI" : "Model settings";
-    const providerChoices = [PROVIDERS.openrouter, PROVIDERS.subscriptions, PROVIDERS.local];
-    const pressed = pressedProviderId(preset.id);
-    surface.innerHTML = `<section id="settings-panel" class="settings-panel" aria-labelledby="settings-title"><header class="settings-header"><h2 id="settings-title">${title}</h2></header><div class="settings-inner"><div class="settings-section provider-section"><span class="settings-label" id="provider-choice-label">Provider</span><div class="provider-choice" role="group" aria-labelledby="provider-choice-label">${providerChoices.map((provider) => `<button type="button" data-provider="${provider.id}" aria-pressed="${provider.id === pressed}">${escapeHtml(provider.label)}</button>`).join("")}</div></div><div id="settings-conditional-sections"></div></div></section>`;
+    const selectedRow = selectedRowId(settings);
+    surface.innerHTML = `<section id="settings-panel" class="settings-panel" aria-labelledby="settings-title"><header class="settings-header"><h2 id="settings-title">${title}</h2></header><div class="settings-inner"><div class="settings-section provider-list-section"><div class="provider-list" role="radiogroup" aria-label="Where answers come from">${PROVIDER_ROWS.map((row) => providerRowMarkup(row, row.id === selectedRow)).join("")}</div></div></div></section>`;
+    const conditionalHost = document.createElement("div");
+    conditionalHost.id = "settings-conditional-sections";
+    surface.querySelector(`[data-provider-item="${selectedRow}"] .provider-body-slot`).append(conditionalHost);
     document.body.append(surface); activeTrigger.setAttribute("aria-controls", surface.id); wireProviderControl(); renderConditionalSections();
     if (activeTrigger?.id === "blank-start-setup") {
       surface.classList.add("settings-setup-surface");
@@ -1243,10 +1322,9 @@ export function createSettingsPopover({
       document.body.append(scrim);
     }
     const panel = surface.querySelector("#settings-panel"); if (panel.querySelector("#api-key")?.value.trim()) commitSettingsKey();
-    const explicit = focusSelector ? surface.querySelector(focusSelector) : null;
     const placement = activeTrigger?.id === "blank-start-setup" ? "center" : "bottom-end";
     const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
-    popover = openPopover({ trigger: activeTrigger, surface, placement, initialFocus: explicit || (focusKey && !coarsePointer ? surface.querySelector("#api-key") : surface), onClose: close });
+    popover = openPopover({ trigger: activeTrigger, surface, placement, initialFocus: focusKey && !coarsePointer ? surface.querySelector("#api-key") : surface, onClose: close });
     // Discovery failures stay in Local settings. The guided dialog opens only
     // from the explicit Set up Local action rendered for error/empty states.
     if (preset.id === "local") void runLocalDiscovery();
