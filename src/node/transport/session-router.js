@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { getAssetContentType } from "../../core/assets.js";
+import { getAssetContentType, MAX_ASSET_BYTES, validateImageAssetName } from "../../core/assets.js";
+import { defaultFsStore } from "../fs-store.js";
 import { resolveAsset } from "../fs-store.js";
 import { slugifyTitle } from "../../core/utils.js";
 import { toPersistedHole } from "../../core/schema.js";
@@ -33,6 +34,16 @@ export async function handleSessionRequest(session, req, res) {
 
   if (req.method === "GET" && assetRequestName !== undefined) {
     await serveSessionAsset(session, assetRequestName, res);
+    return;
+  }
+
+  if (req.method === "PUT" && assetRequestName !== undefined) {
+    await putSessionAsset(session, req, res, assetRequestName);
+    return;
+  }
+
+  if (req.method === "DELETE" && assetRequestName !== undefined) {
+    await deleteSessionAsset(session, res, assetRequestName);
     return;
   }
 
@@ -165,6 +176,62 @@ async function serveSessionAsset(session, name, res) {
     res.writeHead(404, { ...headers, "Content-Type": "text/plain" });
     res.end("Not Found");
   }
+}
+
+async function putSessionAsset(session, req, res, rawName) {
+  try {
+    if (!rawName) throw routeError("Invalid asset name", 400);
+    const name = validateImageAssetName(rawName);
+    if (!name.startsWith("paste-")) throw routeError("Pasted image asset names must start with paste-", 400);
+    const expectedType = getAssetContentType(name);
+    const contentType = String(req.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== expectedType) throw routeError(`Content-Type must be ${expectedType}`, 415);
+    const declaredSize = Number(req.headers["content-length"] || 0);
+    if (declaredSize > MAX_ASSET_BYTES) throw routeError("Asset exceeds 20 MB", 413);
+    if (await resolveAsset(session.holeId, name)) throw routeError(`Asset ${name} already exists`, 409);
+    const bytes = await readAssetBody(req);
+    await defaultFsStore.putAsset(session.holeId, name, bytes);
+    session.assetNames.add(name);
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ ok: true, name }));
+  } catch (error) {
+    const status = error?.statusCode || 400;
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+async function deleteSessionAsset(session, res, rawName) {
+  try {
+    if (!rawName) throw routeError("Invalid asset name", 400);
+    const name = validateImageAssetName(rawName);
+    if (!name.startsWith("paste-")) throw routeError("Only pasted image assets can be deleted here", 400);
+    await defaultFsStore.deleteAsset(session.holeId, name);
+    session.assetNames.delete(name);
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ ok: true, name }));
+  } catch (error) {
+    const status = error?.statusCode || 400;
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+async function readAssetBody(req) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_ASSET_BYTES) throw routeError("Asset exceeds 20 MB", 413);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function routeError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 /** @param {string | undefined} reqUrl */

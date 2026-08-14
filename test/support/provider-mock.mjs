@@ -51,7 +51,7 @@ export async function routeProvider(page, { keyStatus, streams = [], onProviderC
   });
   await page.route(PROVIDER_URL, async (route) => {
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: corsHeaders(), body: "" });
-    onProviderCall?.();
+    onProviderCall?.(route.request().postDataJSON());
     const chunks = streams.shift() || ["# Fallback\n\nFallback streamed document."];
     if (providerDelayMs) await new Promise((resolve) => setTimeout(resolve, providerDelayMs));
     await route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store" }, body: sse(chunks) });

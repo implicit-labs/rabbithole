@@ -1,5 +1,5 @@
 import { validatePortableProjection } from "./portable-projection.js";
-import { maxAssetBytes } from "./assets.js";
+import { maxAssetBytes, validateImageAssetName } from "./assets.js";
 
 // A 100 MB source PDF expands to roughly 134 MB as base64. These caps protect
 // import memory without forcing source PDFs back through a lossy page pipeline.
@@ -44,7 +44,24 @@ export function parsePortableImportPayload(text, kind = "rabbithole") {
   }
   validatePortableImportCaps(parsed);
   const projection = validatePortableProjection(parsed);
+  normalizePortableAttachmentAssets(projection);
   return projection;
+}
+
+/** @param {any} projection */
+function normalizePortableAttachmentAssets(projection) {
+  const nodes = Array.isArray(projection?.hole?.nodes) ? projection.hole.nodes : [];
+  for (const node of nodes) {
+    const origin = node?.origin;
+    if (!origin || typeof origin !== "object" || Array.isArray(origin)) continue;
+    const names = [];
+    for (const rawName of Array.isArray(origin.attachment_assets) ? origin.attachment_assets : []) {
+      try { names.push(validateImageAssetName(rawName)); } catch {}
+      if (names.length === 4) break;
+    }
+    if (names.length) origin.attachment_assets = names;
+    else delete origin.attachment_assets;
+  }
 }
 
 /** @param {string} text */

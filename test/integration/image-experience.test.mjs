@@ -112,13 +112,18 @@ async function runPageFixtures() {
 
 async function runLiveSnapshotDownload() {
   const referencedBytes = Buffer.from("referenced snapshot asset");
+  const pastedBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   const unreferencedBytes = Buffer.from("unreferenced snapshot asset");
   const referencedPath = path.join(process.env.RABBITHOLE_DIR, "diagram.png");
+  const pastedPath = path.join(process.env.RABBITHOLE_DIR, "paste-deadbeef.png");
   const unreferencedPath = path.join(process.env.RABBITHOLE_DIR, "unused.png");
   await fs.writeFile(referencedPath, referencedBytes);
+  await fs.writeFile(pastedPath, pastedBytes);
   await fs.writeFile(unreferencedPath, unreferencedBytes);
   await addAssetsToHole("image-live-snapshot", [
     { name: "diagram.png", file_path: referencedPath },
+    { name: "paste-deadbeef.png", file_path: pastedPath },
     { name: "unused.png", file_path: unreferencedPath },
   ]);
 
@@ -130,7 +135,7 @@ async function runLiveSnapshotDownload() {
     nodes: [
       {
         id: "root", parent_id: null, title: "Root",
-        markdown: "Referenced asset ![diagram](asset:diagram.png)",
+        markdown: "Referenced asset ![diagram](asset:diagram.png)\n\n![Pasted image](asset:paste-deadbeef.png)",
         origin: null, position: { x: 0, y: 0 }, size: null, font_scale: 1,
         collapsed: false, status: "answered", read: true, created_at: now,
       },
@@ -152,7 +157,21 @@ async function runLiveSnapshotDownload() {
     await page.goto(session.url);
     await page.waitForSelector("#t-share");
     await page.waitForSelector(".rh-img-frame .rh-img-handle");
-    const sourceImage = page.locator(".rh-img-frame img").first();
+    await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    const sourceImage = page.locator('.rh-img-frame img[alt="diagram"]');
+    const pastedImage = page.locator('.rh-img-frame img[alt="Pasted image"]');
+    assert.deepEqual(await sourceImage.locator("..").evaluate((frame) => {
+      const style = getComputedStyle(frame);
+      return { pasted: frame.dataset.rhPasted || null, padding: style.paddingTop,
+        background: style.backgroundColor, border: style.borderTopWidth };
+    }), { pasted: null, padding: "8px", background: "rgb(244, 244, 241)", border: "1px" },
+    "ordinary asset images should retain the dark-theme matte");
+    assert.deepEqual(await pastedImage.locator("..").evaluate((frame) => {
+      const style = getComputedStyle(frame);
+      return { pasted: frame.dataset.rhPasted || null, padding: style.paddingTop,
+        background: style.backgroundColor, border: style.borderTopWidth };
+    }), { pasted: "1", padding: "0px", background: "rgba(0, 0, 0, 0)", border: "0px" },
+    "pasted asset images should not receive the dark-theme matte");
     await sourceImage.click();
     await page.waitForSelector(".rh-lightbox:not([hidden])");
     assert.equal(await page.locator('.rh-lightbox-close[aria-label="Close"]').count(), 1);
@@ -171,6 +190,14 @@ async function runLiveSnapshotDownload() {
     await page.click('.rh-lightbox-close[aria-label="Close"]');
     await page.waitForSelector(".rh-lightbox", { state: "detached" });
     assert.equal(await sourceImage.evaluate((img) => img === img.getRootNode().activeElement), true, "image close button should restore source focus");
+    await pastedImage.evaluate((img) => img.click());
+    assert.deepEqual(await page.locator(".rh-lightbox-img").evaluate((img) => {
+      const style = getComputedStyle(img);
+      return { pasted: img.dataset.rhPasted || null, padding: style.paddingTop,
+        background: style.backgroundColor, border: style.borderTopWidth };
+    }), { pasted: "1", padding: "0px", background: "rgba(0, 0, 0, 0)", border: "0px" },
+    "the pasted marker should exempt the lightbox image from the dark-theme matte");
+    await page.keyboard.press("Escape");
     const liveStyles = await page.locator("head style:first-of-type").textContent();
 
     await page.click("#t-share");
@@ -187,9 +214,27 @@ async function runLiveSnapshotDownload() {
     assert.equal(snapshotHtml.split(SNAPSHOT_PAYLOAD_OPEN).length - 1, 1, "snapshot should contain exactly one inert payload");
     assertIncludes(snapshotHtml, `<style>\n${liveStyles}\n</style>`, "snapshot should embed the canonical served stylesheet");
     assertIncludes(snapshotHtml, "RabbitholeFrozenClient.startPortableSnapshot", "snapshot should use derived portable hydration");
-    assert.deepEqual(Object.keys(projection.assets), ["diagram.png"], "snapshot should embed referenced assets only");
+    assert.deepEqual(Object.keys(projection.assets), ["diagram.png", "paste-deadbeef.png"], "snapshot should embed referenced assets only");
     assert.equal(projection.assets["diagram.png"], referencedBytes.toString("base64"));
+    assert.equal(projection.assets["paste-deadbeef.png"], pastedBytes.toString("base64"));
     assert.equal(projection.hole.nodes.find((node) => node.id === "pending")?.markdown, "", "snapshot endpoint should apply persisted pending-node policy");
+
+    const frozenPage = await browser.newPage();
+    try {
+      await frozenPage.setContent(snapshotHtml, { waitUntil: "load" });
+      await frozenPage.waitForSelector('.rh-img-frame img[alt="Pasted image"]', { state: "attached" });
+      await frozenPage.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+      assert.deepEqual(await frozenPage.locator('.rh-img-frame img[alt="Pasted image"]').locator("..").evaluate((frame) => {
+        const style = getComputedStyle(frame);
+        return { pasted: frame.dataset.rhPasted || null, padding: style.paddingTop,
+          background: style.backgroundColor, border: style.borderTopWidth };
+      }), { pasted: "1", padding: "0px", background: "rgba(0, 0, 0, 0)", border: "0px" },
+      "the frozen/share runtime should mount the pasted marker and preserve the matte exemption");
+      assert.equal(await frozenPage.locator('.rh-img-frame img[alt="diagram"]').locator("..").evaluate((frame) =>
+        getComputedStyle(frame).paddingTop), "8px", "the frozen/share runtime should retain ordinary-image mattes");
+    } finally {
+      await frozenPage.close();
+    }
     console.log("ok image ux: live MCP share snapshot download is canonical and portable");
   } finally {
     await browser.close();

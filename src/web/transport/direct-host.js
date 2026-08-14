@@ -1,7 +1,7 @@
 import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../core/reducer.js";
 import { normalizeBlockIds } from "../../core/blocks.js";
 import { collectRelevantNotes, isNoteNode, lineageNodesFromMap, truncate } from "../../core/model.js";
-import { extractNodeAssetRefs } from "../../core/assets.js";
+import { extractNodeAssetRefs, validateImageAssetName } from "../../core/assets.js";
 import { GenerationRun } from "../../core/generation-run.js";
 import { applyPersistedBrowserEvent, assetsOrphanedByDeletion, buildNodeAnsweredEvent, createSaveChain, dispatchBrowserEvent } from "../../core/hole-host.js";
 import { randomId } from "../../core/utils.js";
@@ -14,8 +14,17 @@ import { cropPdfSourceToBlob, cropPdfSourceToDataUrl } from "../pdf-crop.js";
 const SAVE_DEBOUNCE_MS = 400;
 const WEB_ROOT_QUESTION = "web_root_question";
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Image could not be read."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export class DirectRabbitholeHost {
-  constructor({ store, hole, brain = null, brainRequiredError = null, registerAssetUrl = null, onToast = null, onDone = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
+  constructor({ store, hole, brain = null, brainRequiredError = null, registerAssetUrl = null, revokeAssetUrl = null, onToast = null, onDone = null, onAuthRequired = null, onProviderFailure = null, onRootAnswered = null, getPdfTranscriptionCapability = null, mintGenerationRunId = defaultGenerationRunId } = {}) {
     this.store = store;
     this.brain = brain;
     this.brainRequiredError = brainRequiredError;
@@ -28,6 +37,7 @@ export class DirectRabbitholeHost {
     this.getPdfTranscriptionCapability = getPdfTranscriptionCapability;
     this.mintGenerationRunId = mintGenerationRunId;
     this.registerAssetUrl = registerAssetUrl;
+    this.revokeAssetUrl = revokeAssetUrl;
     this.state = createHoleState(hole);
     this.holeId = this.state.hole_id;
     this.title = this.state.title;
@@ -96,7 +106,26 @@ export class DirectRabbitholeHost {
         return { close: subscription.close };
       },
       post: (payload) => this.handleBrowserEvent(payload),
+      putAsset: (name, blob) => this.putAsset(name, blob),
+      deleteAsset: (name) => this.deleteAsset(name),
     };
+  }
+
+  async putAsset(name, blob) {
+    const safeName = validateImageAssetName(name);
+    if (!safeName.startsWith("paste-")) throw new Error("Pasted image asset names must start with paste-");
+    if (await this.store.getAsset(this.holeId, safeName)) throw new Error(`Asset ${safeName} already exists`);
+    await this.store.putAsset(this.holeId, safeName, blob);
+    this.registerAssetUrl?.(safeName, blob);
+    return { ok: true, name: safeName };
+  }
+
+  async deleteAsset(name) {
+    const safeName = validateImageAssetName(name);
+    if (!safeName.startsWith("paste-")) throw new Error("Only pasted image assets can be deleted here");
+    await this.store.deleteAsset(this.holeId, safeName);
+    this.revokeAssetUrl?.(safeName);
+    return { ok: true, name: safeName };
   }
 
   async handleBrowserEvent(payload) {
@@ -125,7 +154,8 @@ export class DirectRabbitholeHost {
   }
 
   async handleBranchRequest(payload) {
-    const parent = this.state.nodes.get(String(payload.parent_id || ""));
+    const parentId = payload.parent_id === null ? null : String(payload.parent_id || "");
+    const parent = this.state.nodes.get(parentId ?? this.state.root_id);
     // Raw flag on purpose — normalization fails against the mid-run streamed
     // body, and the lock must hold precisely then.
     if (parent?.extensions?.pdf?.converting) throw new Error("This PDF is being converted. Wait for conversion to finish before branching.");
@@ -431,9 +461,11 @@ export class DirectRabbitholeHost {
         }
       }
     } catch (error) {
-      if (!context.attachment || controller.signal.aborted) throw error;
+      if ((!context.attachment && !context.attachments?.length) || controller.signal.aborted) throw error;
       if (normalizeProviderError(error).code === "model_no_images") throw error;
+      const hadPastedImages = !!context.attachments?.some((attachment) => attachment?.source === "pasted_image");
       delete context.attachment;
+      delete context.attachments;
       this.dispatchProgress(nodeId, "", { emit: true });
       const retryRun = this.createGenerationRun(this.state.nodes.get(nodeId), fallbackTitle);
       generation = brain.answerBranch(context, controller.signal);
@@ -450,6 +482,7 @@ export class DirectRabbitholeHost {
           this.scheduleSave();
         }
       }
+      if (hadPastedImages) this.onToast?.({ message: "Answered without the pasted image(s) — the request was too large for this model." });
     }
 
     // Branches deliberately accept an empty provider stream: completion uses
@@ -461,9 +494,25 @@ export class DirectRabbitholeHost {
   }
 
   async attachBranchImage(node, context) {
-    const parent = this.state.nodes.get(node.parent_id);
+    const pastedAssets = [];
+    for (const rawName of Array.isArray(node.origin?.attachment_assets) ? node.origin.attachment_assets : []) {
+      try { pastedAssets.push(validateImageAssetName(rawName)); } catch {}
+      if (pastedAssets.length === 4) break;
+    }
+    if (pastedAssets.length) {
+      const attachments = [];
+      for (const name of pastedAssets) {
+        try {
+          const blob = await this.store.getAsset(this.holeId, name);
+          if (blob) attachments.push({ kind: "image", data_url: await blobToDataUrl(blob), source: "pasted_image", name });
+        } catch {}
+      }
+      if (attachments.length) context.attachments = attachments;
+      return;
+    }
+    const parent = this.state.nodes.get(node.parent_id ?? this.state.root_id);
     const anchor = node.origin?.anchor?.pdf;
-    const inheritedAnchor = anchor || parent?.origin?.anchor?.pdf;
+    const inheritedAnchor = node.parent_id == null ? null : (anchor || parent?.origin?.anchor?.pdf);
     let sourceNode = parent;
     while (sourceNode && !normalizePdfExtension(sourceNode)) sourceNode = this.state.nodes.get(sourceNode.parent_id);
     const pdf = normalizePdfExtension(sourceNode);
@@ -471,7 +520,7 @@ export class DirectRabbitholeHost {
     if (pdf && pageNumber) try {
       const blob = await this.store.getAsset(this.holeId, pdf.source.asset);
       const dataUrl = await cropPdfSourceToDataUrl(blob, { sourceKey: pdf.source.sha256, pageNumber, anchor: inheritedAnchor });
-      context.attachment = { kind: "image", data_url: dataUrl, page: pageNumber, source: "selection_crop" };
+      context.attachments = [{ kind: "image", data_url: dataUrl, page: pageNumber, source: "selection_crop" }];
       return;
     } catch {}
   }
@@ -578,8 +627,8 @@ export class DirectRabbitholeHost {
   }
 
   buildBranchContext(node) {
-    const parent = this.state.nodes.get(node.parent_id);
     const root = this.state.nodes.get(this.state.root_id);
+    const parent = this.state.nodes.get(node.parent_id ?? this.state.root_id);
     const lineage = parent ? lineageNodesFromMap(this.state.nodes, parent.id) : [];
     const ancestors = lineage.filter((entry) => entry.id !== parent?.id).map((entry) => ({
       id: entry.id,
@@ -592,8 +641,8 @@ export class DirectRabbitholeHost {
       parent_title: parent?.title || "Untitled",
       parent_markdown: parent?.markdown || "",
       ancestors,
-      notes: collectRelevantNotes(this.state.nodes, node.parent_id),
-      selected_text: node.origin?.selected_text || "",
+      notes: collectRelevantNotes(this.state.nodes, parent?.id || this.state.root_id),
+      selected_text: node.parent_id == null ? "" : (node.origin?.selected_text || ""),
       question: node.origin?.question || "",
       lens: node.origin?.lens || null,
     };

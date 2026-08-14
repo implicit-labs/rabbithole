@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { openBrowser } from "./browser.js";
 import { log, error as logError } from "../logger.js";
-import { addAssetsToHole, defaultFsStore } from "../fs-store.js";
+import { addAssetsToHole, defaultFsStore, resolveAsset } from "../fs-store.js";
 import { maybeUpgradeBaseUrlFromFrontmatter, normalizeBaseUrl } from "../../core/base-url.js";
-import { extractNodeAssetRefs } from "../../core/assets.js";
+import { extractNodeAssetRefs, validateImageAssetName } from "../../core/assets.js";
 import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../core/reducer.js";
 import { collectAllNotes, collectRelevantNotes, isNoteNode, lineageTitlesFromMap, normalizePdfAnchor } from "../../core/model.js";
 import { buildJsonError, closeServerGracefully } from "./http.js";
@@ -772,7 +772,7 @@ export class RabbitHoleSession {
             saved_asks: saved.map((n) => ({
               node_id: n.id,
               question: n.origin.question || "",
-              selected_text: n.origin.selected_text || "",
+              selected_text: n.parent_id == null ? "" : (n.origin.selected_text || ""),
             })),
           }
         : {}),
@@ -790,25 +790,33 @@ export class RabbitHoleSession {
     for (const node of saved) {
       const requestId = randomUUID();
       this.pendingByRequest.set(requestId, node.id);
-      const parent = this.nodes.get(node.parent_id);
+      const contextParentId = node.parent_id ?? this.rootId;
+      const parent = this.nodes.get(contextParentId);
       const event = {
         status: "branch_request",
         session_id: this.id,
         request_id: requestId,
         node_id: node.id,
-        parent_node_id: node.parent_id,
+        parent_node_id: contextParentId,
         parent_node_title: parent?.title || "Untitled",
-        selected_text: node.origin.selected_text || "",
+        selected_text: node.parent_id == null ? "" : (node.origin.selected_text || ""),
         question: node.origin.question || "",
         lens: node.origin.lens || null,
-        lineage: this.lineageTitles(node.parent_id),
+        lineage: this.lineageTitles(contextParentId),
         saved: true, // asked while the agent was away; answer it like any other
       };
       if (this.needsRehydration) {
         this.needsRehydration = false;
         event.rehydration = this.buildRehydrationPayload();
       }
-      enqueue = enqueue.then(() => this.queueBranchEvent(event, node, parent));
+      enqueue = enqueue.then(async () => {
+        try {
+          await this.queueBranchEvent(event, node, parent);
+        } catch (error) {
+          logError(`Saved branch ${node.id} attachment resolution failed: ${error.message}`);
+          this.pushEvent(event);
+        }
+      });
     }
     enqueue.catch((error) => logError(`Saved branch requeue failed: ${error.message}`));
   }
@@ -816,9 +824,10 @@ export class RabbitHoleSession {
   // ---- browser events (browser -> server) ---------------------------------
 
   handleBranchRequest(payload, preparedCrop = null) {
-    const parentId = String(payload.parent_id || "");
-    const parent = this.nodes.get(parentId);
-    if (!parent) throw buildJsonError(`Parent node ${parentId} not found`, 404);
+    const parentId = payload.parent_id === null ? null : String(payload.parent_id || "");
+    const contextParentId = parentId ?? this.rootId;
+    const parent = this.nodes.get(contextParentId);
+    if (!parent) throw buildJsonError(`Parent node ${contextParentId || parentId} not found`, 404);
     // Raw flag, not normalizePdfExtension: mid-run the body is the stream and
     // normalization rejects it — which would drop the lock exactly when it matters.
     if (parent.extensions?.pdf?.converting) throw buildJsonError("This PDF is being converted", 409);
@@ -837,12 +846,12 @@ export class RabbitHoleSession {
       session_id: this.id,
       request_id: requestId,
       node_id: nodeId,
-      parent_node_id: parentId,
+      parent_node_id: contextParentId,
       parent_node_title: parent.title || "Untitled",
       selected_text: node.origin.selected_text,
       question: node.origin.question,
       lens: node.origin.lens,
-      lineage: this.lineageTitles(parentId),
+      lineage: this.lineageTitles(contextParentId),
     };
 
     if (this.needsRehydration) {
@@ -862,6 +871,7 @@ export class RabbitHoleSession {
   }
 
   async preparePdfCrop(payload) {
+    if (payload.parent_id === null || (Array.isArray(payload.attachment_assets) && payload.attachment_assets.length)) return null;
     const parent = this.nodes.get(String(payload.parent_id || ""));
     const anchor = normalizePdfAnchor(payload.anchor?.pdf);
     const pdf = normalizePdfExtension(parent);
@@ -874,13 +884,32 @@ export class RabbitHoleSession {
   }
 
   async queueBranchEvent(event, node, parent, preparedCrop = null) {
+    const pastedAssets = [];
+    for (const rawName of Array.isArray(node?.origin?.attachment_assets) ? node.origin.attachment_assets : []) {
+      try { pastedAssets.push(validateImageAssetName(rawName)); } catch {}
+      if (pastedAssets.length === 4) break;
+    }
+    if (pastedAssets.length) {
+      const attachments = [];
+      for (const name of pastedAssets) {
+        try {
+          const imagePath = await resolveAsset(this.holeId, name);
+          if (imagePath) attachments.push({ kind: "image", image_path: imagePath, source: "pasted_image" });
+        } catch (error) {
+          logError(`Pasted image ${name} could not be resolved: ${error.message}`);
+        }
+      }
+      if (attachments.length) event.attachments = attachments;
+      this.pushEvent(event);
+      return;
+    }
     if (preparedCrop?.imagePath) {
       event.region = { page: preparedCrop.page, image_path: preparedCrop.imagePath };
       this.pushEvent(event);
       return;
     }
 
-    const anchor = node?.origin?.anchor?.pdf || parent?.origin?.anchor?.pdf;
+    const anchor = node?.parent_id == null ? null : (node?.origin?.anchor?.pdf || parent?.origin?.anchor?.pdf);
     let sourceNode = parent;
     while (sourceNode && !normalizePdfExtension(sourceNode)) sourceNode = this.nodes.get(sourceNode.parent_id);
     const pdf = anchor ? normalizePdfExtension(sourceNode) : null;

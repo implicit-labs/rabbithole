@@ -109,7 +109,7 @@ body {
 .rh-img-handle:hover { background: var(--bar-bg); color: var(--fg-bold); }
 .rh-img-handle:focus { outline: none; }
 .rh-img-handle:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-html[data-theme="dark"] .md .rh-img-frame { padding: 8px; background: #f4f4f1; border: 1px solid color-mix(in srgb, var(--border) 60%, #f4f4f1); border-radius: 6px; }
+html[data-theme="dark"] .md .rh-img-frame:not([data-rh-pasted="1"]) { padding: 8px; background: #f4f4f1; border: 1px solid color-mix(in srgb, var(--border) 60%, #f4f4f1); border-radius: 6px; }
 html[data-theme="dark"] .md .rh-img-frame > img { color: #191713; }
 .rh-lightbox { position: fixed; inset: 0; z-index: var(--layer-lightbox); display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.82); cursor: zoom-out; touch-action: none; animation: rh-lightbox-backdrop-in var(--duration-enter) var(--ease-out); }
 .rh-lightbox-dialog { display: contents; }
@@ -117,7 +117,7 @@ html[data-theme="dark"] .md .rh-img-frame > img { color: #191713; }
 .rh-lightbox-content { transform: translate(var(--rh-pan-x, 0px), var(--rh-pan-y, 0px)) scale(var(--rh-zoom, 1)); transform-origin: center center; cursor: grab; user-select: none; -webkit-user-select: none; }
 .rh-lightbox-content:active { cursor: grabbing; }
 .rh-lightbox-img { display: block; max-width: min(92vw, calc(100vw - 112px)); max-height: 92vh; border-radius: 8px; }
-html[data-theme="dark"] .rh-lightbox-img { padding: 8px; background: #f4f4f1; border: 1px solid color-mix(in srgb, var(--border) 60%, #f4f4f1); }
+html[data-theme="dark"] .rh-lightbox-img:not([data-rh-pasted="1"]) { padding: 8px; background: #f4f4f1; border: 1px solid color-mix(in srgb, var(--border) 60%, #f4f4f1); }
 .rh-lightbox-plate { position: relative; z-index: 1; box-sizing: border-box; overflow: hidden; padding: clamp(12px, 2vw, 24px); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--node-bg); color: var(--fg); }
 .rh-lightbox-diagram { display: block; width: 100%; height: 100%; flex: none; }
 .rh-lightbox-close { position: fixed; top: 14px; right: 14px; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border-focus); border-radius: var(--radius-control-lg); background: var(--node-bg); color: var(--fg-bold); box-shadow: var(--shadow-popover); cursor: pointer; transition: var(--transition-color); }
@@ -410,6 +410,11 @@ body.mode-flight #viewport { display: block; }
 .nc-inner.disabled { --nc-op: 0.55; }
 @media (hover: none), (pointer: coarse) { .nc-handle { opacity: 1; pointer-events: auto; transition: none; } .node-composer.open .nc-handle { opacity: 0; pointer-events: none; } }
 .origin-quote { font-family: var(--font-doc); font-size: 12px; color: var(--fg-dim); border-left: 2px solid var(--border-focus); padding-left: 9px; margin-bottom: 12px; font-style: italic; }
+.origin-attachment-strip { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+.origin-attachment-strip img { display: block; width: 52px; height: 42px; object-fit: cover; border: var(--border-default); border-radius: var(--radius-control); background: var(--code-bg); }
+.origin-quote .origin-attachment-strip, .reader-context .origin-attachment-strip { font-style: normal; }
+.side-item .origin-attachment-strip { gap: var(--space-2); margin-top: var(--space-3); }
+.side-item .origin-attachment-strip img { width: 42px; height: 34px; }
 .rh-origin-crop { display: block; width: fit-content; max-width: 58%; overflow: hidden; box-sizing: border-box; margin: 0 0 14px; padding: 0; border: 1px solid color-mix(in srgb, var(--border-focus) 42%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--node-bg) 94%, var(--fg) 6%); box-shadow: 0 1px 1px color-mix(in srgb, var(--fg) 8%, transparent); cursor: zoom-in; line-height: 0; }
 .rh-origin-crop:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 .rh-origin-crop:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
@@ -539,6 +544,28 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .has-draft .lens { display: none; }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
+
+/* A newly placed standalone note is the composer itself. It starts at the
+   compact note height and grows down to the ordinary card cap; the shared
+   action row remains the card's fixed footer throughout. */
+.node.note-draft .node-body { display: flex; padding: 0; overflow: hidden; }
+.node.note-draft .node-body > .nc-inner { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
+  margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: transparent; box-shadow: none; transform: none; opacity: var(--nc-op, 1); transition: none; }
+.node.note-draft .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px 8px; }
+.node.note-draft .note-editor { max-height: none; font-family: var(--font-doc); line-height: 1.72; color: var(--fg); }
+.node.note-draft .paste-attachment-strip { display: flex; flex: 0 0 auto; gap: var(--space-4); overflow-x: auto; padding: 0 var(--space-8) var(--space-4); }
+.node.note-draft .paste-attachment-strip[hidden] { display: none; }
+.paste-attachment { position: relative; flex: 0 0 auto; width: 58px; height: 50px; }
+.paste-attachment img { display: block; width: 100%; height: 100%; object-fit: cover; border: var(--border-default); border-radius: var(--radius-control-lg); background: var(--code-bg); }
+.paste-attachment-remove { position: absolute; top: -5px; right: -5px; display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border-focus); border-radius: var(--radius-pill); background: var(--node-head); color: var(--fg-bold); box-shadow: var(--shadow-popover); cursor: pointer; font: var(--weight-semibold) var(--text-body)/1 var(--font-ui); transition: var(--transition-color), transform var(--duration-instant) var(--ease-standard); }
+.paste-attachment-remove:hover { background: color-mix(in srgb, var(--accent) 12%, var(--node-head)); }
+.paste-attachment-remove:active { transform: scale(.97); }
+.paste-attachment-remove:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.node.note-draft .ask-actions { flex: 0 0 auto; }
+.node.note-draft .ask-actions .commit-actions { display: flex; }
+.node.note-draft .ask-actions .ask-commit { display: inline-flex; }
+.node.note-draft .node-composer, .node.note-draft .node-resize, .node.note-draft .node-collapse { display: none; }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */

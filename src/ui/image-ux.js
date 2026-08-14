@@ -94,6 +94,7 @@ export function openImageLightbox(src, alt, trigger){
   img.src = src;
   img.alt = alt || "";
   img.draggable = false;
+  if (trigger && trigger.dataset && trigger.dataset.rhPasted === "1") img.dataset.rhPasted = "1";
   return openLightbox({
     content: img,
     label: alt || "Image preview",
@@ -122,6 +123,7 @@ export function mountDocImages(dc, surfaceKey, { hideAsk = noop, scheduleEdges =
       img.parentNode.insertBefore(frame, img);
       frame.appendChild(img);
     }
+    if (img.dataset.rhPasted === "1") frame.dataset.rhPasted = "1";
     var key = imageMemoryKey(dc, img, i, surfaceKey);
     img.dataset.rhImgReady = "1";
     img.tabIndex = 0;

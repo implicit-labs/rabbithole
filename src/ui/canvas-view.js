@@ -10,6 +10,7 @@ import {
   childrenOf,
   closed,
   currentNodeId,
+  deleteAsset,
   edgesSvg,
   flashHint,
   frozen,
@@ -20,6 +21,7 @@ import {
   nodes,
   playLandingCue,
   postBrowserEvent,
+  putAsset,
   readerMain,
   registerCoreHooks,
   registerNode,
@@ -37,6 +39,7 @@ import {
   zoomLabel
 } from "./core.js";
 import {
+  DEFAULT_CHILD,
   DEFAULT_STANDALONE_NOTE,
   TREE_PARENT_GAP,
   TREE_STACK_GAP,
@@ -52,8 +55,10 @@ import {
   LENSES,
   branchTypeOfNode,
   isNoteNode,
-  lensLabel
+  lensLabel,
+  truncate
 } from "../core/model.js";
+import { extractNodeAssetRefs } from "../core/assets.js";
 import { openNode } from "./reader.js";
 import { flyReaderToRect } from "./mode-transition.js";
 import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
@@ -61,12 +66,14 @@ import { easeInOutMotion, easeOutMotion } from "./easing.js";
 import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
 import { buildOriginCrop } from "./origin-provenance.js";
 import { BUNNY_MARK_SVG, iconSvg } from "../core/html/icons.js";
-import { createModuleLifecycle } from "./lifecycle.js";
+import { createCleanupScope, createModuleLifecycle } from "./lifecycle.js";
 import { captureContentPosition, restoreContentPosition } from "./scroll-position.js";
 import { applyComposerState, wireComposerActions } from "./composer-state.js";
 import { isCommandEnter } from "./input-intent.js";
-import { refreshNodeHtml } from "./renderer.js";
+import { refreshNodeHtml, registerRendererAssetName } from "./renderer.js";
 import { teardownNode } from "./node-teardown.js";
+import { normalizeClipboardImage } from "./clipboard-image.js";
+import { appendOriginAttachmentThumbnails, originAttachmentNames } from "./origin-attachments.js";
 import { createEdgeScroller } from "./edge-scroll.js";
 
 function isSelectionBranch(node) {
@@ -75,6 +82,22 @@ function isSelectionBranch(node) {
 
 function isFollowup(node) {
   return branchTypeOfNode(node) === BRANCH_FOLLOWUP;
+}
+
+function clipboardImageFiles(event) {
+  var files = [];
+  for (const item of Array.from(event.clipboardData?.items || [])) {
+    if (item.kind !== "file" || !String(item.type || "").toLowerCase().startsWith("image/")) continue;
+    var file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  return files;
+}
+
+function flashClipboardImageError(error) {
+  flashHint(error?.code === "asset_too_large" ? "That image is over 20 MB."
+    : error?.code === "clipboard_image_too_large" ? "That image is too large."
+    : "Couldn't paste that image.");
 }
 
 function defaultCanvasHooks(){
@@ -90,6 +113,20 @@ function defaultCanvasHooks(){
 }
 
 var canvasLifecycle = createModuleLifecycle({ defaults: defaultCanvasHooks });
+var CARD_COMPOSER_COPY = Object.freeze({
+  frozen: "Read-only snapshot",
+  closed: "Session ended — saved",
+  pending: "Still being written…",
+  away: "Asks are saved for the agent…",
+  live: "Ask or note…"
+});
+var STANDALONE_COMPOSER_COPY = Object.freeze({
+  frozen: "Read-only snapshot",
+  closed: "Session ended",
+  pending: "Ask or note…",
+  away: "Ask or note…",
+  live: "Ask or note…"
+});
 var filmCameraHandle = null;
 var cardResizeObserver = null;
 var activePointerGestures = new Set();
@@ -238,7 +275,7 @@ export function createNodeEl(node, enter){
     }
     var titleEl = document.createElement("span"); titleEl.className = "node-title"; titleEl.textContent = node.title || "…";
     titleEl.title = node.title || "";
-    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card" }));
+    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn node-collapse", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card" }));
     syncCollapseButton(node, collapseBtn);
     var openBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_EXPAND_ICON, ariaLabel: "Expand document", title: "Expand document" }));
     var divider = document.createElement("span"); divider.className = "node-act-divider"; divider.setAttribute("aria-hidden", "true");
@@ -393,6 +430,7 @@ export function autoGrowEl(ta, max){
   // Same honest states as the reader's composer: an away agent doesn't disable
   // asking (questions queue server-side); only a pending doc or a dead session does.
 export function updateCardComposer(node){
+    if (node._noteComposer){ updateStandaloneNoteComposer(node); return; }
     if (!node.ncText) return;
     // A draft in progress keeps the drawer out even when the pointer wanders off.
     var hasDraft = !!node.ncText.value.trim();
@@ -402,9 +440,7 @@ export function updateCardComposer(node){
       { text: node.ncText, commits: node.ncActions.querySelectorAll(".ask-commit"),
         lenses: node.ncActions.querySelectorAll(".lens"), wrap: node.ncInner },
       { phase: sessionPhase(), pending: node.status === "pending" || !!node.extensions?.pdf?.converting },
-      { frozen: "Read-only snapshot", closed: "Session ended — saved",
-        pending: "Still being written…", away: "Asks are saved for the agent…",
-        live: "Ask or note…" }
+      CARD_COMPOSER_COPY
     );
   }
   // The card composer's submit gate (a closed session says so out loud), and
@@ -489,10 +525,12 @@ export function fillBody(node){
     body.innerHTML = "";
     if (node.origin && node.origin.selected_text){
       var q = document.createElement("div"); q.className = "origin-quote"; q.textContent = "“" + node.origin.selected_text + "”";
+      appendOriginAttachmentThumbnails(q, node);
       body.appendChild(q);
-    } else if (node.origin && (node.origin.question || node.origin.lens)){
+    } else if (node.origin && (node.origin.question || node.origin.lens || originAttachmentNames(node).length)){
       var fq = document.createElement("div"); fq.className = "origin-quote";
-      fq.textContent = node.origin.lens ? "Follow-up — " + lensLabel(node.origin.lens) : node.origin.question;
+      fq.textContent = node.origin.lens ? "Follow-up — " + lensLabel(node.origin.lens) : (node.origin.question || "Pasted image");
+      appendOriginAttachmentThumbnails(fq, node);
       body.appendChild(fq);
     }
     var crop = buildOriginCrop(node, "card");
@@ -511,6 +549,312 @@ export function fillBody(node){
     var dc = noteSurface(node, surface);
     current.replaceWith(dc);
     return dc;
+  }
+  function cssPixels(style, property){
+    return parseFloat(style[property]) || 0;
+  }
+  // The textarea and card share one ceiling. Derive the text allowance from
+  // the card's saved cap and the live composer chrome so neither can stop
+  // growing while the other still has unused room.
+  function standaloneNoteEditorCap(node){
+    var cardStyle = getComputedStyle(node.el);
+    var inputStyle = getComputedStyle(node._noteInput);
+    var composerStyle = getComputedStyle(node._noteComposer);
+    return Math.max(1,
+      node.h - node.el.querySelector(".node-head").offsetHeight - node._noteActions.offsetHeight -
+      (node._noteAttachmentStrip ? node._noteAttachmentStrip.offsetHeight : 0) -
+      cssPixels(cardStyle, "borderTopWidth") - cssPixels(cardStyle, "borderBottomWidth") -
+      cssPixels(inputStyle, "paddingTop") - cssPixels(inputStyle, "paddingBottom") -
+      cssPixels(composerStyle, "borderTopWidth") - cssPixels(composerStyle, "borderBottomWidth") -
+      cssPixels(composerStyle, "paddingTop") - cssPixels(composerStyle, "paddingBottom"));
+  }
+  function growStandaloneNoteComposer(node){
+    if (!node._noteEditor || !node._noteComposer) return;
+    autoGrowEl(node._noteEditor, standaloneNoteEditorCap(node));
+  }
+  function updateStandaloneNoteComposer(node){
+    if (!node._noteEditor || !node._noteComposer) return;
+    var parent = nodes[rootId];
+    var hasDraft = !!node._noteEditor.value.trim() || !!node._noteAttachments?.length || !!node._notePastePending;
+    node._noteComposer.classList.toggle("has-draft", hasDraft);
+    var rootPending = !parent || parent.status === "pending" || !!parent.extensions?.pdf?.converting;
+    applyComposerState(
+      { text: node._noteEditor, commits: node._noteActions.querySelectorAll(".ask-commit"),
+        wrap: node._noteComposer, hasDraft: hasDraft },
+      { phase: sessionPhase(), pending: false,
+        disabled: !!node._noteUploading || !!node._noteNormalizing },
+      STANDALONE_COMPOSER_COPY
+    );
+    var askCommit = node._noteActions.querySelector('[data-commit="ask"]');
+    if (askCommit) askCommit.disabled = askCommit.disabled || rootPending;
+  }
+  function startStandaloneNoteComposer(node, dc){
+    var scope = createCleanupScope();
+    var composer = document.createElement("div"); composer.className = "nc-inner followup-composer";
+    var input = document.createElement("div"); input.className = "ask-input";
+    var editor = document.createElement("textarea");
+    editor.className = "note-editor md";
+    editor.rows = 1;
+    editor.dataset.nodeId = node.id;
+    editor.dataset.surface = dc.dataset.surface || "canvas";
+    editor.setAttribute("aria-label", "Ask or write a note");
+    editor.spellcheck = true;
+    editor.value = node.md || "";
+    editor.style.fontSize = dc.style.fontSize;
+    var attachmentStrip = document.createElement("div"); attachmentStrip.className = "paste-attachment-strip"; attachmentStrip.hidden = true;
+    var actions = cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
+    input.appendChild(editor); composer.appendChild(input); composer.appendChild(attachmentStrip); composer.appendChild(actions); dc.replaceWith(composer);
+    node._noteEditor = editor; node._noteComposer = composer; node._noteActions = actions; node._noteInput = input;
+    node._noteAttachmentStrip = attachmentStrip;
+    var attachments = []; node._noteAttachments = attachments;
+    var uploadedNames = new Set(); node._noteUploadedAssets = uploadedNames;
+    var pendingAssetCleanup = Promise.resolve();
+    var pendingPasteCount = 0;
+    var pasteQueue = Promise.resolve();
+    function releaseAttachment(attachment){
+      if (attachment?.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    }
+    function releaseAttachments(){
+      attachments.splice(0).forEach(releaseAttachment);
+    }
+    scope.addCleanup(releaseAttachments);
+    node._noteDraftDispose = scope.dispose;
+    node._noteDockedComposer = node.ncComp;
+    if (node._noteDockedComposer?.parentNode) node._noteDockedComposer.parentNode.removeChild(node._noteDockedComposer);
+    node.el.classList.add("note-draft");
+    var settled = false;
+    function queueAssetCleanup(names, keepTracked){
+      names = Array.from(new Set(names || []));
+      if (!names.length) return;
+      if (!keepTracked) names.forEach(function(name){ uploadedNames.delete(name); });
+      var cleanup = Promise.all(names.map(function(name){
+        return Promise.resolve(deleteAsset(name)).catch(function(){});
+      }));
+      pendingAssetCleanup = Promise.allSettled([pendingAssetCleanup, cleanup]).then(function(){});
+    }
+    scope.addCleanup(function(){
+      settled = true;
+      queueAssetCleanup(Array.from(uploadedNames), true);
+    });
+    function release(restoreDockedComposer){
+      node._noteDraftDispose = null;
+      scope.dispose();
+      node._noteEditor = null; node._noteComposer = null; node._noteActions = null; node._noteInput = null;
+      node._noteAttachmentStrip = null; node._noteAttachments = null; node._noteUploadedAssets = null;
+      node._noteUploading = false; node._noteNormalizing = false; node._notePastePending = 0;
+      if (restoreDockedComposer && node.el && node._noteDockedComposer){
+        node.el.insertBefore(node._noteDockedComposer, node.el.querySelector(".node-resize"));
+      }
+      node._noteDockedComposer = null;
+      if (node.el) node.el.classList.remove("note-draft");
+    }
+    function discard(){
+      if (settled || node._noteUploading) return;
+      settled = true;
+      release(false);
+      teardownNode(node.id);
+    }
+    async function submit(kind, event){
+      if (settled || node._noteUploading || node._noteNormalizing) return;
+      var parent = nodes[rootId];
+      if (closed || frozen) return;
+      if (kind === "ask" && (!parent || parent.status === "pending" || !!parent.extensions?.pdf?.converting)) return;
+      var text = editor.value.trim();
+      if (!text && !attachments.length) return;
+      node._noteUploading = true;
+      updateStandaloneNoteComposer(node);
+      await pendingAssetCleanup;
+      if (settled || !node.el) return;
+      uploadedNames.clear();
+      try {
+        for (const attachment of attachments) {
+          const response = await putAsset(attachment.name, attachment.blob);
+          if (settled || !node.el) {
+            if (response && response.ok) Promise.resolve(deleteAsset(attachment.name)).catch(function(){});
+            return;
+          }
+          if (!response || !response.ok) throw new Error("Asset upload failed");
+          uploadedNames.add(attachment.name);
+        }
+      } catch (_error) {
+        if (settled || !node.el) return;
+        queueAssetCleanup(Array.from(uploadedNames), false);
+        node._noteUploading = false;
+        updateStandaloneNoteComposer(node);
+        flashHint("Couldn't save those images — try again.");
+        editor.focus({ preventScroll: true });
+        return;
+      }
+      if (settled || !node.el) return;
+      var attachmentNames = attachments.map(function(attachment){ return attachment.name; });
+      var committedHeight = Math.min(node.h, Math.max(DEFAULT_STANDALONE_NOTE.h, node.el.offsetHeight));
+      if (kind === "ask"){
+        var requestId = uuid();
+        var askResponse = await Promise.resolve(postBrowserEvent({ type: "branch_request", request_id: requestId,
+          node_id: node.id, parent_id: null, selected_text: "", question: text,
+          lens: null, anchor: null, branch_type: BRANCH_FOLLOWUP,
+          ...(attachmentNames.length ? { attachment_assets: attachmentNames } : {}),
+          position: { x: node.x, y: node.y }, size: { w: node.w, h: committedHeight } })).catch(function(){ return null; });
+        if (settled || !node.el) return;
+        if (!askResponse || !askResponse.ok){
+          queueAssetCleanup(Array.from(uploadedNames), true);
+          node._noteUploading = false;
+          updateStandaloneNoteComposer(node);
+          flashHint("Couldn't reach the agent — that ask wasn't posted.");
+          editor.focus({ preventScroll: true });
+          return;
+        }
+        uploadedNames.clear();
+        node.h = committedHeight;
+        settled = true;
+        release(true);
+        node.title = truncate(text, 48) || "Pasted image";
+        node.md = "";
+        node.html = "";
+        node.base_url = parent.base_url || null;
+        node.base_url_source = parent.base_url ? "inherited" : null;
+        node.read = false;
+        node.origin = { selected_text: "", question: text, lens: null, anchor: null, branch_type: BRANCH_FOLLOWUP,
+          ...(attachmentNames.length ? { attachment_assets: attachmentNames } : {}) };
+        node.status = "pending";
+        node._startTs = Date.now();
+        delete node._ephemeral;
+        node.el.classList.remove("node-note");
+        node.titleEl.textContent = node.title;
+        node.titleEl.title = node.title;
+        refreshNodeHtml(node);
+        fillBody(node);
+        layoutNode(node);
+        updateCardComposer(node);
+        scheduleEdges();
+        // Removing the focused textarea can make an overflow-hidden ancestor
+        // scroll to the replacement content. The canvas transform is the only
+        // camera, so keep the DOM scroll pinned through the next layout frame.
+        pinCanvasScroll();
+        if (canvasLifecycle.scope) canvasLifecycle.scope.raf(pinCanvasScroll);
+        return;
+      }
+      var imageMarkdown = attachmentNames.map(function(name){ return "![Pasted image](asset:" + name + ")"; });
+      var noteMarkdown = [editor.value.trimEnd()].concat(imageMarkdown).filter(Boolean).join("\n\n");
+      var noteResponse = await Promise.resolve(postBrowserEvent({ type: "node_create", id: node.id, parent_id: null,
+        title: node.title, markdown: noteMarkdown, origin: node.origin,
+        position: { x: node.x, y: node.y }, size: { w: node.w, h: committedHeight } })).catch(function(){ return null; });
+      if (settled || !node.el) return;
+      if (!noteResponse || !noteResponse.ok){
+        queueAssetCleanup(Array.from(uploadedNames), true);
+        node._noteUploading = false;
+        updateStandaloneNoteComposer(node);
+        flashHint("Couldn't save that note — try again.");
+        editor.focus({ preventScroll: true });
+        return;
+      }
+      uploadedNames.clear();
+      settled = true;
+      release(true);
+      node.md = noteMarkdown;
+      node.h = committedHeight;
+      delete node._ephemeral;
+      refreshNodeHtml(node);
+      fillBody(node);
+      layoutNode(node);
+      updateCardComposer(node);
+      scheduleEdges();
+    }
+    function pinCanvasScroll(){ viewport.scrollLeft = 0; viewport.scrollTop = 0; }
+    function renderAttachments(){
+      var keepEditorFocus = document.activeElement === editor;
+      attachmentStrip.replaceChildren();
+      attachmentStrip.hidden = attachments.length === 0;
+      attachments.forEach(function(attachment, index){
+        var item = document.createElement("div"); item.className = "paste-attachment";
+        var image = document.createElement("img"); image.src = attachment.previewUrl; image.alt = "Pasted image"; image.draggable = false;
+        var remove = document.createElement("button"); remove.type = "button"; remove.className = "paste-attachment-remove";
+        remove.dataset.attachmentIndex = String(index); remove.setAttribute("aria-label", "Remove pasted image"); remove.title = "Remove image"; remove.textContent = "×";
+        item.append(image, remove); attachmentStrip.appendChild(item);
+      });
+      growStandaloneNoteComposer(node);
+      updateStandaloneNoteComposer(node);
+      if (keepEditorFocus && editor.isConnected) editor.focus({ preventScroll: true });
+    }
+    scope.listen(attachmentStrip, "click", function(e){
+      var button = e.target.closest ? e.target.closest(".paste-attachment-remove") : null;
+      if (!button) return;
+      e.preventDefault(); e.stopPropagation();
+      var index = Number(button.dataset.attachmentIndex);
+      var removed = attachments.splice(index, 1)[0];
+      if (removed){
+        releaseAttachment(removed);
+        if (uploadedNames.has(removed.name)) queueAssetCleanup([removed.name], false);
+      }
+      renderAttachments();
+      editor.focus({ preventScroll: true });
+    });
+    scope.listen(editor, "paste", function(e){
+      var imageFiles = clipboardImageFiles(e);
+      if (!imageFiles.length) return;
+      var available = Math.max(0, 4 - attachments.length - pendingPasteCount);
+      var consumed = imageFiles.slice(0, available);
+      if (imageFiles.length > consumed.length) flashHint("Up to 4 images per ask or note.");
+      if (!consumed.length) return;
+      e.preventDefault();
+      pendingPasteCount += consumed.length;
+      node._notePastePending = pendingPasteCount;
+      node._noteNormalizing = true;
+      updateStandaloneNoteComposer(node);
+      pasteQueue = pasteQueue.then(async function(){
+        for (const file of consumed) {
+          try {
+            const normalized = await normalizeClipboardImage(file);
+            if (settled || !node.el) continue;
+            attachments.push({ ...normalized, previewUrl: URL.createObjectURL(normalized.blob) });
+          } catch (error) {
+            flashClipboardImageError(error);
+          } finally {
+            pendingPasteCount -= 1;
+            node._notePastePending = pendingPasteCount;
+          }
+        }
+        node._noteNormalizing = pendingPasteCount > 0;
+        if (!settled && node.el) renderAttachments();
+      });
+    });
+    scope.listen(editor, "input", function(){
+      growStandaloneNoteComposer(node);
+      updateStandaloneNoteComposer(node);
+      // A textarea caret can programmatically scroll an overflow-hidden
+      // ancestor as it moves down. The camera transform, never DOM scroll,
+      // owns the canvas position.
+      pinCanvasScroll();
+      scope.raf(pinCanvasScroll);
+    });
+    scope.listen(editor, "keydown", function(e){
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation(); discard();
+    });
+    wireComposerActions({ text: editor, actions: actions, listen: scope.listen,
+      hasDraft: function(){ return !!editor.value.trim() || attachments.length > 0; },
+      commitFromEnter: function(e){
+        return !e.altKey && (e.metaKey || e.ctrlKey) && isCommandEnter(e) ? "ask" : null;
+      },
+      onCommit: function(kind, e){ e.stopPropagation(); submit(kind, e); },
+      onLens: function(){} });
+    // Moving between the textarea and its actions stays inside one surface.
+    // Once focus truly leaves, an empty draft vanishes and a written draft
+    // keeps the established note-editor blur behavior by saving as Note.
+    scope.listen(composer, "focusout", function(){
+      function settleBlur(){
+        if (settled || composer.contains(document.activeElement)) return;
+        if (node._noteNormalizing){ scope.timeout(settleBlur, 25); return; }
+        if (editor.value.trim() || attachments.length) submit("note", null);
+        else discard();
+      }
+      scope.timeout(settleBlur, 0);
+    });
+    growStandaloneNoteComposer(node);
+    updateStandaloneNoteComposer(node);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+    pinCanvasScroll();
   }
   function refreshMountedNoteSurfaces(node, editor){
     var mounted = document.querySelectorAll('.doc-content[data-node-id="' + node.id + '"]');
@@ -628,6 +972,7 @@ export function fillBody(node){
   }
   function startNoteEditing(node, dc, caretOffset){
     if (!isNoteNode(node) || frozen || closed || node._noteEditor) return;
+    if (node._ephemeral){ startStandaloneNoteComposer(node, dc); return; }
     var editor = document.createElement("textarea");
     editor.className = "note-editor md";
     editor.rows = 1;
@@ -640,14 +985,72 @@ export function fillBody(node){
     dc.replaceWith(editor);
     node._noteEditor = editor;
     var settled = false;
-    function finish(save){
-      if (settled) return;
+    var settling = false;
+    var uploadedNames = new Set();
+    var pendingPasteCount = 0;
+    var pasteQueue = Promise.resolve();
+    function grow(){ autoGrowEl(editor, Math.max(90, node.h - 60)); }
+    function insertPastedImage(name){
+      var start = editor.selectionStart;
+      var end = editor.selectionEnd;
+      var before = editor.value.slice(0, start);
+      var after = editor.value.slice(end);
+      var leading = before && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
+      var trailing = after && !after.startsWith("\n\n") ? (after.startsWith("\n") ? "\n" : "\n\n") : "";
+      var insertion = leading + "![Pasted image](asset:" + name + ")" + trailing;
+      editor.value = before + insertion + after;
+      var nextCaret = before.length + insertion.length;
+      editor.setSelectionRange(nextCaret, nextCaret);
+      grow();
+    }
+    async function finish(save){
+      if (settled || settling) return;
+      settling = true;
+      await pasteQueue;
+      var referenced = save ? extractNodeAssetRefs({ markdown: editor.value }) : new Set();
+      var cleanup = Array.from(uploadedNames).filter(function(name){ return !referenced.has(name); });
+      await Promise.allSettled(cleanup.map(function(name){ return Promise.resolve(deleteAsset(name)); }));
       settled = true;
       if (save) commitNoteEditing(node, editor);
       else cancelNoteEditing(node, editor);
     }
-    function grow(){ autoGrowEl(editor, Math.max(90, node.h - 60)); }
     editor.addEventListener("input", grow);
+    editor.addEventListener("paste", function(e){
+      if (settled || settling) return;
+      var imageFiles = clipboardImageFiles(e);
+      if (!imageFiles.length) return;
+      var available = Math.max(0, 4 - uploadedNames.size - pendingPasteCount);
+      var consumed = imageFiles.slice(0, available);
+      if (imageFiles.length > consumed.length) flashHint("Up to 4 images per ask or note.");
+      if (!consumed.length) return;
+      e.preventDefault();
+      pendingPasteCount += consumed.length;
+      pasteQueue = pasteQueue.then(async function(){
+        for (const file of consumed) {
+          try {
+            var normalized;
+            try {
+              normalized = await normalizeClipboardImage(file);
+            } catch (error) {
+              flashClipboardImageError(error);
+              continue;
+            }
+            var response = await putAsset(normalized.name, normalized.blob);
+            if (!response || !response.ok){
+              flashHint("Couldn't save that image — try again.");
+              continue;
+            }
+            uploadedNames.add(normalized.name);
+            registerRendererAssetName(normalized.name);
+            insertPastedImage(normalized.name);
+          } catch (_error) {
+            flashHint("Couldn't save that image — try again.");
+          } finally {
+            pendingPasteCount -= 1;
+          }
+        }
+      });
+    });
     editor.addEventListener("keydown", function(e){
       if (e.key === "Escape"){
         e.preventDefault(); e.stopPropagation(); finish(false);
@@ -672,11 +1075,17 @@ function layoutNode(node){
       // Short answers therefore hug their content while longer answers retain
       // the existing scrollable viewport. Keep the root's established fixed
       // document window; it is the canvas anchor rather than a branch.
-      if (node.id === rootId || (isNoteNode(node) && node.parent_id == null)){
+      if (node._ephemeral && isNoteNode(node) && node.parent_id == null){
+        el.style.height = "auto";
+        el.style.minHeight = DEFAULT_STANDALONE_NOTE.h + "px";
+        el.style.maxHeight = node.h + "px";
+      } else if (node.id === rootId || (isNoteNode(node) && node.parent_id == null)){
         el.style.height = node.h + "px";
+        el.style.minHeight = "";
         el.style.maxHeight = "";
       } else {
         el.style.height = "auto";
+        el.style.minHeight = "";
         el.style.maxHeight = node.h + "px";
       }
     }
@@ -777,6 +1186,7 @@ function layoutNode(node){
     });
   }
 function toggleCollapse(node, btn){
+    if (node._ephemeral) return;
     node.collapsed = !node.collapsed;
     node.el.classList.toggle("collapsed", node.collapsed);
     syncCollapseButton(node, btn);
@@ -1153,7 +1563,11 @@ function focusOrigin(node, on){
 
 export function frameAll(animate, source){
     var visCache = Object.create(null);
-    var ids = Object.keys(nodes).filter(function(id){ return isVisible(nodes[id], visCache); });
+    var ids = Object.keys(nodes).filter(function(id){
+      var node = nodes[id];
+      var emptyDraft = node._ephemeral && !node._noteEditor?.value.trim() && !node._noteAttachments?.length && !node._notePastePending;
+      return !emptyDraft && isVisible(node, visCache);
+    });
     if (!ids.length) return;
     var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
     ids.forEach(function(id){ var n=nodes[id]; minX=Math.min(minX,n.x); minY=Math.min(minY,n.y); maxX=Math.max(maxX,n.x+n.w); maxY=Math.max(maxY,n.y+effH(n)); });
@@ -1181,10 +1595,12 @@ export function createStandaloneNoteAtViewportCenter(){
       id: uuid(), parent_id: null, title: "Note", html: "", md: "",
       base_url: null, base_url_source: null, read: true, origin: { kind: "note" },
       x: point.x, y: point.y,
-      w: DEFAULT_STANDALONE_NOTE.w, h: DEFAULT_STANDALONE_NOTE.h, font_scale: 1, collapsed: false,
+      w: DEFAULT_STANDALONE_NOTE.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
       status: "answered", _order: nextOrder(), _startTs: 0, extensions: {}, _ephemeral: true
     });
-    createNodeEl(node, true);
+    // The cursor should land on an exact, stable canvas point immediately;
+    // type-to-grow must never inherit the branch-card entrance translation.
+    createNodeEl(node, false);
     renderVisibility(); drawEdges();
     startNoteEditing(node, node.bodyEl.querySelector(".doc-content"));
     return node;

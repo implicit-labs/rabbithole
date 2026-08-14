@@ -24,15 +24,29 @@ const DEFAULT_TOKEN_BUDGET = 12000;
 /** @param {AnswerContext} context @param {{ tokenBudget?: number }} [options] */
 export function buildAnswerMessages(context, { tokenBudget = DEFAULT_TOKEN_BUDGET } = {}) {
   let packed = packBranchContext(context, { tokenBudget });
-  const attachment = context?.attachment?.kind === "image" && context.attachment.data_url ? context.attachment : null;
-  if (attachment) {
-    const label = attachment.source === "parent_crop" ? "Parent clip image" : "Selection region image";
-    packed = `${label}: attached (page ${attachment.page}). Trust the image over extracted text for math, tables, and figures.\n${packed}`;
+  const attachments = imageAttachments(context);
+  if (attachments.length) {
+    if (attachments.every((attachment) => attachment.source === "pasted_image")) {
+      packed = `${attachments.length === 1 ? "Pasted image" : "Pasted images"}: attached. Use ${attachments.length === 1 ? "it" : "them"} as part of the human's question.\n${packed}`;
+    } else {
+      const attachment = attachments[0];
+      const label = attachment.source === "parent_crop" ? "Parent clip image" : "Selection region image";
+      packed = `${label}: attached (page ${attachment.page}). Trust the image over extracted text for math, tables, and figures.\n${packed}`;
+    }
   }
   return [
     { role: "system", content: ANSWERING_SYSTEM_PROMPT_V1 },
-    { role: "user", content: attachment ? [{ type: "text", text: packed }, { type: "image_url", image_url: { url: attachment.data_url } }] : packed },
+    { role: "user", content: attachments.length ? [
+      { type: "text", text: packed },
+      ...attachments.map((attachment) => ({ type: "image_url", image_url: { url: attachment.data_url } })),
+    ] : packed },
   ];
+}
+
+/** @param {AnswerContext} context @returns {Record<string, any>[]} */
+function imageAttachments(context) {
+  const source = Array.isArray(context?.attachments) ? context.attachments : [context?.attachment];
+  return source.filter((attachment) => attachment?.kind === "image" && attachment.data_url);
 }
 
 /** @param {AnswerContext} context @param {{ tokenBudget?: number }} [options] */

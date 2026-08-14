@@ -63,7 +63,7 @@ export const toolDefinitions = [
       "parent document as a whole (a chat reply beneath it) — answer conversationally in that document's " +
       "context. A branch_request may carry a 'lens' (explain | eli5 | example | deeper) — the question " +
       "text spells out the style the human tapped; honor it. One marked saved=true was asked while no " +
-      "agent was listening — answer it like any other. When region.image_path is present, it is either " +
+      "agent was listening — answer it like any other. When attachments are present, read every attachments[].image_path; these are images pasted into the question. When region.image_path is present, it is either " +
       "this selection's clip or the immediate parent's clip; read that image before answering and trust it over extracted text for math, tables, and figures. " +
       "A convert_request asks you to transcribe the listed page image_path files under its inline rules; stream the document through answer_branch with that request_id. " +
       "On a resumed hole the first branch_request carries " +
@@ -104,7 +104,7 @@ export const toolDefinitions = [
   {
     name: "answer_branch",
     description: [
-      "Answer one pending branch_request or convert_request from an open Rabbithole. For convert_request, read every pages[].image_path in order, follow rules exactly, stream transcription chunks, and emit figure: refs rather than cropping. For branch_request, write a focused answer using the supplied selection context; when region.image_path is present, it may be the new selection clip or the immediate parent's clip, so read it and trust it over extracted text.",
+      "Answer one pending branch_request or convert_request from an open Rabbithole. For convert_request, read every pages[].image_path in order, follow rules exactly, stream transcription chunks, and emit figure: refs rather than cropping. For branch_request, write a focused answer using the supplied selection context; read every attachments[].image_path when attachments are present. When region.image_path is present, it may be the new selection clip or the immediate parent's clip, so read it and trust it over extracted text.",
       "",
       AUTHORING_VOCABULARY_V1,
       "",

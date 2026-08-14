@@ -20,6 +20,17 @@ const inherited = buildAnswerMessages({ ...context, attachment: { kind: "image",
 assert(inherited[1].content[0].text.startsWith("Parent clip image: attached (page 7). Trust the image over extracted text for math, tables, and figures.\n"));
 assert.equal(inherited[1].content[1].image_url.url, dataUrl);
 
+const pasted = buildAnswerMessages({ ...context, attachments: [
+  { kind: "image", data_url: "data:image/png;base64,AAAA", source: "pasted_image" },
+  { kind: "image", data_url: "data:image/jpeg;base64,BBBB", source: "pasted_image" },
+] });
+assert.deepEqual(pasted[1].content.map((part) => part.type), ["text", "image_url", "image_url"]);
+assert(pasted[1].content[0].text.startsWith("Pasted images: attached. Use them as part of the human's question.\n"));
+assert.equal(pasted[1].content[0].text.includes("page undefined"), false);
+assert.deepEqual(pasted[1].content.slice(1).map((part) => part.image_url.url), [
+  "data:image/png;base64,AAAA", "data:image/jpeg;base64,BBBB",
+]);
+
 const noteContext = {
   ...context,
   parent_id: "parent",

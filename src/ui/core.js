@@ -56,6 +56,8 @@ export var shareMenu = null;
 function defaultCoreHooks(){
   return {
     post: function(){ return Promise.resolve({ ok: true }); },
+    putAsset: function(){ return Promise.resolve({ ok: true }); },
+    deleteAsset: function(){ return Promise.resolve({ ok: true }); },
     ensureCanvasBuilt: function(){},
     diveToNode: function(){},
     openNode: function(){},
@@ -68,6 +70,8 @@ function defaultCoreHooks(){
 
 var coreHooks = defaultCoreHooks();
 export function postBrowserEvent(event) { return coreHooks.post(event); }
+export function putAsset(name, blob) { return coreHooks.putAsset(name, blob); }
+export function deleteAsset(name) { return coreHooks.deleteAsset(name); }
 var coreScope = null;
 
 export function registerCoreHooks(hooks) {

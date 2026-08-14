@@ -31,6 +31,7 @@ import { captureContentPosition, restoreContentPosition } from "./scroll-positio
 import { mountVisuals } from "./visuals.js";
 import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { buildOriginCrop } from "./origin-provenance.js";
+import { appendOriginAttachmentThumbnails, originAttachmentNames } from "./origin-attachments.js";
 
 function anchorStart(node) {
   return node.origin?.anchor?.offset_start ?? 1e9;
@@ -227,7 +228,7 @@ export function renderReaderBody(){
     // The lineage trail leads the document column and scrolls with it — the
     // floating taskbar above carries no per-document state.
     if (breadcrumbEl) col.appendChild(breadcrumbEl);
-    if (node.origin && (node.origin.selected_text || node.origin.question)){
+    if (node.origin && (node.origin.selected_text || node.origin.question || originAttachmentNames(node).length)){
       var ctx = document.createElement("div");
       ctx.className = "reader-context";
       if (node.origin.selected_text){
@@ -236,8 +237,9 @@ export function renderReaderBody(){
         ctx.innerHTML = '<span class="rc-label">From</span>“' + escapeHtml(truncate(node.origin.selected_text, 200)) + '”' + tail + '<span class="rc-go">→</span>';
       } else {
         ctx.innerHTML = '<span class="rc-label">Follow-up</span>' +
-          (node.origin.lens ? lensBadgeHtml(node.origin.lens) : escapeHtml(node.origin.question || ""));
+          (node.origin.lens ? lensBadgeHtml(node.origin.lens) : escapeHtml(node.origin.question || "Pasted image"));
       }
+      appendOriginAttachmentThumbnails(ctx, node);
       // The strip is a live link: click it to land on the exact spot in the
       // parent this branch grew from (flashed so the eye finds it).
       if (node.parent_id && nodes[node.parent_id]){
@@ -363,6 +365,7 @@ export function renderMarginNotes(){
       tile.classList.toggle("pending", pending);
       tile.classList.toggle("followup", isFollowup(k));
       tile._question.innerHTML = qHtml;
+      appendOriginAttachmentThumbnails(tile._question, k);
       tile._quote.textContent = quote ? "“" + truncate(quote, 80) + "”" : "";
       tile._quote.hidden = !quote;
       tile._status.innerHTML = status;

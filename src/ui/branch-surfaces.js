@@ -224,11 +224,15 @@ export function closeShare(settings){
   // DELETE — remove a branch now; keep one exact local undo until the toast expires.
   // ===========================================================================
 export function removeBranch(node){
+    if (!node || node.id === rootId) return;
+    if (node._ephemeral){
+      removeNodesLocal([node.id], node.parent_id);
+      return;
+    }
     if (closed){
       flashHint(frozen ? "This is a read-only snapshot." : "Session ended — changes can't be saved anymore.");
       return;
     }
-    if (!node || node.id === rootId) return;
     if (pendingRemoval) commitPendingBranchRemoval();
     var ids = collectSubtree(node.id, []);
     var previousCurrentId = currentNodeId;

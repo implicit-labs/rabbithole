@@ -45,6 +45,18 @@ export function validateAssetName(name, paramName = "asset name") {
   return value;
 }
 
+/**
+ * @param {unknown} name
+ * @param {string} [paramName]
+ */
+export function validateImageAssetName(name, paramName = "image asset name") {
+  const value = validateAssetName(name, paramName);
+  if (!isValidImageAssetName(value)) {
+    throw new Error(`${paramName} must use an image extension; got ${JSON.stringify(name)}`);
+  }
+  return value;
+}
+
 /** @param {unknown} name */
 export function getAssetContentType(name) {
   const ext = getAssetExtension(name);
@@ -106,6 +118,11 @@ function extractAssetRefsFromMarkdown(markdown) {
 export function extractNodeAssetRefs(node) {
   const refs = new Set(extractAssetRefsFromMarkdown(node?.markdown));
   try { refs.add(validateAssetName(node?.origin?.crop_asset)); } catch {}
+  if (Array.isArray(node?.origin?.attachment_assets)) {
+    for (const name of node.origin.attachment_assets) {
+      try { refs.add(validateImageAssetName(name)); } catch {}
+    }
+  }
   const pages = node?.extensions?.pdf?.pages;
   if (Array.isArray(pages)) {
     for (const page of pages) {

@@ -28,6 +28,57 @@ assert.deepEqual(
 );
 console.log("ok reducer: canonical hydration-node projection preserves both host wire shapes");
 
+// A standalone ask is disconnected in the graph while borrowing root context
+// for inherited document metadata. Its exact node state must survive the same
+// serialize/delete/restore cycle the UI's undo toast stages locally.
+{
+  const initial = createHoleState({
+    hole_id: "standalone-ask",
+    title: "Standalone ask",
+    root_id: "root",
+    nodes: [{
+      id: "root", parent_id: null, title: "Root", markdown: "Root context",
+      base_url: "https://example.test/docs/", base_url_source: "explicit",
+    }],
+  });
+  let result = reduceHoleEvent(initial, {
+    type: "branch_request",
+    parent_id: null,
+    node_id: "floating-ask",
+    selected_text: "must be ignored",
+    question: "How does this fit together?",
+    anchor: { offset_start: 1, offset_end: 8 },
+    branch_type: "selection",
+    position: { x: 240, y: -35 },
+    size: { w: 300, h: 180 },
+  }, { now: "2026-08-13T00:00:00.000Z" });
+  const ask = result.state.nodes.get("floating-ask");
+  assert.equal(ask.parent_id, null, "branch_request permits an explicitly parentless ask");
+  assert.deepEqual(ask.position, { x: 240, y: -35 });
+  assert.deepEqual(ask.size, { w: 300, h: 180 });
+  assert.equal(ask.base_url, "https://example.test/docs/");
+  assert.equal(ask.base_url_source, "inherited");
+  assert.deepEqual(ask.origin, {
+    selected_text: "",
+    question: "How does this fit together?",
+    lens: null,
+    anchor: null,
+    branch_type: "followup",
+  }, "parentless asks normalize to whole-hole follow-up semantics");
+
+  result = reduceHoleEvent(result.state, {
+    type: "branch_request", parent_id: "floating-ask", node_id: "ask-child", question: "And then?",
+  }, { now: "2026-08-13T00:00:01.000Z" });
+  const undoSnapshot = holeStateToHole(result.state);
+  const deleted = reduceHoleEvent(result.state, { type: "delete_node", node_id: "floating-ask" });
+  assert.deepEqual(new Set(deleted.effects.deletedNodeIds), new Set(["floating-ask", "ask-child"]),
+    "deleting a parentless ask still removes its whole descendant subtree");
+  const restored = createHoleState(undoSnapshot);
+  assert.deepEqual(holeStateToHole(restored), undoSnapshot,
+    "the exact parentless-ask subtree round-trips for local delete undo");
+}
+console.log("ok reducer: standalone asks retain null graph parents, root context, and exact delete-undo state");
+
 function summarizeEffects(effects) {
   const out = { ...effects };
   if (out.createdNode) {

@@ -55,12 +55,16 @@ async function runKeepListeningAndLiveReattachFixture() {
   await sleep(20);
   assert.equal(detachEvents(session).length, 0, "detach should not broadcast inside the grace window");
 
-  const ask = session.handleBranchRequest({
+  await defaultFsStore.putAsset(session.holeId, "paste-live.png", Buffer.from([1, 2, 3, 4]));
+  session.assetNames.add("paste-live.png");
+  const ask = await session.handleBrowserEvent({
+    type: "branch_request",
     parent_id: session.rootId,
     request_id: "req-live",
     node_id: "node-live",
     selected_text: "Root",
     question: "Explain this",
+    attachment_assets: ["paste-live.png"],
   });
   assert.equal(session.queue.length, 1, "ask during rearm gap should stay queued");
 
@@ -69,6 +73,12 @@ async function runKeepListeningAndLiveReattachFixture() {
   assert.equal(branch.request_id, ask.request_id);
   assert.equal(branch.node_id, ask.node_id);
   assert.equal(branch.session_id, session.id);
+  assert.equal(branch.attachments.length, 1);
+  assert.equal(branch.attachments[0].kind, "image");
+  assert.equal(branch.attachments[0].source, "pasted_image");
+  assert.equal(path.isAbsolute(branch.attachments[0].image_path), true);
+  await fs.realpath(branch.attachments[0].image_path);
+  assert.deepEqual(await fs.readFile(branch.attachments[0].image_path), Buffer.from([1, 2, 3, 4]));
   assert.equal(session.url, originalUrl, "live reattach should not open a new local session");
   assert.equal(session.queue.length, 0, "reattach should drain the queued branch request");
   assert.equal(session.waiters.length, 0);
@@ -109,17 +119,18 @@ async function runSavedAskRequeueFixture() {
   const root = rootNode();
   const child = {
     id: "saved-child",
-    parent_id: "root",
+    parent_id: null,
     title: "Saved question",
     markdown: "",
     base_url: null,
     base_url_source: null,
     origin: {
-      selected_text: "Root",
+      selected_text: "stale standalone selection",
       question: "Saved while away?",
       lens: null,
       anchor: null,
-      branch_type: "selection",
+      branch_type: "followup",
+      attachment_assets: ["../escape.png", "source.pdf", "paste-saved.png"],
     },
     position: { x: 0, y: 0 },
     size: null,
@@ -127,8 +138,17 @@ async function runSavedAskRequeueFixture() {
     collapsed: false,
     status: "pending",
     read: false,
-    created_at: new Date().toISOString(),
+    created_at: "2026-08-13T00:00:00.000Z",
   };
+  const laterChild = {
+    ...child,
+    id: "saved-child-later",
+    title: "Later saved question",
+    origin: { ...child.origin, question: "Does the next saved ask still arrive?", attachment_assets: [] },
+    created_at: "2026-08-13T00:00:01.000Z",
+  };
+
+  await defaultFsStore.putAsset(holeId, "paste-saved.png", Buffer.from([5, 6, 7, 8]));
 
   await defaultFsStore.saveHole({
     hole_id: holeId,
@@ -138,6 +158,7 @@ async function runSavedAskRequeueFixture() {
     nodes: [
       root,
       child,
+      laterChild,
     ],
   });
 
@@ -145,11 +166,26 @@ async function runSavedAskRequeueFixture() {
   assert.equal(saved.status, "branch_request");
   assert.equal(saved.saved, true);
   assert.equal(saved.node_id, "saved-child");
+  assert.equal(saved.parent_node_id, "root", "saved standalone asks resume with root as their context source");
+  assert.equal(saved.parent_node_title, "Root");
+  assert.equal(saved.selected_text, "", "saved standalone asks retain whole-hole selection semantics");
+  assert.deepEqual(saved.lineage, ["Root"]);
+  assert.equal(saved.attachments.length, 1, "saved asks re-resolve their pasted images after restart");
+  assert.equal(saved.attachments[0].kind, "image");
+  assert.equal(saved.attachments[0].source, "pasted_image");
+  assert.equal(path.isAbsolute(saved.attachments[0].image_path), true);
+  await fs.realpath(saved.attachments[0].image_path);
+  assert.deepEqual(await fs.readFile(saved.attachments[0].image_path), Buffer.from([5, 6, 7, 8]));
   assert(saved.rehydration, "first saved ask should include rehydration");
+  assert.deepEqual(saved.rehydration.saved_asks, [{
+    node_id: "saved-child", question: "Saved while away?", selected_text: "",
+  }, {
+    node_id: "saved-child-later", question: "Does the next saved ask still arrive?", selected_text: "",
+  }]);
 
   const session = getSession(saved.session_id);
   assert(session, "cold resume should create a live session");
-  assert.equal(session.queue.length, 0);
+  assert.equal(session.queue.length, 1, "the later saved ask should already be queued behind the first delivery");
 
   const afterAnswer = await answerBranch({
     sessionId: saved.session_id,
@@ -157,8 +193,18 @@ async function runSavedAskRequeueFixture() {
     title: "Saved answer",
     content: "Saved answer.",
   });
-  assert.equal(afterAnswer.status, "keep_listening");
+  assert.equal(afterAnswer.status, "branch_request", "a bad saved attachment name must not wedge the later saved-ask requeue");
+  assert.equal(afterAnswer.node_id, "saved-child-later");
+  assert.equal(afterAnswer.question, "Does the next saved ask still arrive?");
+  const afterLaterAnswer = await answerBranch({
+    sessionId: afterAnswer.session_id,
+    requestId: afterAnswer.request_id,
+    title: "Later saved answer",
+    content: "Later saved answer.",
+  });
+  assert.equal(afterLaterAnswer.status, "keep_listening");
   assert.equal([...session.nodes.values()].filter((node) => node.status === "pending").length, 0);
+  assert.equal(session.nodes.get("saved-child").parent_id, null, "answering a saved standalone ask keeps it disconnected");
   assert.equal(session.pendingByRequest.size, 0);
   assert.equal(session.inFlightBranchRequests.size, 0);
 
@@ -167,7 +213,7 @@ async function runSavedAskRequeueFixture() {
   assert.equal(session.queue.length, 0, "live reattach should not requeue saved asks again");
   assert.equal(session.waiters.length, 0);
 
-  console.log("ok rearm: live reattach does not duplicate saved-ask requeues");
+  console.log("ok rearm: invalid saved attachment names do not block valid delivery or later saved asks");
 }
 
 // The wire entry a note node should produce (standalone by default; anchored

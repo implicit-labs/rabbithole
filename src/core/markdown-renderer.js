@@ -419,7 +419,9 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
         const safe = sanitizeUrl(resolved, SAFE_IMG);
         if (safe === null) return escapeHtml(text || "");
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-        return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || "")}"${titleAttr}>`;
+        const pastedAttr = /^asset:paste-[a-f0-9-]+\.(?:png|jpg)$/.test(String(href))
+          ? ' data-rh-pasted="1"' : "";
+        return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text || "")}"${titleAttr}${pastedAttr}>`;
       },
     };
   }

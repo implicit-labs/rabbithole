@@ -39,6 +39,8 @@ const server = new McpServer(
       "When a branch_request includes region.image_path, it is the new selection clip or immediate parent's clip.",
       "Read that image before answering and trust it",
       "over extracted text for math, tables, and figures. The region page number is included alongside it.",
+      "When a branch_request includes attachments, read every attachments[].image_path before answering;",
+      "these are images the human pasted directly into the question.",
       "You already hold the documents you authored, so that's enough context. On a RESUMED hole the",
       "first branch_request includes a 'rehydration' field with the full tree (plus any saved_asks);",
       "read it to reload context. Use list_rabbitholes to find a saved hole to resume.",

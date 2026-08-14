@@ -69,6 +69,11 @@ async function runStorageFixtures() {
   await defaultFsStore.deleteAsset("storage-hole", "diagram-1.png");
   assert.equal(await resolveAsset("storage-hole", "diagram-1.png"), null);
 
+  await defaultFsStore.putAsset("atomic-hole", "paste-atomic.png", PNG_BYTES);
+  await assert.rejects(() => defaultFsStore.putAsset("atomic-hole", "paste-atomic.png", PNG_BYTES_2), /already exists/);
+  assert.deepEqual(await defaultFsStore.getAsset("atomic-hole", "paste-atomic.png"), PNG_BYTES,
+    "atomic putAsset must preserve the first file when a name already exists");
+
   await fs.writeFile(oversize, "");
   await fs.truncate(oversize, MAX_ASSET_BYTES + 1);
   await assert.rejects(
@@ -92,7 +97,7 @@ async function runStorageFixtures() {
     /assets\[0\]\.file_path exceeds 20 MB/
   );
 
-  console.log("ok assets: storage copy, overwrite, delete, and validation failures");
+  console.log("ok assets: storage copy, atomic no-overwrite put, delete, and validation failures");
   return { source, source2 };
 }
 
@@ -222,6 +227,53 @@ async function runSessionFixtures(source, source2) {
     assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
     assert.deepEqual(Buffer.from(await asset.arrayBuffer()), PNG_BYTES);
 
+    const uploaded = await fetch(`${session.url}/assets/paste-contract.png`, {
+      method: "PUT", headers: { "Content-Type": "image/png" }, body: PNG_BYTES_2,
+    });
+    assert.equal(uploaded.status, 200);
+    assert.deepEqual(await uploaded.json(), { ok: true, name: "paste-contract.png" });
+    assert.equal(session.assetNames.has("paste-contract.png"), true, "PUT should register the asset on the live hole");
+    const uploadedGet = await fetch(`${session.url}/assets/paste-contract.png`);
+    assert.equal(uploadedGet.headers.get("content-type"), "image/png", "served content type comes from the validated extension");
+    assert.deepEqual(Buffer.from(await uploadedGet.arrayBuffer()), PNG_BYTES_2);
+
+    const duplicate = await fetch(`${session.url}/assets/paste-contract.png`, {
+      method: "PUT", headers: { "Content-Type": "image/png" }, body: PNG_BYTES,
+    });
+    assert.equal(duplicate.status, 409, "PUT must reject an existing pasted-image name");
+    assert.deepEqual(await defaultFsStore.getAsset(session.holeId, "paste-contract.png"), PNG_BYTES_2,
+      "a rejected duplicate PUT must not overwrite the original asset");
+    const nonPaste = await fetch(`${session.url}/assets/figure.png`, {
+      method: "PUT", headers: { "Content-Type": "image/png" }, body: PNG_BYTES,
+    });
+    assert.equal(nonPaste.status, 400, "the browser PUT seam must be restricted to paste- image names");
+
+    const wrongType = await fetch(`${session.url}/assets/paste-wrong.png`, {
+      method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: PNG_BYTES,
+    });
+    assert.equal(wrongType.status, 415);
+    assert.match((await wrongType.json()).error, /Content-Type must be image\/png/);
+    const badName = await fetch(`${session.url}/assets/Bad.png`, {
+      method: "PUT", headers: { "Content-Type": "image/png" }, body: PNG_BYTES,
+    });
+    assert.equal(badName.status, 400);
+    const tooLarge = await fetch(`${session.url}/assets/paste-too-large.png`, {
+      method: "PUT", headers: { "Content-Type": "image/png" }, body: Buffer.alloc(MAX_ASSET_BYTES + 1),
+    });
+    assert.equal(tooLarge.status, 413);
+    assert.equal(await defaultFsStore.getAsset(session.holeId, "paste-too-large.png"), null);
+
+    const forbiddenDelete = await fetch(`${session.url}/assets/diagram-1.png`, { method: "DELETE" });
+    assert.equal(forbiddenDelete.status, 400, "DELETE must not remove non-pasted assets");
+    assert.deepEqual(await defaultFsStore.getAsset(session.holeId, "diagram-1.png"), PNG_BYTES);
+    const deleted = await fetch(`${session.url}/assets/paste-contract.png`, { method: "DELETE" });
+    assert.equal(deleted.status, 200);
+    assert.deepEqual(await deleted.json(), { ok: true, name: "paste-contract.png" });
+    assert.equal(session.assetNames.has("paste-contract.png"), false);
+    assert.equal((await fetch(`${session.url}/assets/paste-contract.png`)).status, 404);
+    const deletedAgain = await fetch(`${session.url}/assets/paste-contract.png`, { method: "DELETE" });
+    assert.equal(deletedAgain.status, 200, "valid pasted-image DELETE is idempotent");
+
     for (const requestPath of [
       "/assets/../diagram-1.png",
       "/assets/%2e%2e/diagram-1.png",
@@ -273,7 +325,7 @@ async function runSessionFixtures(source, source2) {
     await closeAllSessions("asset_contract_test_complete");
   }
 
-  console.log("ok assets: route serving, route rejection, canonical referenced-only export, SSE progress");
+  console.log("ok assets: GET/PUT/DELETE validation, no-overwrite storage, canonical referenced-only export, SSE progress");
 }
 
 const { source, source2 } = await runStorageFixtures();

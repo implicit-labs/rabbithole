@@ -72,6 +72,8 @@ export interface BranchRequestEvent extends NodePresentationFields {
   lens?: unknown;
   anchor?: unknown;
   branch_type?: unknown;
+  /** Optional durable pasted-image assets attached to this ask, in paste order. */
+  attachment_assets?: unknown;
   /** Optional durable crop asset prepared by a host for a PDF region ask. */
   crop_asset?: unknown;
 }

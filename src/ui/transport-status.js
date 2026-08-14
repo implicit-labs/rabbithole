@@ -41,7 +41,7 @@ import {
   scheduleEdges,
   updateCardComposer
 } from "./canvas-view.js";
-import { updateComposerState } from "./ask-followups.js";
+import { updateComposerState, updateSelectionComposerState } from "./ask-followups.js";
 import { removeNodesLocal } from "./branch-surfaces.js";
 import { refreshNodeHtml } from "./renderer.js";
 import { cancelFrame, nextFrame } from "./lifecycle.js";
@@ -98,6 +98,26 @@ export function post(payload){
     if (frozen) return Promise.resolve({ ok: true }); // a snapshot has no server
     if (transportDisposed) return Promise.resolve(null);
     return postWithAdapter(transportAdapter, payload);
+  }
+export function putAsset(name, blob){
+    if (frozen) return Promise.resolve({ ok: false });
+    if (transportDisposed) return Promise.resolve(null);
+    if (transportAdapter && typeof transportAdapter.putAsset === "function") {
+      return Promise.resolve(transportAdapter.putAsset(name, blob)).catch(function(){ return null; });
+    }
+    return fetch("/assets/" + name, {
+      method: "PUT",
+      headers: { "Content-Type": blob.type || "application/octet-stream" },
+      body: blob
+    }).catch(function(){ return null; });
+  }
+export function deleteAsset(name){
+    if (frozen) return Promise.resolve({ ok: false });
+    if (transportDisposed) return Promise.resolve(null);
+    if (transportAdapter && typeof transportAdapter.deleteAsset === "function") {
+      return Promise.resolve(transportAdapter.deleteAsset(name)).catch(function(){ return null; });
+    }
+    return fetch("/assets/" + name, { method: "DELETE" }).catch(function(){ return null; });
   }
   function postWithAdapter(adapter, payload){
     if (adapter && typeof adapter.post === "function") {
@@ -340,6 +360,7 @@ function handleServer(msg){
       if (node.titleEl){ node.titleEl.textContent = node.title; node.titleEl.title = node.title; }
       if (node.bodyEl){ fillBody(node); scheduleEdges(); }
       updateCardComposer(node);
+      refreshOpenStandaloneComposers();
       if (mode === "reader"){
         // The answered node itself may be open (e.g. opened pending from canvas).
         if (currentNodeId === node.id){ renderBreadcrumb(); renderReaderBody(); renderMarginNotes(); updateComposerState(); }
@@ -376,6 +397,8 @@ function handleServer(msg){
         pn.extensions[msg.namespace] = msg.value;
         if (pn.bodyEl) fillBody(pn);
         if (mode === "reader" && currentNodeId === pn.id) renderReaderBody();
+        updateCardComposer(pn);
+        refreshOpenStandaloneComposers();
         scheduleEdges();
       }
     } else if (msg.type === "pdf_convert_progress"){
@@ -472,5 +495,10 @@ export function refreshStatus(){
     }
     if (mode === "reader") renderMarginNotes();
     updateComposerState();
+    updateSelectionComposerState();
     if (canvasBuilt) for (var cid in nodes) updateCardComposer(nodes[cid]);
+  }
+
+  function refreshOpenStandaloneComposers(){
+    for (var id in nodes) if (nodes[id]._noteComposer) updateCardComposer(nodes[id]);
   }

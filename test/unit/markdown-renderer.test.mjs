@@ -128,6 +128,15 @@ async function runMarkdownFixtures() {
       },
     },
     {
+      name: "pasted asset images carry only the pasted-image marker",
+      markdown: "![paste](asset:paste-deadbeef.png) ![diagram](asset:diagram-1.png)",
+      assert(html) {
+        assert(html.includes('<img src="/assets/paste-deadbeef.png" alt="paste" data-rh-pasted="1">'));
+        assert(html.includes('<img src="/assets/diagram-1.png" alt="diagram">'));
+        assert(!html.includes('alt="diagram" data-rh-pasted'));
+      },
+    },
+    {
       name: "single tildes remain literal approximation notation",
       markdown: "Rates price ~zero cuts (~77% probability); the structural bid is ~1,000t/yr.",
       assert(html) {

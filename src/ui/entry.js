@@ -7,6 +7,8 @@ import {
   persistNode,
   persistNodesBulk,
   post,
+  putAsset,
+  deleteAsset,
   refreshStatus,
   scheduleViewSave,
   setTransportAdapter
@@ -22,6 +24,8 @@ export function startRabbithole(hydration, options) {
     hydration: hydration,
     host: {
       post: post,
+      putAsset: putAsset,
+      deleteAsset: deleteAsset,
       connect: connectSse,
       refreshStatus: refreshStatus,
       persistNode: persistNode,

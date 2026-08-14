@@ -153,6 +153,7 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
     updateSelectionDraftSurface();
     paintSelectionHighlight(selectionDraft.range);
     ask.classList.add("visible");
+    updateSelectionComposerState();
     var owner = selectionOwner(dc);
     var virtualAnchor = { getBoundingClientRect: function(){ return selectionDraft.range.getBoundingClientRect(); }, contextElement: dc };
     askTabOwner = owner;
@@ -184,6 +185,7 @@ export function showAskFromSelection(options){
     updateSelectionDraftSurface();
     if (selectionDraft.range) paintSelectionHighlight(selectionDraft.range);
     ask.classList.add("visible");
+    updateSelectionComposerState();
     var owner = selectionOwner(selectionDraft.container);
     askTabOwner = owner;
     askOwnerCleanup = askLifecycle.scope
@@ -264,6 +266,19 @@ export function disposeAskFollowups(){
   }
   function updateSelectionDraftSurface(){
     ask.classList.toggle("has-draft", !!askText.value.trim());
+    updateSelectionComposerState();
+  }
+
+export function updateSelectionComposerState(){
+    if (!ask || !ask.classList.contains("visible") || !selectionDraft) return;
+    var parent = nodes[selectionDraft.parentId];
+    applyComposerState(
+      { text: askText, commits: document.getElementById("ask-actions").querySelectorAll(".ask-commit"),
+        lenses: document.getElementById("ask-actions").querySelectorAll(".lens"), wrap: ask },
+      { phase: sessionPhase(), pending: !parent || parent.status === "pending" || !!parent.extensions?.pdf?.converting },
+      { frozen: "Read-only snapshot", closed: "Session ended", pending: "This answer is still being written…",
+        away: "Ask or note…", live: "Ask or note…" }
+    );
   }
 
   function retirePdfConversionAction(parent){

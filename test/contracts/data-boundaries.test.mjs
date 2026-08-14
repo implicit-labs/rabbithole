@@ -131,6 +131,27 @@ console.log("ok data boundaries: typed content fixtures distinguish extension, h
 console.log("ok data boundaries: typed persisted and portable artifacts are canonical fixed points");
 
 {
+  const imported = parseRabbitholeFile(portable(validHole({ nodes: [
+    validNode(),
+    validNode({
+      id: "attachment-node",
+      parent_id: "root",
+      origin: { question: "Imported attachments", attachment_assets: [
+        "paste-one.png", "source.pdf", "../escape.png", "paste-two.jpg",
+        "paste-three.webp", "paste-four.gif", "paste-five.svg",
+      ] },
+    }),
+    validNode({ id: "invalid-attachment-node", parent_id: "root", origin: { attachment_assets: ["source.pdf", "../escape.png"] } }),
+  ] })));
+  assert.deepEqual(imported.hole.nodes.find((node) => node.id === "attachment-node").origin.attachment_assets,
+    ["paste-one.png", "paste-two.jpg", "paste-three.webp", "paste-four.gif"],
+    "portable import must reject PDF/traversal names and cap attachment assets at four valid images");
+  assert.equal(Object.hasOwn(imported.hole.nodes.find((node) => node.id === "invalid-attachment-node").origin, "attachment_assets"), false,
+    "portable import must drop an attachment_assets field when no valid image names remain");
+}
+console.log("ok data boundaries: portable import normalizes attachment asset names and count");
+
+{
   const anchoredOrigin = {
     kind: "note",
     selected_text: "source phrase",
@@ -158,12 +179,25 @@ console.log("ok data boundaries: typed persisted and portable artifacts are cano
         origin: { kind: "note" },
         read: false,
       }),
+      validNode({
+        id: "standalone-ask",
+        parent_id: null,
+        title: "Whole-hole question",
+        markdown: "A disconnected answer.",
+        origin: { selected_text: "", question: "How does this fit together?", lens: null, anchor: null, branch_type: "followup" },
+        position: { x: 320, y: -40 },
+        size: { w: 300, h: 180 },
+        collapsed: true,
+        read: false,
+      }),
     ],
   }), { updatedAt: stamp });
   const reparsed = parsePersistedHole(noteHole);
   assert.equal(reparsed.schema_version, 2, "notes do not bump the persisted schema version");
   assert.deepEqual(reparsed.nodes.find((node) => node.id === "anchored-note")?.origin, anchoredOrigin, "note kind, selected text, and anchor survive persisted round-trip");
   assert.equal(reparsed.nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "a non-root standalone note is valid persisted state");
+  assert.deepEqual(reparsed.nodes.find((node) => node.id === "standalone-ask"), noteHole.nodes.find((node) => node.id === "standalone-ask"),
+    "a parentless ask keeps its graph, geometry, answer, origin, and collapse state through persisted JSON");
 
   const exportStore = await newStore();
   await exportStore.saveHole(noteHole);
@@ -174,6 +208,8 @@ console.log("ok data boundaries: typed persisted and portable artifacts are cano
   assert.deepEqual(importedHole.nodes.find((node) => node.id === "anchored-note")?.origin, anchoredOrigin, "portable export/import preserves anchored note origin");
   assert.equal(importedHole.nodes.find((node) => node.id === "anchored-note")?.markdown, "Anchored **content**", "portable export/import preserves note markdown");
   assert.equal(importedHole.nodes.find((node) => node.id === "standalone-note")?.parent_id, null, "portable export/import preserves standalone notes");
+  assert.deepEqual(importedHole.nodes.find((node) => node.id === "standalone-ask"), noteHole.nodes.find((node) => node.id === "standalone-ask"),
+    "portable export/import preserves a parentless ask exactly");
 
   const snapshotProjection = createSnapshotProjection(noteHole, noteHole.view_state, {});
   const snapshotNote = snapshotProjection.hole.nodes.find((node) => node.id === "anchored-note");
@@ -182,8 +218,12 @@ console.log("ok data boundaries: typed persisted and portable artifacts are cano
   assert.deepEqual(snapshotNote.extensions, {}, "snapshot projection may strip personal extensions without stripping note content");
   const frozen = snapshotProjectionToFrozenHydration(snapshotProjection);
   assert.equal(frozen.nodes.find((node) => node.id === "standalone-note")?.markdown, "Hole-wide content", "frozen hydration retains standalone note content");
+  const frozenAsk = frozen.nodes.find((node) => node.id === "standalone-ask");
+  assert.equal(frozenAsk?.parent_id, null, "frozen hydration keeps standalone asks disconnected");
+  assert.equal(frozenAsk?.markdown, "A disconnected answer.", "frozen hydration retains standalone ask answers");
+  assert.equal(frozenAsk?.collapsed, true, "frozen hydration retains standalone ask collapse state");
 }
-console.log("ok data boundaries notes: persisted, portable export/import, and snapshot projections preserve note content and anchors");
+console.log("ok data boundaries parentless nodes: persisted, portable, and snapshot projections preserve notes and standalone asks");
 
 assert.throws(
   () => validatePersistedHole(validHole({ nodes: [validNode({ extensions: [] })] })),

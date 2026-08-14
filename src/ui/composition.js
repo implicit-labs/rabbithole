@@ -43,6 +43,8 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
   host = host || {};
   capabilities = capabilities || {};
   var post = typeof host.post === "function" ? host.post : resolved;
+  var putAsset = typeof host.putAsset === "function" ? host.putAsset : resolved;
+  var deleteAsset = typeof host.deleteAsset === "function" ? host.deleteAsset : resolved;
   var cleanups = [];
   var disposed = false;
 
@@ -65,6 +67,8 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
 
     registerCoreHooks({
       post: post,
+      putAsset: putAsset,
+      deleteAsset: deleteAsset,
       openNode: openNode,
       ensureNodeHtml: ensureNodeHtml,
       mountDocImages: mountImages,

@@ -281,6 +281,44 @@ async function runMarkdownWireFixture() {
   const persistedAfterAnswer = await new FsStore().loadHole(session.holeId);
   assert.equal(persistedAfterAnswer.nodes.find((node) => node.id === nodeId).markdown, answered.markdown);
 
+  const standaloneRequestId = "req-standalone-wire";
+  const standaloneNodeId = "node-standalone-wire";
+  assert.deepEqual(await postEvent(session, {
+    type: "branch_request",
+    request_id: standaloneRequestId,
+    node_id: standaloneNodeId,
+    parent_id: null,
+    selected_text: "ignored without a graph parent",
+    question: "What does the whole document imply?",
+    anchor: { offset_start: 2, offset_end: 6 },
+    branch_type: "selection",
+    position: { x: 275, y: -45 },
+    size: { w: 300, h: 180 },
+  }), { ok: true, node_id: standaloneNodeId, request_id: standaloneRequestId });
+  const standaloneBranch = await openRabbithole({ holeId: session.holeId });
+  assert.equal(standaloneBranch.status, "branch_request");
+  assert.equal(standaloneBranch.request_id, standaloneRequestId);
+  assert.equal(standaloneBranch.node_id, standaloneNodeId);
+  assert.equal(standaloneBranch.parent_node_id, session.rootId,
+    "MCP wire exposes the root as the context source for a disconnected ask");
+  assert.equal(standaloneBranch.parent_node_title, "Markdown Wire Root");
+  assert.equal(standaloneBranch.selected_text, "", "parentless asks use whole-document selected_text semantics");
+  assert.deepEqual(standaloneBranch.lineage, ["Markdown Wire Root"]);
+  assert.equal(session.nodes.get(standaloneNodeId).parent_id, null,
+    "agent context must not change the standalone ask's graph parent");
+  assert.deepEqual(session.nodes.get(standaloneNodeId).position, { x: 275, y: -45 });
+  assert.deepEqual(session.nodes.get(standaloneNodeId).size, { w: 300, h: 180 });
+  assertKeepListeningShape(await answerBranch({
+    sessionId: session.id,
+    requestId: standaloneRequestId,
+    title: "Whole-document implication",
+    content: "The answer remains disconnected on the canvas.",
+  }), session);
+  await session.flushSave();
+  const persistedStandalone = (await new FsStore().loadHole(session.holeId)).nodes.find((node) => node.id === standaloneNodeId);
+  assert.equal(persistedStandalone.parent_id, null);
+  assert.equal(persistedStandalone.markdown, "The answer remains disconnected on the canvas.");
+
   await postEvent(session, {
     type: "node_create",
     id: "anchored-wire-note",

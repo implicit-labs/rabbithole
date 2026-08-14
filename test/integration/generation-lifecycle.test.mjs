@@ -324,6 +324,7 @@ const notesContextHost = new DirectRabbitholeHost({
       { id: "root", parent_id: null, title: "Root", markdown: "Root body", created_at: "2026-08-11T00:00:00.000Z" },
       { id: "parent", parent_id: "root", title: "Parent", markdown: "Parent body", created_at: "2026-08-11T00:00:01.000Z" },
       { id: "ask", parent_id: "parent", title: "Ask", markdown: "", status: "pending", origin: { question: "Why?", selected_text: "Parent" } },
+      { id: "standalone-ask", parent_id: null, title: "Standalone ask", markdown: "", status: "pending", origin: { question: "What follows globally?", selected_text: "" } },
       { id: "anchored", parent_id: "root", title: "Note", markdown: "Remember the root.", created_at: "2026-08-11T00:00:02.000Z", origin: { kind: "note", selected_text: "Root body" } },
       { id: "standalone", parent_id: null, title: "Note", markdown: "Whole-canvas thought.", created_at: "2026-08-11T00:00:03.000Z", origin: { kind: "note" } },
     ],
@@ -333,7 +334,55 @@ assert.deepEqual(notesContextHost.buildBranchContext(notesContextHost.state.node
   { note_id: "standalone", on_node_id: null, on_selected_text: null, content: "Whole-canvas thought.", created_at: "2026-08-11T00:00:03.000Z" },
   { note_id: "anchored", on_node_id: "root", on_selected_text: "Root body", content: "Remember the root.", created_at: "2026-08-11T00:00:02.000Z" },
 ]);
-console.log("ok generation lifecycle notes: direct-host branch context uses shared note relevance");
+const standaloneContext = notesContextHost.buildBranchContext(notesContextHost.state.nodes.get("standalone-ask"));
+assert.deepEqual({
+  parent_id: standaloneContext.parent_id,
+  parent_title: standaloneContext.parent_title,
+  parent_markdown: standaloneContext.parent_markdown,
+  ancestors: standaloneContext.ancestors,
+  selected_text: standaloneContext.selected_text,
+}, {
+  parent_id: "root",
+  parent_title: "Root",
+  parent_markdown: "Root body",
+  ancestors: [],
+  selected_text: "",
+}, "BYOK prompt context uses the root document for a parentless ask without inventing graph lineage");
+assert.deepEqual(standaloneContext.notes, [
+  { note_id: "standalone", on_node_id: null, on_selected_text: null, content: "Whole-canvas thought.", created_at: "2026-08-11T00:00:03.000Z" },
+  { note_id: "anchored", on_node_id: "root", on_selected_text: "Root body", content: "Remember the root.", created_at: "2026-08-11T00:00:02.000Z" },
+]);
+console.log("ok generation lifecycle context: direct-host parented and standalone asks use shared root-aware note relevance");
+
+async function verifyAttachmentFallbackToast(source, expectedToasts) {
+  let attempts = 0;
+  const toasts = [];
+  const host = new DirectRabbitholeHost({
+    store: { saveHole: async () => {} },
+    hole: { hole_id: `fallback-${source}`, root_id: "root", nodes: [
+      { id: "root", parent_id: null, title: "Root", markdown: "Root", status: "answered" },
+      { id: "branch", parent_id: "root", title: "Branch", markdown: "", status: "pending", origin: { question: "Why?" } },
+    ] },
+    brain: { async *answerBranch() {
+      attempts += 1;
+      if (attempts === 1) throw new ProviderError("payload too large", { status: 413, code: "payload_too_large" });
+      yield { type: "title", title: "Fallback answer" };
+      yield { type: "text", delta: "Answered without the image." };
+    } },
+    onToast: (toast) => toasts.push(toast.message),
+  });
+  host.attachBranchImage = async (_node, context) => {
+    context.attachments = [{ kind: "image", data_url: "data:image/png;base64,AA==", source }];
+  };
+  await host.runAnswer("branch", new AbortController());
+  assert.equal(attempts, 2);
+  assert.deepEqual(toasts, expectedToasts);
+}
+await verifyAttachmentFallbackToast("pasted_image", [
+  "Answered without the pasted image(s) — the request was too large for this model.",
+]);
+await verifyAttachmentFallbackToast("selection_crop", []);
+console.log("ok generation lifecycle: attachment retry toasts only when pasted images are dropped, not PDF crops");
 
 const pendingNode = { id: "branch", status: "pending", markdown: "", title: "Fallback" };
 const oldRun = mintHost.createGenerationRun(pendingNode);

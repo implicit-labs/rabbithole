@@ -160,10 +160,11 @@ function cloneNodes(state, options) {
 
 /** @param {HoleState} state @param {BranchRequestEvent} event @param {ReduceOptions} options */
 function reduceBranchRequest(state, event, options) {
-  const parentId = String(event.parent_id || "");
-  const parent = state.nodes.get(parentId);
-  if (!parent) throw new Error(`Parent node ${parentId} not found`);
-  const node = createPendingBranchNode(event, parent, options);
+  const parentId = event.parent_id === null ? null : String(event.parent_id || "");
+  const contextParentId = parentId === null ? state.root_id : parentId;
+  const contextParent = contextParentId ? state.nodes.get(contextParentId) : null;
+  if (!contextParent) throw new Error(`Parent node ${contextParentId || parentId} not found`);
+  const node = createPendingBranchNode({ ...event, parent_id: parentId }, contextParent, options);
   if (!node.id) throw new Error("Branch request node_id is required");
   const nodes = cloneNodes(state, options);
   nodes.set(node.id, node);

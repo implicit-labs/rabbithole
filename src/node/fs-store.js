@@ -178,7 +178,32 @@ export class FsStore {
     const safeName = validateAssetName(name);
     const buffer = await bytesToBuffer(bytes, "asset bytes", safeName);
     const dir = await ensureAssetDir(holeId);
-    await fs.writeFile(path.join(dir, safeName), buffer);
+    const destination = path.join(dir, safeName);
+    const temporary = path.join(dir, `.${safeName}.${randomUUID()}.tmp`);
+    try {
+      try {
+        await fs.stat(destination);
+        const error = new Error(`Asset ${safeName} already exists`);
+        error.code = "EEXIST";
+        error.statusCode = 409;
+        throw error;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      await fs.writeFile(temporary, buffer, { flag: "wx" });
+      try {
+        await fs.stat(destination);
+        const error = new Error(`Asset ${safeName} already exists`);
+        error.code = "EEXIST";
+        error.statusCode = 409;
+        throw error;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      await fs.rename(temporary, destination);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
   async deleteAsset(holeId, name) {

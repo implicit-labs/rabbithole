@@ -31,6 +31,7 @@ try {
   await verifyMobileSelectionSurface(mobileWebKit, "webkit");
   await verifyAnchoredNotes();
   await verifyStandaloneNotesAndEditing();
+  await verifyStandaloneImagePaste();
   await verifyLogicalMarkGrouping();
   await verifyCanvasBranching();
   console.log("web app verification passed");
@@ -717,7 +718,15 @@ async function verifyStandaloneNotesAndEditing() {
   const context = await browser.newContext();
   await seedConfiguredOpenRouter(context);
   const page = await context.newPage();
-  await routeProvider(page);
+  let providerCalls = 0;
+  await routeProvider(page, {
+    onProviderCall: () => { providerCalls += 1; },
+    providerDelayMs: 220,
+    streams: [[
+      "TITLE: Standalone canvas ask\n",
+      "The standalone two-intent composer reached the existing provider path.",
+    ]],
+  });
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await createDocument(page, [
@@ -861,6 +870,22 @@ async function verifyStandaloneNotesAndEditing() {
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => document.querySelectorAll(".node-note").length === 1);
     assert.equal(await persistedNoteCount(), 1, "Escape must leave no persisted empty note");
+    assert.equal(await page.locator(".node.note-draft").count(), 0, "empty-draft Escape must leave zero draft nodes");
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    const deletableDraft = page.locator(".node.note-draft");
+    await deletableDraft.waitFor();
+    const deletableDraftId = await deletableDraft.getAttribute("data-id");
+    assert.equal(await deletableDraft.locator(".node-collapse").count(), 1,
+      "the draft retains its structural collapse button for committed-card reuse");
+    assert.equal(await deletableDraft.locator(".node-collapse").isVisible(), false,
+      "collapse must be hidden while a card is an ephemeral draft");
+    await deletableDraft.locator(".node-btn.danger").click();
+    await page.waitForSelector(`.node[data-id="${deletableDraftId}"]`, { state: "detached" });
+    assert.equal(await page.locator("#branch-undo.visible").count(), 0,
+      "deleting an ephemeral draft must discard immediately without an undo toast");
+    assert.equal(await persistedNoteCount(), 1, "deleting an ephemeral draft must not create persistence traffic");
 
     point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
@@ -874,17 +899,193 @@ async function verifyStandaloneNotesAndEditing() {
     const standaloneEditor = page.locator(".node-note .note-editor");
     await standaloneEditor.waitFor();
     const standaloneCard = page.locator(".node-note:has(.note-editor)");
-    assert.deepEqual(await standaloneCard.evaluate((card) => ({
-      width: parseFloat(card.style.width),
-      height: parseFloat(card.style.height),
-    })), { width: 300, height: 180 }, "standalone notes should use the compact default size");
+    assert.deepEqual(await standaloneCard.evaluate((card) => {
+      const editor = card.querySelector(".note-editor");
+      return {
+        width: card.offsetWidth,
+        height: card.offsetHeight,
+        maxHeight: parseFloat(card.style.maxHeight),
+        active: document.activeElement === editor,
+        caret: [editor.selectionStart, editor.selectionEnd, editor.value.length],
+        lenses: card.querySelectorAll(".lens").length,
+        collapseVisible: getComputedStyle(card.querySelector(".node-collapse")).display !== "none",
+        commits: Array.from(card.querySelectorAll(".ask-commit")).map((button) => ({
+          commit: button.dataset.commit,
+          title: button.title,
+          hint: button.querySelector("kbd")?.textContent,
+          disabled: button.disabled,
+          visible: getComputedStyle(button).display !== "none",
+        })),
+      };
+    }), {
+      width: 300,
+      height: 180,
+      maxHeight: 460,
+      active: true,
+      caret: [0, 0, 0],
+      lenses: 0,
+      collapseVisible: false,
+      commits: [
+        { commit: "note", title: "Save note", hint: undefined, disabled: true, visible: true },
+        { commit: "ask", title: "Ask (Command/Control+Enter)", hint: "⌘↵", disabled: true, visible: true },
+      ],
+    }, "standalone drafts should start compact and focused with honest disabled commit actions but no lenses");
+    await standaloneEditor.press("1");
+    assert.equal(await standaloneEditor.inputValue(), "1", "a lens-less standalone composer must type 1 as ordinary text");
     await standaloneEditor.fill("Standalone note survives reload");
-    await page.click("#t-theme");
+    assert.deepEqual(await standaloneCard.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, false],
+      "typing should enable both standalone commit intents exactly like card composers");
+    await standaloneCard.locator('.ask-commit[data-commit="note"]').click();
     await page.locator(".node-note .doc-content", { hasText: "Standalone note survives reload" }).waitFor();
     await page.waitForFunction(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
       return hole.nodes.some((node) => node.parent_id === null && node.origin?.kind === "note" && node.markdown === "Standalone note survives reload");
     });
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    const askDraft = page.locator(".node.note-draft");
+    const askEditor = askDraft.locator(".note-editor");
+    await askEditor.fill("How does the standalone Ask intent work?");
+    const askDraftState = await askDraft.evaluate((card) => {
+      card.__standaloneAskIdentity = true;
+      const rect = card.getBoundingClientRect();
+      return {
+        id: card.dataset.id,
+        nodeCount: document.querySelectorAll(".node").length,
+        edgeCount: document.querySelectorAll("#edges path").length,
+        transform: getComputedStyle(document.getElementById("world")).transform,
+        position: { x: parseFloat(card.style.left), y: parseFloat(card.style.top) },
+        size: { w: card.offsetWidth, h: card.offsetHeight },
+        screen: { left: rect.left, top: rect.top, width: rect.width },
+      };
+    });
+    await askDraft.locator('.ask-commit[data-commit="ask"]').click();
+    const standaloneAsk = page.locator(`.node[data-id="${askDraftState.id}"]`);
+    await page.waitForFunction((id) => {
+      const card = document.querySelector(`.node[data-id="${id}"]`);
+      return card && !card.classList.contains("note-draft") && card.textContent.includes("Thinking");
+    }, askDraftState.id);
+    const pendingAskState = await standaloneAsk.evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      return {
+        sameCard: card.__standaloneAskIdentity === true,
+        nodeCount: document.querySelectorAll(".node").length,
+        edgeCount: document.querySelectorAll("#edges path").length,
+        ownEdges: document.querySelectorAll(`#edges [data-child="${card.dataset.id}"]`).length,
+        transform: getComputedStyle(document.getElementById("world")).transform,
+        screen: { left: rect.left, top: rect.top, width: rect.width },
+        noteClass: card.classList.contains("node-note"),
+        text: card.textContent,
+      };
+    });
+    assert.equal(pendingAskState.sameCard, true, "Ask commit must morph the exact draft DOM card into its pending answer surface");
+    assert.equal(pendingAskState.nodeCount, askDraftState.nodeCount, "Ask commit must not replace the draft with a second node");
+    assert.equal(pendingAskState.edgeCount, askDraftState.edgeCount, "a standalone Ask commit must add zero graph edges");
+    assert.equal(pendingAskState.ownEdges, 0, "a standalone Ask must never acquire an edge element");
+    assert.equal(pendingAskState.transform, askDraftState.transform, "committing a standalone Ask must not move the viewport");
+    assert.deepEqual(pendingAskState.screen, askDraftState.screen, "the pending ask must keep the draft's exact screen position and width");
+    assert.equal(pendingAskState.noteClass, false, "the in-place pending surface is an ask card, not a committed note");
+    assert.match(pendingAskState.text, /How does the standalone Ask intent work\?/);
+    await page.waitForFunction(async ({ id, position, size }) => {
+      const stored = (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id);
+      return stored?.status === "pending" && stored.parent_id === null
+        && stored.position.x === position.x && stored.position.y === position.y
+        && stored.size.w === size.w && stored.size.h === size.h;
+    }, { id: askDraftState.id, position: askDraftState.position, size: askDraftState.size });
+    await standaloneAsk.filter({ hasText: "The standalone two-intent composer reached the existing provider path." }).waitFor();
+    assert.equal(providerCalls, 1, "the standalone Ask action should call the configured provider exactly once");
+    assert.equal(await page.locator(".node.note-draft").count(), 0, "Ask commit should consume the ephemeral note surface");
+    assert.deepEqual(await standaloneAsk.evaluate((card) => ({
+      sameCard: card.__standaloneAskIdentity === true,
+      edgeCount: document.querySelectorAll("#edges path").length,
+      ownEdges: document.querySelectorAll(`#edges [data-child="${card.dataset.id}"]`).length,
+      transform: getComputedStyle(document.getElementById("world")).transform,
+    })), {
+      sameCard: true,
+      edgeCount: askDraftState.edgeCount,
+      ownEdges: 0,
+      transform: askDraftState.transform,
+    }, "the streamed answer must settle in the same disconnected card without moving the camera");
+    await page.waitForFunction(async ({ id, position, size }) => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.some((node) => node.id === id && node.parent_id === null
+        && node.origin?.question === "How does the standalone Ask intent work?"
+        && node.origin?.selected_text === "" && node.origin?.branch_type === "followup"
+        && node.position.x === position.x && node.position.y === position.y
+        && node.size.w === size.w && node.size.h === size.h
+        && node.markdown.includes("existing provider path"));
+    }, { id: askDraftState.id, position: askDraftState.position, size: askDraftState.size });
+
+    await page.keyboard.press("Control+K");
+    await page.fill("#pal-text", "intent work");
+    await page.locator(".pal-item:visible", { hasText: "Standalone canvas ask" }).waitFor();
+    await page.keyboard.press("Escape");
+
+    await standaloneAsk.locator('.node-btn[aria-label="Collapse card"]').click();
+    assert.equal(await standaloneAsk.evaluate((card) => card.classList.contains("collapsed")), true,
+      "standalone asks must use the ordinary collapse path");
+    await standaloneAsk.locator(".node-btn.danger").click();
+    await page.waitForSelector(`.node[data-id="${askDraftState.id}"]`, { state: "detached" });
+    await page.locator("#branch-undo [data-notice-action]").click();
+    const restoredStandaloneAsk = page.locator(`.node[data-id="${askDraftState.id}"]`);
+    await restoredStandaloneAsk.waitFor();
+    assert.equal(await restoredStandaloneAsk.evaluate((card) => card.classList.contains("collapsed")), true,
+      "delete undo must restore a parentless ask's collapsed state");
+    assert.equal(await page.locator(`#edges [data-child="${askDraftState.id}"]`).count(), 0,
+      "delete undo must keep the restored standalone ask disconnected");
+    await restoredStandaloneAsk.locator('.node-btn[aria-label="Expand card"]').click();
+
+    const beforeTidy = await restoredStandaloneAsk.evaluate((card) => ({ left: card.style.left, top: card.style.top }));
+    await page.click("#t-tidy");
+    await page.waitForTimeout(320);
+    assert.deepEqual(await restoredStandaloneAsk.evaluate((card) => ({ left: card.style.left, top: card.style.top })), beforeTidy,
+      "Tidy must leave parentless asks in place just as it leaves standalone notes");
+
+    await page.waitForTimeout(300);
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    const growthCard = page.locator(".node.note-draft");
+    const growthEditor = growthCard.locator(".note-editor");
+    await growthEditor.waitFor();
+    const growthStart = await growthCard.evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      const row = card.querySelector(".ask-actions").getBoundingClientRect();
+      return { top: rect.top, height: card.offsetHeight, rowHeight: row.height, rowBottomGap: rect.bottom - row.bottom };
+    });
+    await growthEditor.fill(Array.from({ length: 12 }, (_, index) => `Growing line ${index + 1}`).join("\n"));
+    const growthMiddle = await growthCard.evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      const row = card.querySelector(".ask-actions").getBoundingClientRect();
+      return { top: rect.top, height: card.offsetHeight, rowHeight: row.height, rowBottomGap: rect.bottom - row.bottom };
+    });
+    assert(growthMiddle.height > growthStart.height && growthMiddle.height < 460,
+      `typing should grow the card between its compact start and standard cap (${JSON.stringify({ growthStart, growthMiddle })})`);
+    assert(Math.abs(growthMiddle.top - growthStart.top) < 0.5,
+      `type-to-grow must keep the draft card's top-left fixed (${JSON.stringify({ growthStart, growthMiddle })})`);
+    assert(Math.abs(growthMiddle.rowHeight - growthStart.rowHeight) < 0.5
+      && Math.abs(growthMiddle.rowBottomGap - growthStart.rowBottomGap) < 0.5,
+    "the shared commit row must stay pinned without reflow while the card grows");
+    await growthEditor.fill(Array.from({ length: 80 }, (_, index) => `Capped line ${index + 1}`).join("\n"));
+    const growthCap = await growthCard.evaluate((card) => {
+      const rect = card.getBoundingClientRect();
+      const row = card.querySelector(".ask-actions").getBoundingClientRect();
+      const editor = card.querySelector(".note-editor");
+      return { top: rect.top, height: card.offsetHeight, cap: parseFloat(card.style.maxHeight),
+        rowHeight: row.height, rowBottomGap: rect.bottom - row.bottom,
+        editorClientHeight: editor.clientHeight, editorScrollHeight: editor.scrollHeight,
+        editorOverflow: getComputedStyle(editor).overflowY };
+    });
+    assert.equal(growthCap.height, growthCap.cap, "the draft card should stop exactly at the standard card height cap");
+    assert(growthCap.editorScrollHeight > growthCap.editorClientHeight && growthCap.editorOverflow === "auto",
+      `content beyond the card cap should scroll inside the editor (${JSON.stringify(growthCap)})`);
+    assert(Math.abs(growthCap.top - growthStart.top) < 0.5, "capped growth must still preserve the card's top edge");
+    assert(Math.abs(growthCap.rowHeight - growthStart.rowHeight) < 0.5
+      && Math.abs(growthCap.rowBottomGap - growthStart.rowBottomGap) < 0.5,
+    "the commit footer must keep its geometry at the growth cap");
+    await growthEditor.press("Escape");
+    await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
+    assert.equal(await persistedNoteCount(), 2, "cancelling a grown draft must create no persistence traffic");
 
     await page.keyboard.press("Control+K");
     await page.waitForSelector("#palette:not([hidden])");
@@ -937,6 +1138,179 @@ async function verifyStandaloneNotesAndEditing() {
   } finally {
     await context.close();
   }
+}
+
+async function verifyStandaloneImagePaste() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  const providerBodies = [];
+  await page.addInitScript(() => {
+    const revoke = URL.revokeObjectURL.bind(URL);
+    window.__revokedObjectUrls = [];
+    URL.revokeObjectURL = (url) => { window.__revokedObjectUrls.push(String(url)); revoke(url); };
+  });
+  await routeProvider(page, {
+    onProviderCall: (body) => providerBodies.push(body),
+    providerDelayMs: 350,
+    streams: [["TITLE: Pasted image answer\n", "The pasted image reached the provider."]],
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, "# Clipboard images\n\nPaste images into a standalone canvas composer.");
+    const assets = () => page.evaluate(() => window.__rabbitholeTest.inspectAssets());
+    assert.deepEqual((await assets()).names, []);
+
+    let point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    let draft = page.locator(".node.note-draft");
+    let editor = draft.locator(".note-editor");
+    const removableDraftId = await draft.getAttribute("data-id");
+    assert.equal(await pasteSyntheticImage(editor, "remove.png", "#d55"), true, "an image paste should be consumed");
+    const removablePreview = draft.locator(".paste-attachment img");
+    await removablePreview.waitFor();
+    assert.equal(await editor.evaluate((textarea) => document.activeElement === textarea), true,
+      "normalizing and rendering a pasted attachment must preserve editor focus");
+    assert.equal(await draft.evaluate((card) => card.classList.contains("note-draft")), true,
+      "paste busy states must never auto-commit the ephemeral draft");
+    assert.equal(await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.some((node) => node.id === id), removableDraftId), false,
+      "a pasted attachment must remain uncommitted until Note or Ask is explicitly chosen");
+    const removableUrl = await removablePreview.getAttribute("src");
+    await page.waitForFunction(() => Array.from(document.querySelectorAll(".node.note-draft .ask-commit")).every((button) => !button.disabled));
+    assert.deepEqual(await draft.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, false],
+      "an image-only draft should enable Note and Ask");
+    assert.deepEqual((await assets()).names, [], "pasting and previewing must not upload an asset");
+    await draft.locator(".paste-attachment-remove").click();
+    await page.waitForFunction(() => !document.querySelector(".paste-attachment"));
+    assert.equal(await page.evaluate((url) => window.__revokedObjectUrls.includes(url), removableUrl), true,
+      "removing a preview should revoke its object URL");
+    assert.deepEqual(await draft.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [true, true]);
+    await editor.press("Escape");
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    draft = page.locator(".node.note-draft");
+    editor = draft.locator(".note-editor");
+    assert.equal(await pasteSyntheticImage(editor, "note.png", "#4a8"), true);
+    await draft.locator(".paste-attachment img").waitFor();
+    await draft.locator('.ask-commit[data-commit="note"]:not(:disabled)').waitFor();
+    await draft.locator('.ask-commit[data-commit="note"]').evaluate((button) => button.click());
+    const imageNote = page.locator(".node-note", { has: page.locator(".doc-content img") }).last();
+    await imageNote.locator(".rh-img-frame img").waitFor();
+    const imageNoteId = await imageNote.getAttribute("data-id");
+    const editableImageNote = page.locator(`.node-note[data-id="${imageNoteId}"]`);
+    assert.equal(await imageNote.locator(".rh-img-handle").count(), 1, "committed pasted-note images should receive resize UX");
+    await imageNote.locator(".rh-img-frame img").evaluate((image) => image.click());
+    await page.locator(".rh-lightbox").waitFor();
+    await page.keyboard.press("Escape");
+    const noteAssets = await assets();
+    assert.equal(noteAssets.names.length, 1, "an attachment-only Note commit should upload exactly one asset");
+    const noteAsset = noteAssets.names[0];
+    assert.match(noteAsset, /^paste-[a-f0-9-]+\.png$/);
+    assert.equal(await page.evaluate(async (name) => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.some((node) => node.origin?.kind === "note"
+        && node.markdown === `![Pasted image](asset:${name})`);
+    }, noteAsset), true, "the note should persist an image ref even with empty text");
+
+    const committedSurface = editableImageNote.locator(".doc-content");
+    await committedSurface.dispatchEvent("dblclick", { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
+    let reentryEditor = editableImageNote.locator(".note-editor");
+    await reentryEditor.waitFor();
+    await reentryEditor.evaluate((textarea) => textarea.setSelectionRange(textarea.value.length, textarea.value.length));
+    assert.equal(await pasteSyntheticImage(reentryEditor, "reentry-save.png", "#ea4"), true,
+      "a committed-note editor should consume image paste");
+    await page.waitForFunction((id) => {
+      const editor = document.querySelector(`.node[data-id="${id}"] .note-editor`);
+      return editor && /\n\n!\[Pasted image\]\(asset:paste-[a-f0-9-]+\.png\)$/.test(editor.value);
+    }, imageNoteId);
+    const savedEditMarkdown = await reentryEditor.inputValue();
+    const savedEditAsset = savedEditMarkdown.match(/asset:(paste-[a-f0-9-]+\.png)\)$/)?.[1];
+    assert(savedEditAsset, "the pasted image link should be inserted at the caret as its own paragraph");
+    await reentryEditor.evaluate((textarea) => textarea.blur());
+    await editableImageNote.locator('.doc-content img[data-rh-pasted="1"]').nth(1).waitFor({ state: "attached" });
+    await page.waitForFunction(async ({ id, markdown }) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return node?.markdown === markdown;
+    }, { id: imageNoteId, markdown: savedEditMarkdown });
+    assert((await assets()).names.includes(savedEditAsset), "blur-save should retain the newly referenced edit-session asset");
+
+    await editableImageNote.locator(".doc-content").dispatchEvent("dblclick", { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
+    reentryEditor = editableImageNote.locator(".note-editor");
+    await reentryEditor.waitFor();
+    const assetsBeforeCancel = (await assets()).names;
+    assert.equal(await pasteSyntheticImage(reentryEditor, "reentry-cancel.png", "#b5d"), true);
+    await page.waitForFunction((count) => window.__rabbitholeTest.inspectAssets().then((result) => result.names.length === count + 1), assetsBeforeCancel.length);
+    const cancelledMarkdown = await reentryEditor.inputValue();
+    assert.equal(Array.from(cancelledMarkdown.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length, 3,
+      "the cancel case should finish inserting its newly uploaded image before rollback");
+    await reentryEditor.press("Escape");
+    await editableImageNote.locator(".doc-content").waitFor();
+    await page.waitForFunction((expected) => window.__rabbitholeTest.inspectAssets().then((result) =>
+      JSON.stringify(result.names) === JSON.stringify(expected)), assetsBeforeCancel);
+    assert.equal(await editableImageNote.locator(".doc-content img").count(), 2,
+      "Escape should restore the saved note without the cancelled pasted image");
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    draft = page.locator(".node.note-draft");
+    editor = draft.locator(".note-editor");
+    assert.equal(await pasteSyntheticImage(editor, "ask.png", "#58c"), true);
+    await draft.locator(".paste-attachment img").waitFor();
+    await draft.locator('.ask-commit[data-commit="ask"]:not(:disabled)').waitFor();
+    const askId = await draft.getAttribute("data-id");
+    await draft.locator('.ask-commit[data-commit="ask"]').evaluate((button) => button.click());
+    const imageAsk = page.locator(`.node[data-id="${askId}"]`);
+    await imageAsk.locator(".origin-quote .origin-attachment-strip img").waitFor();
+    assert.equal(await imageAsk.locator(".node-title").innerText(), "Pasted image", "an image-only ask should use the fallback title");
+    await page.waitForFunction(() => document.querySelector(".node .origin-attachment-strip img"));
+    await page.waitForTimeout(30);
+    assert.equal(providerBodies.length, 1);
+    const userContent = providerBodies[0].messages.find((message) => message.role === "user").content;
+    assert.deepEqual(userContent.map((part) => part.type), ["text", "image_url"],
+      "the BYOK provider request should contain the pasted image part");
+    assert.match(userContent[1].image_url.url, /^data:image\/png;base64,/);
+    await imageAsk.filter({ hasText: "The pasted image reached the provider." }).waitFor();
+    assert.equal(await imageAsk.locator(".origin-quote .origin-attachment-strip img").count(), 1,
+      "the question thumbnail should remain after the ask is answered");
+    const storedAsk = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), askId);
+    assert.equal(storedAsk.origin.question, "");
+    assert.equal(storedAsk.origin.attachment_assets.length, 1);
+
+    const beforeDiscard = await assets();
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    draft = page.locator(".node.note-draft");
+    editor = draft.locator(".note-editor");
+    assert.equal(await pasteSyntheticImage(editor, "discard.png", "#a6c"), true);
+    const discardedPreview = draft.locator(".paste-attachment img");
+    await discardedPreview.waitFor();
+    const discardedUrl = await discardedPreview.getAttribute("src");
+    assert.deepEqual((await assets()).names, beforeDiscard.names, "an uncommitted pasted image must remain memory-only");
+    await editor.press("Escape");
+    await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
+    assert.equal(await page.evaluate((url) => window.__revokedObjectUrls.includes(url), discardedUrl), true,
+      "discarding the composer should revoke its preview URL");
+    assert.deepEqual((await assets()).names, beforeDiscard.names, "discarding must leave no uploaded asset behind");
+    console.log("ok web app: standalone clipboard images preview, remove, Note, Ask, provider delivery, and discard");
+  } finally {
+    await context.close();
+  }
+}
+
+async function pasteSyntheticImage(editor, fileName, color) {
+  return editor.evaluate(async (textarea, { fileName, color }) => {
+    textarea.focus();
+    const canvas = document.createElement("canvas"); canvas.width = 12; canvas.height = 8;
+    const context = canvas.getContext("2d"); context.fillStyle = color; context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], fileName, { type: "image/png" }));
+    const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer });
+    if (!event.clipboardData) Object.defineProperty(event, "clipboardData", { value: transfer });
+    const consumed = !textarea.dispatchEvent(event);
+    return consumed;
+  }, { fileName, color });
 }
 
 async function verifyLogicalMarkGrouping() {

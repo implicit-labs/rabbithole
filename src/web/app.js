@@ -854,6 +854,7 @@ async function mountHole(hole, { replace = false } = {}) {
     brain,
     brainRequiredError: brainRequiredErrorForSettings(settings),
     registerAssetUrl: (name, blob) => currentAssetLease?.register(name, blob),
+    revokeAssetUrl: (name) => currentAssetLease?.revoke(name),
     onToast: (notice) => { if (currentHost === host) showToast(notice); },
     onDone: async () => {
       if (currentHost !== host) return;
@@ -1235,6 +1236,11 @@ async function createLiveAssetData(holeId) {
       if (data[name]) URL.revokeObjectURL(data[name]);
       const url = URL.createObjectURL(blob); data[name] = url; urls.push(url);
       registerRendererAssetName(name);
+    },
+    revoke(name) {
+      if (disposed || !data[name]) return;
+      URL.revokeObjectURL(data[name]);
+      delete data[name];
     },
     dispose() {
       if (disposed) return;

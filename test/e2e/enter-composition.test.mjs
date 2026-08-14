@@ -27,6 +27,7 @@ async function verifyEnterCompositionAndNewlines() {
     ["TITLE: Reader Lens\n", "Reader lens completed."],
     ["TITLE: Card Enter\n", "Card Enter completed."],
     ["TITLE: Card Lens\n", "Card lens completed."],
+    ["TITLE: Standalone Enter\n", "Standalone composer ask completed."],
   ]);
   try {
     await createDocument(documentPage.page, "# Enter handling\n\nEuler identity lets us test selection and follow-up inputs.");
@@ -34,9 +35,87 @@ async function verifyEnterCompositionAndNewlines() {
     await verifySelectionCommitKeys(documentPage.page, () => documentPage.providerCalls);
     await verifyReaderComposer(documentPage.page, () => documentPage.providerCalls);
     await verifyCardComposer(documentPage.page, () => documentPage.providerCalls);
-    assert.equal(documentPage.providerCalls, 5, "each in-document ask submit should call the provider exactly once");
+    await verifyStandaloneComposer(documentPage.page, () => documentPage.providerCalls);
+    assert.equal(documentPage.providerCalls, 6, "each in-document ask submit should call the provider exactly once");
   } finally {
     await documentPage.context.close();
+  }
+
+  await verifyPendingRootStandaloneComposer();
+}
+
+async function verifyPendingRootStandaloneComposer() {
+  process.env.RABBITHOLE_NO_BROWSER = "1";
+  const [{ createSession }, { buildCanvasHtml }, { defaultFsStore }] = await Promise.all([
+    import("../../src/node/sessions.js"),
+    import("../../src/node/html/canvas.js"),
+    import("../../src/node/fs-store.js"),
+  ]);
+  const holeId = `pending-root-e2e-${Date.now()}`;
+  await defaultFsStore.putAsset(holeId, "paste-selected.png", Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+  const root = {
+    id: "root", parent_id: null, title: "Pending root", markdown: "", origin: null,
+    position: { x: 0, y: 0 }, size: null, font_scale: 1, collapsed: false,
+    status: "pending", read: true, created_at: new Date().toISOString(), extensions: {},
+  };
+  const selectedAttachment = {
+    id: "selected-attachment", parent_id: "root", title: "Selected attachment", markdown: "Rendered answer",
+    origin: { selected_text: "quoted source", question: "What is shown?", lens: null, anchor: null,
+      branch_type: "selection", attachment_assets: ["paste-selected.png"] },
+    position: { x: 360, y: 0 }, size: null, font_scale: 1, collapsed: false,
+    status: "answered", read: false, created_at: new Date().toISOString(), extensions: {},
+  };
+  const session = await createSession({
+    holeId, title: "Pending root E2E", rootId: "root", nodes: [root, selectedAttachment],
+    assetNames: new Set(["paste-selected.png"]), isResume: false,
+    renderPage: (hydration) => buildCanvasHtml(hydration),
+  });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.goto(session.url, { waitUntil: "domcontentloaded" });
+    await page.locator('.node[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
+    assert.equal(await page.locator('.node[data-id="selected-attachment"] .origin-quote').innerText(), "“quoted source”",
+      "selected_text and attachment thumbnails must coexist on the canvas card");
+
+    let point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    let draft = page.locator(".node.note-draft");
+    let editor = draft.locator(".note-editor");
+    await editor.fill("Note while the root is pending");
+    assert.deepEqual(await draft.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, true],
+      "a pending root must disable only standalone Ask, not Note");
+    assert.equal(await editor.getAttribute("placeholder"), "Ask or note…", "the pending root must keep the standalone live placeholder");
+    await draft.locator('[data-commit="note"]').click();
+    await page.locator(".node-note .doc-content", { hasText: "Note while the root is pending" }).waitFor();
+
+    point = await findCanvasBackground(page);
+    await page.mouse.dblclick(point.x, point.y);
+    draft = page.locator(".node.note-draft");
+    editor = draft.locator(".note-editor");
+    await editor.fill("Ask after root answer");
+    assert.equal(await draft.locator('[data-commit="ask"]').isDisabled(), true);
+    const answeredRoot = session.nodes.get("root");
+    answeredRoot.status = "answered";
+    answeredRoot.markdown = "The root is now answered.";
+    session.broadcast({ type: "node_answered", node_id: "root", parent_id: null, title: "Answered root",
+      markdown: answeredRoot.markdown, origin: null, base_url: null, base_url_source: null });
+    await page.waitForFunction(() => {
+      const ask = document.querySelector('.node.note-draft [data-commit="ask"]');
+      return ask && !ask.disabled;
+    });
+    assert.equal(await draft.locator('[data-commit="ask"]').isDisabled(), false,
+      "node_answered must refresh and unlock an open standalone Ask draft");
+
+    session.close("done");
+    await page.waitForFunction(() => document.querySelector(".node.note-draft .note-editor")?.placeholder === "Session ended");
+    assert.equal(await editor.getAttribute("placeholder"), "Session ended",
+      "an uncommitted standalone draft must not claim it was saved when the session closes");
+    console.log("ok enter composition: pending root Note/Ask lock, node_answered refresh, selected-text thumbnails, and honest closed copy");
+  } finally {
+    await context.close();
+    await session.close("enter_composition_test_complete");
   }
 }
 
@@ -47,6 +126,7 @@ async function openTestPage(streams) {
   const state = { providerCalls: 0 };
   await routeProvider(page, {
     streams,
+    providerDelayMs: 120,
     onProviderCall: () => { state.providerCalls += 1; },
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -169,6 +249,25 @@ async function verifyCardComposer(page, calls) {
   assert.equal(await page.locator(".node").count(), blankCount, "blank card Enter variants must be inert");
   assert.equal(calls(), 3, "blank card Enter variants must not call the provider");
 
+  await page.fill(selector, "   ");
+  await page.press(selector, "1");
+  assert.equal(await page.inputValue(selector), "   1", "a lens key must type normally unless the editor is exactly empty");
+  await page.fill(selector, "   ");
+  await page.locator('.node.root .nc-inner .lens[data-lens="explain"]').evaluate((button) => button.click());
+  assert.equal(calls(), 3, "a lens click must be inert when the editor contains whitespace");
+  await page.fill(selector, "");
+
+  // Regression: a classList.toggle with an undefined force argument flips the
+  // dim class on every input event — check two consecutive keystrokes so the
+  // assertion cannot pass on flip parity.
+  await page.focus(selector);
+  await page.keyboard.type("a");
+  const dimA = await page.locator(".node.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
+  await page.keyboard.type("b");
+  const dimB = await page.locator(".node.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
+  assert.equal(dimA || dimB, false, "a live card composer must not dim while typing");
+  await page.fill(selector, "");
+
   await page.fill(selector, "line one");
   await page.focus(selector);
   await page.keyboard.press("Shift+Enter");
@@ -203,6 +302,130 @@ async function verifyCardComposer(page, calls) {
   assert.equal(calls(), 5, "an empty-box card lens tap should submit one whole-document lens ask");
 }
 
+async function verifyStandaloneComposer(page, calls) {
+  let point = await findCanvasBackground(page);
+  await page.mouse.dblclick(point.x, point.y);
+  const selector = ".node.note-draft .note-editor";
+  await page.waitForSelector(selector);
+  const actionParity = await page.evaluate(() => {
+    const signature = (root) => Array.from(root.querySelectorAll(".ask-commit")).map((button) => ({
+      className: button.className,
+      commit: button.dataset.commit,
+      title: button.title,
+      label: button.childNodes[0].textContent.trim(),
+      hint: button.querySelector("kbd")?.textContent,
+    }));
+    return {
+      card: signature(document.querySelector(".node.root .node-composer")),
+      standalone: signature(document.querySelector(".node.note-draft .nc-inner")),
+      standaloneLenses: document.querySelectorAll(".node.note-draft .lens").length,
+      disabled: Array.from(document.querySelectorAll(".node.note-draft .ask-commit")).map((button) => button.disabled),
+    };
+  });
+  assert.deepEqual(actionParity.standalone.map(({ title, hint, ...action }) => action),
+    actionParity.card.map(({ title, hint, ...action }) => action),
+    "standalone and card composers must keep the same Note/Ask action structure");
+  assert.deepEqual(actionParity.card.map(({ title, hint }) => ({ title, hint })), [
+    { title: "Save note (Enter)", hint: "↵" },
+    { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
+  ], "card composers must retain their existing Enter shortcuts");
+  assert.deepEqual(actionParity.standalone.map(({ title, hint }) => ({ title, hint: hint || null })), [
+    { title: "Save note", hint: null },
+    { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
+  ], "standalone drafts must advertise Note as a button action and Ask as Cmd/Ctrl+Enter");
+  assert.equal(actionParity.standaloneLenses, 0, "the root-level standalone composer must not expose document lenses");
+  assert.deepEqual(actionParity.disabled, [true, true], "an empty standalone composer must disable both commit actions");
+
+  await page.fill(selector, "composing standalone");
+  assert.equal((await dispatchComposingEnter(page, selector)).defaultPrevented, false);
+  assert.equal((await dispatchModifiedEnter(page, selector, { altKey: true })).defaultPrevented, false,
+    "Alt+Enter must remain text input on the standalone surface, matching the card composer");
+  assert.equal(calls(), 5, "IME and Alt+Enter must not submit the standalone composer");
+
+  await page.fill(selector, "");
+  const blankCount = await page.locator(".node").count();
+  await page.press(selector, "Enter");
+  await page.press(selector, "Control+Enter");
+  assert.equal(await page.locator(".node").count(), blankCount, "blank standalone Enter variants must be inert");
+  assert.equal(calls(), 5, "blank standalone Enter variants must not call the provider");
+
+  await page.fill(selector, "line one");
+  await page.focus(selector);
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("line two");
+  assert.equal(await page.inputValue(selector), "line one\nline two",
+    "plain Enter should insert a newline in the standalone composer");
+  assert.equal(await page.locator(".node.note-draft").count(), 1,
+    "plain Enter must leave the standalone draft uncommitted");
+  assert.equal(calls(), 5, "plain Enter must not call the provider or commit the standalone draft");
+  await page.locator('.node.note-draft [data-commit="note"]').click();
+  await page.locator(".node-note", { hasText: "line one" }).last().waitFor();
+  await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
+  assert.equal(calls(), 5, "the standalone Note button should save without calling the provider");
+
+  point = await findCanvasBackground(page);
+  await page.mouse.dblclick(point.x, point.y);
+  await page.waitForSelector(selector);
+  await page.fill(selector, "Standalone command ask");
+  const draft = await page.locator(".node.note-draft").evaluate((card) => {
+    card.__enterStandaloneIdentity = true;
+    const rect = card.getBoundingClientRect();
+    return {
+      id: card.dataset.id,
+      edgeCount: document.querySelectorAll("#edges path").length,
+      transform: getComputedStyle(document.getElementById("world")).transform,
+      position: { x: parseFloat(card.style.left), y: parseFloat(card.style.top) },
+      size: { w: card.offsetWidth, h: card.offsetHeight },
+      screen: { left: rect.left, top: rect.top, width: rect.width },
+    };
+  });
+  await page.keyboard.press("Control+Enter");
+  const askCard = page.locator(`.node[data-id="${draft.id}"]`);
+  await page.waitForFunction((id) => {
+    const card = document.querySelector(`.node[data-id="${id}"]`);
+    return card && !card.classList.contains("note-draft") && card.textContent.includes("Thinking");
+  }, draft.id);
+  assert.deepEqual(await askCard.evaluate((card) => {
+    const rect = card.getBoundingClientRect();
+    return {
+      sameCard: card.__enterStandaloneIdentity === true,
+      edgeCount: document.querySelectorAll("#edges path").length,
+      ownEdges: document.querySelectorAll(`#edges [data-child="${card.dataset.id}"]`).length,
+      transform: getComputedStyle(document.getElementById("world")).transform,
+      screen: { left: rect.left, top: rect.top, width: rect.width },
+    };
+  }), {
+    sameCard: true,
+    edgeCount: draft.edgeCount,
+    ownEdges: 0,
+    transform: draft.transform,
+    screen: draft.screen,
+  }, "Cmd/Ctrl+Enter must morph the draft into a disconnected pending card without moving the viewport");
+  await page.waitForFunction(async ({ id, position, size }) => {
+    const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+    return node?.status === "pending" && node.parent_id === null
+      && node.position.x === position.x && node.position.y === position.y
+      && node.size.w === size.w && node.size.h === size.h;
+  }, { id: draft.id, position: draft.position, size: draft.size });
+  await askCard.filter({ hasText: "Standalone composer ask completed." }).waitFor();
+  assert.equal(calls(), 6, "Cmd/Ctrl+Enter should submit the standalone Ask once");
+  assert.deepEqual(await askCard.evaluate((card) => ({
+    sameCard: card.__enterStandaloneIdentity === true,
+    edgeCount: document.querySelectorAll("#edges path").length,
+    ownEdges: document.querySelectorAll(`#edges [data-child="${card.dataset.id}"]`).length,
+    transform: getComputedStyle(document.getElementById("world")).transform,
+  })), { sameCard: true, edgeCount: draft.edgeCount, ownEdges: 0, transform: draft.transform },
+  "the answer stream must settle into the exact same disconnected card");
+  await page.waitForFunction(async ({ id, position, size }) => {
+    const hole = await window.__rabbitholeTest.readStoredHole();
+    return hole.nodes.some((node) => node.id === id && node.parent_id === null
+      && node.origin?.question === "Standalone command ask"
+      && node.origin?.selected_text === "" && node.origin?.branch_type === "followup"
+      && node.position.x === position.x && node.position.y === position.y
+      && node.size.w === size.w && node.size.h === size.h);
+  }, { id: draft.id, position: draft.position, size: draft.size });
+}
+
 async function assertComposerAtRest(page, selector, message) {
   assert.deepEqual(await page.locator(selector).evaluate((row) => ({
     lensesVisible: Array.from(row.querySelectorAll(".lens")).every((button) => getComputedStyle(button).display !== "none"),
@@ -222,6 +445,19 @@ async function dispatchComposingEnter(page, selector) {
     const allowed = element.dispatchEvent(event);
     return { allowed, defaultPrevented: event.defaultPrevented };
   });
+}
+
+async function dispatchModifiedEnter(page, selector, modifiers) {
+  return page.locator(selector).evaluate((element, values) => {
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+      ...values,
+    });
+    const allowed = element.dispatchEvent(event);
+    return { allowed, defaultPrevented: event.defaultPrevented };
+  }, modifiers);
 }
 
 async function createDocument(page, markdown) {
@@ -254,4 +490,17 @@ async function selectText(page, text) {
     }
     throw new Error(`Text not found: ${targetText}`);
   }, text);
+}
+
+async function findCanvasBackground(page) {
+  return page.evaluate(() => {
+    const viewport = document.getElementById("viewport");
+    for (let y = innerHeight - 70; y >= 90; y -= 70) {
+      for (let x = innerWidth - 70; x >= 70; x -= 70) {
+        const target = document.elementFromPoint(x, y);
+        if (target && viewport.contains(target) && !target.closest(".node")) return { x, y };
+      }
+    }
+    throw new Error("No empty canvas point found");
+  });
 }

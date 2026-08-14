@@ -1,5 +1,5 @@
 import { inheritedNodeBaseUrl } from "./base-url.js";
-import { validateAssetName } from "./assets.js";
+import { validateAssetName, validateImageAssetName } from "./assets.js";
 
 /** @typedef {import("./contracts/engine.js").HoleNode} ModelHoleNode */
 /** @typedef {import("./contracts/engine.js").BranchRequestEvent} ModelBranchRequestEvent */
@@ -170,20 +170,28 @@ export function normalizeViewState(state) {
 
 /** @param {ModelBranchRequestEvent} payload @param {ModelHoleNode} parent @param {{ now?: string }} [options] @returns {ModelHoleNode} */
 export function createPendingBranchNode(payload, parent, { now = new Date().toISOString() } = {}) {
-  const selectedText = String(payload.selected_text ?? "").trim();
+  const standalone = payload.parent_id === null;
+  const selectedText = standalone ? "" : String(payload.selected_text ?? "").trim();
   const question = String(payload.question ?? "").trim();
   const lens = normalizeLens(payload.lens);
-  const anchor = normalizeAnchor(payload.anchor);
-  const branchType = normalizeBranchType(payload.branch_type, selectedText);
+  const anchor = standalone ? null : normalizeAnchor(payload.anchor);
+  const branchType = standalone ? BRANCH_FOLLOWUP : normalizeBranchType(payload.branch_type, selectedText);
   const inheritedBase = inheritedNodeBaseUrl(parent);
   const nodeId = String(payload.node_id || "");
   let cropAsset = null;
   try { cropAsset = validateAssetName(payload.crop_asset); } catch {}
+  const attachmentAssets = [];
+  if (Array.isArray(payload.attachment_assets)) {
+    for (const rawName of payload.attachment_assets) {
+      try { attachmentAssets.push(validateImageAssetName(rawName)); } catch {}
+      if (attachmentAssets.length === 4) break;
+    }
+  }
 
   return /** @type {ModelHoleNode} */ ({
     id: nodeId,
-    parent_id: String(payload.parent_id || ""),
-    title: lens ? lensLabel(lens) : question ? truncate(question, 48) : "…",
+    parent_id: standalone ? null : String(payload.parent_id || ""),
+    title: lens ? lensLabel(lens) : question ? truncate(question, 48) : attachmentAssets.length ? "Pasted image" : "…",
     markdown: "",
     base_url: inheritedBase.base_url,
     base_url_source: inheritedBase.base_url_source,
@@ -193,6 +201,7 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
       lens,
       anchor,
       branch_type: branchType,
+      ...(attachmentAssets.length ? { attachment_assets: attachmentAssets } : {}),
       ...(cropAsset ? { crop_asset: cropAsset } : {}),
     },
     position: normalizePosition(payload.position),
