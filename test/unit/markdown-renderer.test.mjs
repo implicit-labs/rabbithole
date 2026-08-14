@@ -121,6 +121,13 @@ async function runMarkdownFixtures() {
       assert: assertNoRawHtmlLeak,
     },
     {
+      name: "frozen SVG data URLs retain the svg+xml MIME spelling",
+      markdown: "![vector](data:image/svg+xml;base64,PHN2Zy8+)",
+      assert(html) {
+        assert(html.includes('<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="vector">'));
+      },
+    },
+    {
       name: "single tildes remain literal approximation notation",
       markdown: "Rates price ~zero cuts (~77% probability); the structural bid is ~1,000t/yr.",
       assert(html) {
