@@ -67,6 +67,7 @@ import { applyComposerState, wireComposerActions } from "./composer-state.js";
 import { isCommandEnter } from "./input-intent.js";
 import { refreshNodeHtml } from "./renderer.js";
 import { teardownNode } from "./node-teardown.js";
+import { createEdgeScroller } from "./edge-scroll.js";
 
 function isSelectionBranch(node) {
   return branchTypeOfNode(node) === BRANCH_SELECTION;
@@ -187,6 +188,17 @@ function applyTransform(){
     });
   }
 function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale }; }
+  // The canvas the human can actually see: the viewport minus the chrome that
+  // floats over it. Framing, note placement, and edge-scroll all owe the same
+  // answer, or they aim at pixels hidden under the rail or the taskbar.
+  function visibleCanvasRect(){
+    var fullW = viewport.clientWidth || window.innerWidth;
+    var fullH = viewport.clientHeight || window.innerHeight;
+    var rail = document.getElementById("web-rail"), taskbar = document.getElementById("taskbar");
+    var left = (rail && rail.classList.contains("open")) ? rail.getBoundingClientRect().width : 0;
+    var top = taskbar ? taskbar.getBoundingClientRect().height : 0;
+    return { left: left, top: top, right: fullW, bottom: fullH, width: fullW - left, height: fullH - top };
+  }
   function zoomAt(sx, sy, factor){
     var next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * factor));
     zoomTo(sx, sy, next);
@@ -685,7 +697,11 @@ function layoutNode(node){
         handle.removeEventListener("lostpointercapture", done);
         activePointerGestures.delete(cancel);
         try { handle.releasePointerCapture(e.pointerId); } catch(_e){}
-        if (commit) onUp();
+        // onUp runs on every ending, interrupted or not, and is told which it
+        // was. A gesture torn down by a pinch takeover has still left the world
+        // changed, and whatever it started — a running edge scroll, a grabbing
+        // cursor — has to be shut down on that path too, not only on a clean up.
+        onUp(commit);
       }
       function done(ev){ if (ev.pointerId === e.pointerId) finish(true); }
       function cancel(){ finish(false); }
@@ -702,19 +718,63 @@ function layoutNode(node){
   // holds the controls, and a pointer that lands on one of those is operating the control,
   // not the card. Every head gesture owes that distinction the same answer.
   function onCardControl(e){ return !!e.target.closest(".node-btn, [contenteditable]"); }
-  function enableDrag(node, handle){
-    var sx, sy, ox, oy;
+  // A card gesture that can outrun the viewport. Two rules make that work:
+  //
+  // The grab is anchored in world coordinates, not as a running screen delta,
+  // so the card is re-derived from wherever the pointer currently points into
+  // the world. That is what lets the camera move mid-gesture at all — a screen
+  // delta would slide the card out from under the cursor by exactly the pan.
+  //
+  // And every camera step re-runs that derivation from the *unchanged* pointer,
+  // so while the canvas scrolls the card keeps travelling with the cursor.
+  function enableCardGesture(node, handle, opts){
+    var grabX, grabY, lastX, lastY, scroller = null;
+    function place(){
+      var w = screenToWorld(lastX, lastY);
+      opts.apply(node, w.x - grabX, w.y - grabY);
+      layoutNode(node); scheduleEdges();
+    }
     onPointerGesture(handle,
-      function(e){ if (e.button !== 0 || onCardControl(e)) return false; e.preventDefault(); canvasLifecycle.hooks.hideAsk(); sx=e.clientX; sy=e.clientY; ox=node.x; oy=node.y; return true; },
-      function(ev){ node.x = ox + (ev.clientX - sx) / view.scale; node.y = oy + (ev.clientY - sy) / view.scale; layoutNode(node); scheduleEdges(); },
-      function(){ drawEdges(); canvasLifecycle.hooks.persistNode(node); });
+      function(e){
+        if (e.button !== 0 || !opts.accept(e)) return false;
+        e.preventDefault();
+        if (opts.stopPropagation) e.stopPropagation();
+        canvasLifecycle.hooks.hideAsk();
+        var w = screenToWorld(e.clientX, e.clientY);
+        var anchor = opts.anchor(node);
+        grabX = w.x - anchor.x; grabY = w.y - anchor.y;
+        lastX = e.clientX; lastY = e.clientY;
+        scroller = createEdgeScroller(visibleCanvasRect, function(dx, dy){
+          cancelViewAnimation(); // an in-flight glide would fight the drag
+          setViewAdjusted(true);
+          view.x += dx; view.y += dy;
+          applyTransform();
+          place();
+        });
+        return true;
+      },
+      function(ev){ lastX = ev.clientX; lastY = ev.clientY; place(); scroller.update(lastX, lastY); },
+      function(){
+        if (scroller) scroller.stop();
+        scroller = null;
+        drawEdges();
+        canvasLifecycle.hooks.persistNode(node);
+      });
+  }
+  function enableDrag(node, handle){
+    enableCardGesture(node, handle, {
+      accept: function(e){ return !onCardControl(e); },
+      anchor: function(n){ return { x: n.x, y: n.y }; },
+      apply: function(n, x, y){ n.x = x; n.y = y; }
+    });
   }
   function enableResize(node, handle){
-    var sx, sy, ow, oh;
-    onPointerGesture(handle,
-      function(e){ if (e.button !== 0) return false; e.preventDefault(); e.stopPropagation(); sx=e.clientX; sy=e.clientY; ow=node.w; oh=node.h; return true; },
-      function(ev){ node.w = Math.max(240, ow + (ev.clientX - sx)/view.scale); node.h = Math.max(160, oh + (ev.clientY - sy)/view.scale); layoutNode(node); scheduleEdges(); },
-      function(){ drawEdges(); canvasLifecycle.hooks.persistNode(node); });
+    enableCardGesture(node, handle, {
+      stopPropagation: true,
+      accept: function(){ return true; },
+      anchor: function(n){ return { x: n.x + n.w, y: n.y + n.h }; },
+      apply: function(n, x, y){ n.w = Math.max(240, x - n.x); n.h = Math.max(160, y - n.y); }
+    });
   }
 function toggleCollapse(node, btn){
     node.collapsed = !node.collapsed;
@@ -1097,25 +1157,19 @@ export function frameAll(animate, source){
     if (!ids.length) return;
     var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
     ids.forEach(function(id){ var n=nodes[id]; minX=Math.min(minX,n.x); minY=Math.min(minY,n.y); maxX=Math.max(maxX,n.x+n.w); maxY=Math.max(maxY,n.y+effH(n)); });
-    var fullW=viewport.clientWidth||window.innerWidth, fullH=viewport.clientHeight||window.innerHeight, pad=100;
-    var rail=document.getElementById("web-rail"), taskbar=document.getElementById("taskbar");
-    var insetX=(rail && rail.classList.contains("open")) ? rail.getBoundingClientRect().width : 0;
-    var insetY=taskbar ? taskbar.getBoundingClientRect().height : 0;
-    var vw=fullW-insetX, vh=fullH-insetY;
+    var r=visibleCanvasRect(), pad=100;
+    var vw=r.width, vh=r.height;
     var ts = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min((vw-pad)/(maxX-minX), (vh-pad)/(maxY-minY), 1.2)));
-    var tx = insetX+vw/2 - (minX+(maxX-minX)/2)*ts, ty = insetY+vh/2 - (minY+(maxY-minY)/2)*ts;
+    var tx = r.left+vw/2 - (minX+(maxX-minX)/2)*ts, ty = r.top+vh/2 - (minY+(maxY-minY)/2)*ts;
     if (source) setViewAdjusted(true);
     if (animate){ animateView(tx, ty, ts, { source: source, duration: 270, ease: "inOut" }); return; }
     view.scale = ts; view.x = tx; view.y = ty; applyTransform();
   }
 export function createStandaloneNoteAtViewportCenter(){
-    var fullW=viewport.clientWidth||window.innerWidth, fullH=viewport.clientHeight||window.innerHeight;
-    var rail=document.getElementById("web-rail"), taskbar=document.getElementById("taskbar");
-    var insetX=(rail && rail.classList.contains("open")) ? rail.getBoundingClientRect().width : 0;
-    var insetY=taskbar ? taskbar.getBoundingClientRect().height : 0;
+    var r = visibleCanvasRect();
     createStandaloneNoteAtScreen(
-      insetX + (fullW - insetX) / 2 - DEFAULT_STANDALONE_NOTE.w * view.scale / 2,
-      insetY + (fullH - insetY) / 2 - DEFAULT_STANDALONE_NOTE.h * view.scale / 2
+      r.left + r.width / 2 - DEFAULT_STANDALONE_NOTE.w * view.scale / 2,
+      r.top + r.height / 2 - DEFAULT_STANDALONE_NOTE.h * view.scale / 2
     );
   }
   function createStandaloneNoteAtScreen(sx, sy){
