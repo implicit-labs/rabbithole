@@ -8,30 +8,30 @@
       "description": "Built live client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build.",
-      "baseline": 617361,
-      "ceiling": 648229.05,
-      "measured_at_commit": "45e1f34"
+      "rationale": "Exact file size after a deterministic build. The audited standalone image lifecycle deliberately adds upload rollback, asset deletion, and teardown guards.",
+      "baseline": 652808,
+      "ceiling": 685448.4,
+      "measured_at_commit": "0a3edc4"
     },
     {
       "id": "bundle_frozen_client_bytes",
       "description": "Built frozen client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build.",
-      "baseline": 594725,
-      "ceiling": 624461.25,
-      "measured_at_commit": "45e1f34"
+      "rationale": "Exact file size after a deterministic build. Shared draft/composer safety and frozen SVG handling intentionally remain in the frozen client.",
+      "baseline": 629424,
+      "ceiling": 660895.2,
+      "measured_at_commit": "0a3edc4"
     },
     {
       "id": "web_initial_js_bytes",
       "description": "Statically loaded web application JavaScript",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded.",
-      "baseline": 793325,
-      "ceiling": 832991.25,
-      "measured_at_commit": "45e1f34"
+      "rationale": "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded. BYOK pasted-image validation, cleanup, retry disclosure, and URL revocation deliberately add this closure cost.",
+      "baseline": 839027,
+      "ceiling": 880978.35,
+      "measured_at_commit": "0a3edc4"
     },
     {
       "id": "pdf_runtime_distribution_bytes",
