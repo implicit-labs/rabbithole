@@ -34,7 +34,7 @@ async function buildSessionSnapshotProjection(session) {
 /** @param {import("./session.js").RabbitHoleSession} session */
 export async function buildSessionExportHtml(session) {
   const snapshotProjection = await buildSessionSnapshotProjection(session);
-  const { stylesheetText, frozenClientSource } = getUiAssets();
+  const { stylesheetText, frozenClientSource } = await getUiAssets();
   return buildSnapshotHtml({
     title: snapshotProjection.hole.title || "Rabbithole",
     stylesheetText,

@@ -19,6 +19,10 @@ and CSS live as pure template strings here, while Node-only assembly lives under
 - `src/node/html/built-assets.js` reads committed files from `dist/`:
   `client.js`, `frozen-client.js`, `katex.css`, `dompurify.js`, and the pinned
   `mermaid.js` runtime.
+- `src/node/html/dev-reload.js` holds the `RABBITHOLE_DEV` loop: with it unset
+  those reads stay frozen at first access, and with it set both the bundles and
+  the `src/core/` template modules are re-read per page load so a browser reload
+  shows a rebuild without restarting the MCP server.
 - `src/web/` is the standalone static web host. `npm run build` writes
   `web/dist/` (ignored) with `index.html`, `app.js`, CSS, DOMPurify, Mermaid,
   and frozen snapshot source. `scripts/check-dist.mjs` intentionally compares only the

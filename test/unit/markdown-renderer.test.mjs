@@ -247,7 +247,7 @@ async function assertPageAssembly() {
     const check = spawnSync(process.execPath, ["--check", scriptPath], { encoding: "utf8" });
     assert.equal(check.status, 0, check.stderr || check.stdout);
 
-    const stylesheetBytes = Buffer.byteLength(getUiAssets().stylesheetText, "utf8");
+    const stylesheetBytes = Buffer.byteLength((await getUiAssets()).stylesheetText, "utf8");
     const pageBytes = Buffer.byteLength(liveHtml, "utf8");
     console.log(`ok page assembly: UI stylesheet ${stylesheetBytes} bytes, live page ${pageBytes} bytes`);
   } finally {

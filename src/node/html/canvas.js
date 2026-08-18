@@ -8,12 +8,13 @@
 
 import { escapeHtml, serializeForInlineScript } from "../../core/utils.js";
 import { getDompurifyScript, getMermaidScript, getPdfJsScript, getPdfWorkerScript, getUiAssets } from "./built-assets.js";
-import { CANVAS_SHELL } from "../../core/html/shell.js";
+import { getCoreHtml } from "./dev-reload.js";
 
-export function buildCanvasHtml(hydration) {
+export async function buildCanvasHtml(hydration) {
   const title = hydration?.title || "Rabbithole";
   const hydrationJson = serializeForInlineScript(hydration);
-  const { stylesheetText, clientSource, frozenClientSource } = getUiAssets();
+  const { stylesheetText, clientSource, frozenClientSource } = await getUiAssets();
+  const { CANVAS_SHELL } = await getCoreHtml();
   const liveSnapshotSource = `  window.__RABBITHOLE_FROZEN_CLIENT__ = ${serializeForInlineScript(frozenClientSource)};\n`;
   const liveSnapshotHoleHook = `      getSnapshotHole: async function(){
         var response = await fetch("/snapshot-hole", { cache: "no-store" });

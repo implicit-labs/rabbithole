@@ -275,6 +275,7 @@ before mounting, and invalid diagrams fall back to their original source.
 |---------|--------|
 | `RABBITHOLE_DIR` | Override the storage directory (default `~/.rabbithole/`). |
 | `RABBITHOLE_NO_BROWSER=1` | Don't auto-open the browser (headless/testing). |
+| `RABBITHOLE_DEV=1` | Development only: re-read UI sources and bundles per page load (see the UI dev loop below). |
 | `RABBITHOLE_PROXY_URL` | Build-time: URL of your fetch-proxy relay for the web app (empty string disables the default). |
 
 ## Repo layout
@@ -308,6 +309,22 @@ npm run check:dist
 
 Commit both the source changes and `dist/`. There is no `prepare` build step;
 GitHub `npx` installs use the committed artifacts.
+
+### UI dev loop
+
+Start the MCP server with `RABBITHOLE_DEV=1` in its environment. Then iterate
+without restarting it or losing the open session:
+
+1. Edit `src/ui/`, `src/core/html/`, or anything they import.
+2. `node build.mjs --outdir=dist` (rebuilds the MCP bundles only, skipping the
+   static web app).
+3. Reload the canvas tab.
+
+The page is served with `Cache-Control: no-store`, so the reload picks up the
+rebuilt bundles and the freshly re-read shell and stylesheet templates. The
+listening agent lives in the Node process, not the page, so a reload rejoins the
+same session. Without `RABBITHOLE_DEV`, every asset is read once at startup and
+UI changes require a restart.
 
 ### Production deployment
 

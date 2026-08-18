@@ -24,11 +24,12 @@ export async function handleSessionRequest(session, req, res) {
   const assetRequestName = rawAssetRequestName(req.url);
 
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+    const page = await session.renderPage(session.buildHydration());
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store, no-cache, must-revalidate",
     });
-    res.end(session.renderPage(session.buildHydration()));
+    res.end(page);
     return;
   }
 

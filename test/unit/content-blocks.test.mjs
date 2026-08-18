@@ -467,7 +467,7 @@ function runFrameworkSanitization() {
 }
 
 async function assertPageAssembly() {
-  const html = buildCanvasHtml({ title: "Content Blocks", root_id: "root", nodes: [] });
+  const html = await buildCanvasHtml({ title: "Content Blocks", root_id: "root", nodes: [] });
   const purify = getDompurifyScript();
   const mermaid = getMermaidScript();
   assert.equal(count(html, purify), 1, "DOMPurify should be inlined exactly once");
