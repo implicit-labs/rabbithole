@@ -8,7 +8,6 @@ import { defaultFsStore } from "../../src/node/fs-store.js";
 import { readAttentionPdfTwoPage } from "../support/attention-pdf.mjs";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
-process.env.RABBITHOLE_MAX_BLOCK_MS = "5000";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-node-convert-"));
 
 async function openPdfSession(name) {
@@ -56,7 +55,7 @@ function abortAfter(ms) {
     assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "conversion pages must be lossless source renders");
   }
 
-  // A keep_listening re-arm must redeliver the unanswered conversion, not drop it.
+  // A real host retry must redeliver the unanswered conversion, not drop it.
   const redelivered = await session.waitForEvent();
   assert.equal(redelivered.status, "convert_request");
   assert.equal(redelivered.request_id, request.request_id, "convert_request must survive a waitForEvent re-arm");

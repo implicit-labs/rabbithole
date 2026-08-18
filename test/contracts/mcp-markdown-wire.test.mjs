@@ -14,7 +14,6 @@ import { FsStore } from "../../src/node/fs-store.js";
 import { importSnapshotFile } from "../../src/web/portable.js";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
-process.env.RABBITHOLE_MAX_BLOCK_MS = "50";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-mcp-markdown-wire-"));
 
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 8, 8, 8, 8]);
@@ -37,13 +36,16 @@ function assertNoContentHtml(value, label) {
   assert.equal(JSON.stringify(value).includes("contentHtml"), false, `${label} should not carry contentHtml`);
 }
 
-function assertKeepListeningShape(result, session) {
-  assert.deepEqual(Object.keys(result).sort(), ["hole_id", "instruction", "session_id", "status"]);
-  assert.equal(result.status, "keep_listening");
+function assertCancelledShape(result, session) {
+  assert.deepEqual(Object.keys(result).sort(), ["session_id", "status"]);
+  assert.equal(result.status, "cancelled");
   assert.equal(result.session_id, session.id);
-  assert.equal(result.hole_id, session.holeId);
-  assert.match(result.instruction, /open_rabbithole/);
-  assert.match(result.instruction, new RegExp(session.holeId));
+}
+
+function abortAfter(ms = 25) {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
 }
 
 function assertBranchRequestShape(result, session, requestId, nodeId) {
@@ -151,7 +153,7 @@ async function runRendererGoldenFixtures() {
 }
 
 async function runEmptySessionClosedFixture() {
-  const opened = await openRabbithole({ title: "Empty close wire", content: "No notes" });
+  const opened = await openRabbithole({ title: "Empty close wire", content: "No notes", signal: abortAfter() });
   const session = getSession(opened.session_id);
   assert(session);
   await session.close("empty_close_wire_done");
@@ -194,10 +196,11 @@ async function runMarkdownWireFixture() {
     title: "Markdown Wire Root",
     content: rootMarkdown,
     assets: [{ name: "diagram-1.png", file_path: imagePath }],
+    signal: abortAfter(),
   });
   const session = getSession(opened.session_id);
   assert(session, "open_rabbithole should leave a live session");
-  assertKeepListeningShape(opened, session);
+  assertCancelledShape(opened, session);
 
   const liveRes = await fetch(session.url);
   assert.equal(liveRes.status, 200);
@@ -270,8 +273,9 @@ async function runMarkdownWireFixture() {
     requestId,
     title: "Markdown Wire Answer",
     content: "\n</div>\n```\n\nDone.",
+    signal: abortAfter(),
   });
-  assertKeepListeningShape(afterFinal, session);
+  assertCancelledShape(afterFinal, session);
   const answered = session.outboundEvents.find((event) => event.data.type === "node_answered" && event.data.node_id === nodeId)?.data;
   assert(answered, "node_answered event should be broadcast");
   assertNoContentHtml(answered, "node_answered");
@@ -308,11 +312,12 @@ async function runMarkdownWireFixture() {
     "agent context must not change the standalone ask's graph parent");
   assert.deepEqual(session.nodes.get(standaloneNodeId).position, { x: 275, y: -45 });
   assert.deepEqual(session.nodes.get(standaloneNodeId).size, { w: 300, h: 180 });
-  assertKeepListeningShape(await answerBranch({
+  assertCancelledShape(await answerBranch({
     sessionId: session.id,
     requestId: standaloneRequestId,
     title: "Whole-document implication",
     content: "The answer remains disconnected on the canvas.",
+    signal: abortAfter(),
   }), session);
   await session.flushSave();
   const persistedStandalone = (await new FsStore().loadHole(session.holeId)).nodes.find((node) => node.id === standaloneNodeId);
@@ -359,11 +364,12 @@ async function runMarkdownWireFixture() {
   const notesBranch = await openRabbithole({ holeId: session.holeId });
   assert.deepEqual(notesBranch.notes, [standaloneNoteEntry, anchoredNoteEntry],
     "branch_request carries exactly the standalone-first relevant note entries");
-  assertKeepListeningShape(await answerBranch({
+  assertCancelledShape(await answerBranch({
     sessionId: session.id,
     requestId: notesRequestId,
     title: "Reading the definition",
     content: "Read it in context.",
+    signal: abortAfter(),
   }), session);
 
   const noteThreadRequestId = "req-note-thread-wire";
@@ -379,11 +385,12 @@ async function runMarkdownWireFixture() {
   const noteThreadBranch = await openRabbithole({ holeId: session.holeId });
   assert.deepEqual(noteThreadBranch.notes, [{ ...anchoredNoteEntry, on_lineage: true }, standaloneNoteEntry],
     "a branch_request inside a note carries that note body first with on_lineage: true");
-  assertKeepListeningShape(await answerBranch({
+  assertCancelledShape(await answerBranch({
     sessionId: session.id,
     requestId: noteThreadRequestId,
     title: "Expanding the note",
     content: "Here is the expansion.",
+    signal: abortAfter(),
   }), session);
 
   const reloaded = await fetch(session.url);

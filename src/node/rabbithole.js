@@ -20,9 +20,9 @@ async function resolveMarkdown({ content, filePath }) {
  * `signal` is the MCP request's AbortSignal — if the human cancels the tool
  * call, the session tells the browser the agent detached.
  */
-export async function openRabbithole({ title, content, filePath, holeId, baseUrl, assets, signal }) {
+export async function openRabbithole({ title, content, filePath, holeId, baseUrl, assets, focus, signal }) {
   if (holeId) {
-    return resumeRabbithole(holeId, signal, assets);
+    return resumeRabbithole(holeId, signal, assets, focus);
   }
 
   const pdf = !content && filePath && await isPdfFile(filePath)
@@ -68,12 +68,13 @@ export async function openRabbithole({ title, content, filePath, holeId, baseUrl
   return session.waitForEvent(signal);
 }
 
-async function resumeRabbithole(holeId, signal, assets) {
+async function resumeRabbithole(holeId, signal, assets, focus = false) {
   log(`resumeRabbithole: ${holeId}`);
   const liveSession = getSessionByHole(holeId);
   if (liveSession) {
     const addedAssets = await addAssetsToHole(liveSession.holeId, assets);
     for (const asset of addedAssets) liveSession.assetNames.add(asset.name);
+    if (focus) liveSession.focusBrowser();
     return liveSession.waitForEvent(signal);
   }
 

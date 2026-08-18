@@ -132,7 +132,7 @@ async function resumePortableOverMcp(text, prefix, title, rootMarkdown, branchMa
 async function startMcp(dir) {
   const transport = new StdioClientTransport({
     command: process.execPath, args: [path.join(ROOT, "bin/mcp-server.js")], cwd: ROOT, stderr: "pipe",
-    env: { ...process.env, RABBITHOLE_DIR: dir, RABBITHOLE_NO_BROWSER: "1", RABBITHOLE_MAX_BLOCK_MS: "2000" },
+    env: { ...process.env, RABBITHOLE_DIR: dir, RABBITHOLE_NO_BROWSER: "1" },
   });
   let stderr = "";
   const urls = [];
@@ -156,8 +156,8 @@ async function startMcp(dir) {
   };
 }
 
-async function callTool(client, name, args) {
-  const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 15000 });
+async function callTool(client, name, args, options = {}) {
+  const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 15000, ...options });
   assert.equal(result.isError, undefined, `${name} failed: ${JSON.stringify(result)}`);
   return JSON.parse(result.content[0].text);
 }
@@ -184,8 +184,13 @@ async function streamAnswer(client, request, title) {
   const split = BRANCH_MARKDOWN.indexOf("\n\n") + 2;
   const partial = await callTool(client, "answer_branch", { session_id: request.session_id, request_id: request.request_id, content: BRANCH_MARKDOWN.slice(0, split), partial: true });
   assert.equal(partial.partial, true);
-  const final = await callTool(client, "answer_branch", { session_id: request.session_id, request_id: request.request_id, title, content: BRANCH_MARKDOWN.slice(split) });
-  assert.equal(final.status, "keep_listening", `final answer result: ${JSON.stringify(final)}`);
+  const controller = new AbortController();
+  const final = callTool(client, "answer_branch", {
+    session_id: request.session_id, request_id: request.request_id, title, content: BRANCH_MARKDOWN.slice(split),
+  }, { signal: controller.signal });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  controller.abort();
+  await assert.rejects(final, /abort/i, "the host should be able to cancel an otherwise indefinite listener after the answer commits");
 }
 
 async function downloadShare(page, selector, filename) {

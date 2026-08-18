@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
-process.env.RABBITHOLE_MAX_BLOCK_MS = "50";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-mcp-rearm-"));
 
 const { openRabbithole, answerBranch } = await import("../../src/node/rabbithole.js");
@@ -13,6 +12,12 @@ const { defaultFsStore } = await import("../../src/node/fs-store.js");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortAfter(ms = 25) {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
 }
 
 function detachEvents(session) {
@@ -38,22 +43,36 @@ function rootNode(id = "root") {
   };
 }
 
-async function runKeepListeningAndLiveReattachFixture() {
-  const first = await openRabbithole({ title: "MCP Rearm", content: "Root" });
-  assert.equal(first.status, "keep_listening");
-  assert(first.hole_id, "keep_listening should include hole_id");
-  assert(first.session_id, "keep_listening should include session_id");
-  assert.match(first.instruction, /open_rabbithole/);
-  assert.match(first.instruction, new RegExp(first.hole_id));
+async function runZeroIdleTurnsAndSingleListenerFixture() {
+  const openingController = new AbortController();
+  const opening = openRabbithole({ title: "MCP Listener", content: "Root", signal: openingController.signal });
+  await sleep(25);
+  openingController.abort();
+  const opened = await opening;
+  assert.equal(opened.status, "cancelled");
 
-  const session = getSession(first.session_id);
-  assert(session, "new hole should still have a live session after rearm");
-  const originalUrl = session.url;
-  assert.equal(session.agentAttached, true, "rearm should not detach immediately");
-  assert.equal(session.waiters.length, 0, "rearm should remove the waiter it released");
-  assert.equal(detachEvents(session).length, 0, "rearm should not broadcast detach immediately");
-  await sleep(20);
-  assert.equal(detachEvents(session).length, 0, "detach should not broadcast inside the grace window");
+  const session = getSession(opened.session_id);
+  assert(session, "cancelled host wait should leave the durable canvas session live");
+  assert.equal(session.agentAttached, false);
+
+  // Even a legacy local override must not be able to reintroduce model
+  // polling. This makes the zero-idle-turn invariant fast to test.
+  process.env.RABBITHOLE_MAX_BLOCK_MS = "50";
+  const idle = session.waitForEvent();
+  const idleOutcome = await Promise.race([idle.then(() => "resolved"), sleep(125).then(() => "pending")]);
+  delete process.env.RABBITHOLE_MAX_BLOCK_MS;
+  assert.equal(idleOutcome, "pending", "an idle canvas must not periodically resolve its model listener");
+  assert(session.waiter, "one background listener should remain attached during idle time");
+  assert.equal(session.agentAttached, true);
+
+  const overlapping = await session.waitForEvent();
+  assert.deepEqual(overlapping, {
+    status: "already_listening",
+    session_id: session.id,
+    hole_id: session.holeId,
+    instruction: "This session already has an active background listener. Do not attach another one; the existing call will receive the next canvas event.",
+  });
+  assert(session.waiter, "a redundant attach must not replace the owning listener");
 
   await defaultFsStore.putAsset(session.holeId, "paste-live.png", Buffer.from([1, 2, 3, 4]));
   session.assetNames.add("paste-live.png");
@@ -66,9 +85,9 @@ async function runKeepListeningAndLiveReattachFixture() {
     question: "Explain this",
     attachment_assets: ["paste-live.png"],
   });
-  assert.equal(session.queue.length, 1, "ask during rearm gap should stay queued");
+  assert.equal(session.queue.length, 0, "the active listener should receive the ask directly");
 
-  const branch = await openRabbithole({ holeId: first.hole_id });
+  const branch = await idle;
   assert.equal(branch.status, "branch_request");
   assert.equal(branch.request_id, ask.request_id);
   assert.equal(branch.node_id, ask.node_id);
@@ -79,39 +98,43 @@ async function runKeepListeningAndLiveReattachFixture() {
   assert.equal(path.isAbsolute(branch.attachments[0].image_path), true);
   await fs.realpath(branch.attachments[0].image_path);
   assert.deepEqual(await fs.readFile(branch.attachments[0].image_path), Buffer.from([1, 2, 3, 4]));
-  assert.equal(session.url, originalUrl, "live reattach should not open a new local session");
-  assert.equal(session.queue.length, 0, "reattach should drain the queued branch request");
-  assert.equal(session.waiters.length, 0);
-  assert.equal(session.rearmDetachTimer, null, "reattach should clear the grace timer");
+  assert.equal(session.waiter, null);
 
+  const answerController = new AbortController();
+  setTimeout(() => answerController.abort(), 25);
   const afterAnswer = await answerBranch({
     sessionId: branch.session_id,
     requestId: branch.request_id,
     title: "Answer",
     content: "Answered.",
+    signal: answerController.signal,
   });
-  assert.equal(afterAnswer.status, "keep_listening");
+  assert.equal(afterAnswer.status, "cancelled");
   assert.equal(session.pendingByRequest.size, 0);
   assert.equal(session.inFlightBranchRequests.size, 0);
-  assert.equal(session.waiters.length, 0, "answer_branch rearm should not leak waiters");
-  assert.equal(detachEvents(session).length, 0, "answer_branch rearm should stay attached during grace");
 
-  const second = await openRabbithole({ holeId: first.hole_id });
-  assert.equal(second.status, "keep_listening");
-  assert.equal(session.queue.length, 0);
-  assert.equal(session.waiters.length, 0, "repeated rearm should not leak waiters");
-  assert.equal(detachEvents(session).length, 0, "repeated rearm should not broadcast detach inside grace");
+  const duplicate = await answerBranch({
+    sessionId: branch.session_id,
+    requestId: branch.request_id,
+    title: "Duplicate answer",
+    content: "Must not be written twice.",
+  });
+  assert.deepEqual(duplicate, {
+    ok: true, node_id: ask.node_id, request_id: ask.request_id, duplicate: true, completed: true,
+  }, "a retried completed request should be an idempotent acknowledgement");
+  assert.equal(session.nodes.get(ask.node_id).markdown, "Answered.");
 
-  const controller = new AbortController();
-  const cancelledWait = session.waitForEvent(controller.signal);
-  controller.abort();
-  const cancelled = await cancelledWait;
-  assert.equal(cancelled.status, "cancelled");
-  assert.equal(session.agentAttached, false, "hard MCP cancellation should still detach");
+  const liveController = new AbortController();
+  const liveListener = openRabbithole({ holeId: session.holeId, signal: liveController.signal });
+  await sleep(20);
+  const redundantLiveAttach = await openRabbithole({ holeId: session.holeId });
+  assert.equal(redundantLiveAttach.status, "already_listening");
+  liveController.abort();
+  assert.equal((await liveListener).status, "cancelled");
+  assert.equal(session.waiter, null, "hard cancellation should release the sole listener");
   assert.equal(detachEvents(session).at(-1)?.data.reason, "cancelled");
-  assert.equal(session.waiters.length, 0, "hard cancellation should remove its waiter");
 
-  console.log("ok rearm: keep_listening shape, grace, live reattach, and waiter cleanup");
+  console.log("ok listener: zero idle turns, one delivery lease, idempotent completion, and cancellation cleanup");
 }
 
 async function runSavedAskRequeueFixture() {
@@ -201,17 +224,18 @@ async function runSavedAskRequeueFixture() {
     requestId: afterAnswer.request_id,
     title: "Later saved answer",
     content: "Later saved answer.",
+    signal: abortAfter(),
   });
-  assert.equal(afterLaterAnswer.status, "keep_listening");
+  assert.equal(afterLaterAnswer.status, "cancelled");
   assert.equal([...session.nodes.values()].filter((node) => node.status === "pending").length, 0);
   assert.equal(session.nodes.get("saved-child").parent_id, null, "answering a saved standalone ask keeps it disconnected");
   assert.equal(session.pendingByRequest.size, 0);
   assert.equal(session.inFlightBranchRequests.size, 0);
 
-  const liveAgain = await openRabbithole({ holeId });
-  assert.equal(liveAgain.status, "keep_listening");
+  const liveAgain = await openRabbithole({ holeId, signal: abortAfter() });
+  assert.equal(liveAgain.status, "cancelled");
   assert.equal(session.queue.length, 0, "live reattach should not requeue saved asks again");
-  assert.equal(session.waiters.length, 0);
+  assert.equal(session.waiter, null);
 
   console.log("ok rearm: invalid saved attachment names do not block valid delivery or later saved asks");
 }
@@ -223,7 +247,7 @@ function noteEntry(session, id, content, extra = {}) {
 }
 
 async function runNotesContextFixture() {
-  const opened = await openRabbithole({ title: "MCP notes context", content: "Root note target" });
+  const opened = await openRabbithole({ title: "MCP notes context", content: "Root note target", signal: abortAfter() });
   const session = getSession(opened.session_id);
   assert(session);
 
@@ -283,7 +307,7 @@ async function runNotesContextFixture() {
 }
 
 async function runDoneNotesDeliveryFixture() {
-  const opened = await openRabbithole({ title: "MCP notes on Done", content: "Root feedback target" });
+  const opened = await openRabbithole({ title: "MCP notes on Done", content: "Root feedback target", signal: abortAfter() });
   const session = getSession(opened.session_id);
   assert(session);
 
@@ -302,7 +326,7 @@ async function runDoneNotesDeliveryFixture() {
   });
 
   const blocked = session.waitForEvent();
-  assert.equal(session.waiters.length, 1, "the agent call should be blocked before Done");
+  assert(session.waiter, "the agent call should be blocked before Done");
   assert.deepEqual(await session.handleBrowserEvent({ type: "done" }), { ok: true });
   assert.deepEqual(await blocked, {
     status: "session_closed",
@@ -319,7 +343,7 @@ async function runDoneNotesDeliveryFixture() {
 }
 
 try {
-  await runKeepListeningAndLiveReattachFixture();
+  await runZeroIdleTurnsAndSingleListenerFixture();
   await runSavedAskRequeueFixture();
   await runNotesContextFixture();
   await runDoneNotesDeliveryFixture();

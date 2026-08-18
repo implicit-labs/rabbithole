@@ -188,9 +188,9 @@ Follow these steps exactly:
    the markdown came from a URL or repo; add `assets` for local images referenced
    as `asset:name.png`), which blocks until they select text and ask. Answer
    with `answer_branch` (stream chunks with `partial: true`, finish with a
-   titled final call) and keep looping until `status='session_closed'`. If a
-   long wait returns `status='keep_listening'`, immediately call
-   `open_rabbithole` with the returned `{ hole_id }` and do not re-send content.
+   titled final call) and keep looping until `status='session_closed'`. Leave
+   the blocked call running in the background: a passive canvas does not poll
+   the model. Re-attach once only if the host truly cancels or times it out.
 
 Notes for you: the tool call blocks by design (long-poll) — that is normal, not
 a hang. The first `npx` run fetches this repo, so allow it time; later runs
@@ -201,14 +201,15 @@ are cached. If the browser must not auto-open (headless), set
 
 | Tool | What it does |
 |------|--------------|
-| `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
+| `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). Use `{ hole_id, focus: true }` only when the human explicitly asks to reopen/show an already-live canvas. A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
 | `answer_branch` | Answer a pending branch request → a child document. Stream with `partial: true` chunks, then finish with a normal call carrying the node title; use `base_url` for fetched markdown and `assets` for local images referenced as `asset:name.png`. A `branch_request` from a PDF may include `region.image_path` — read that image before answering. Also streams "Convert to document" transcriptions when a `convert_request` arrives. |
 | `list_rabbitholes` | List saved holes to resume by id. |
 
 The loop: `open_rabbithole` → `branch_request` → `answer_branch` → `branch_request` → … → `session_closed`.
-Long waits may return `keep_listening`; immediately call `open_rabbithole`
-again with the returned `hole_id`. If the host reports a tool timeout, do the
-same — questions are saved.
+Long waits remain blocked and consume no model turns. If the host truly cancels
+or times out a call, resume once with the same `hole_id` — questions are saved.
+An `already_listening` result means the existing background call still owns
+delivery; do not attach another listener.
 
 For research PDFs, page renders are the dependable figure source. For arXiv
 links, prefer fetching the HTML version and opening that content with
@@ -274,7 +275,6 @@ before mounting, and invalid diagrams fall back to their original source.
 |---------|--------|
 | `RABBITHOLE_DIR` | Override the storage directory (default `~/.rabbithole/`). |
 | `RABBITHOLE_NO_BROWSER=1` | Don't auto-open the browser (headless/testing). |
-| `RABBITHOLE_MAX_BLOCK_MS` | Max time for one blocking MCP wait before returning `keep_listening` (default `240000`). |
 | `RABBITHOLE_PROXY_URL` | Build-time: URL of your fetch-proxy relay for the web app (empty string disables the default). |
 
 ## Repo layout

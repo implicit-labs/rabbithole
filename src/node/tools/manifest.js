@@ -68,10 +68,11 @@ export const toolDefinitions = [
       "A convert_request asks you to transcribe the listed page image_path files under its inline rules; stream the document through answer_branch with that request_id. " +
       "On a resumed hole the first branch_request carries " +
       "a 'rehydration' field with the whole tree (and any saved_asks); read it to reload your context. " +
-      "Long waits periodically return status='keep_listening' with hole_id; immediately call " +
-      "open_rabbithole { hole_id } to keep listening, and do not re-send content. If the host reports " +
-      "a tool timeout (e.g. timed out awaiting tools/call), also re-call open_rabbithole { hole_id }; " +
-      "nothing is lost and asks are saved. " +
+      "Long waits remain blocked and should be left running in the background; never poll the canvas. " +
+      "If the host truly cancels or times out the tool call, re-call open_rabbithole { hole_id } once; " +
+      "nothing is lost and asks are saved. A status='already_listening' result means another live " +
+      "background call owns delivery; do not call again. When the human explicitly asks to reopen or " +
+      "show the canvas, resume with { hole_id, focus: true }. " +
       "It returns status='session_closed' when the human clicks Done or closes the tab.",
     input: obj({
       title: str("Document title (required for a new hole)", { optional: true, maxLength: 2000 }),
@@ -88,9 +89,14 @@ export const toolDefinitions = [
           "Local image files to attach to this hole; reference them in markdown as asset:name.png images",
       }),
       hole_id: str("Resume a saved hole instead of starting a new one", { optional: true, maxLength: 200 }),
+      focus: {
+        kind: "boolean",
+        description: "Bring an already-live canvas to the browser when the human explicitly asks to reopen or show it",
+        optional: true,
+      },
     }),
     validateInput: validateOpen,
-    run: ({ title, content, file_path, base_url, hole_id, assets }, extra) =>
+    run: ({ title, content, file_path, base_url, hole_id, assets, focus }, extra) =>
       openRabbithole({
         title,
         content,
@@ -98,6 +104,7 @@ export const toolDefinitions = [
         baseUrl: base_url,
         holeId: hole_id,
         assets,
+        focus,
         signal: extra?.signal,
       }),
   },
@@ -108,7 +115,7 @@ export const toolDefinitions = [
       "",
       AUTHORING_VOCABULARY_V1,
       "",
-      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call blocks and returns the next event. If it returns status='keep_listening', immediately call open_rabbithole { hole_id }; if the host reports a tool timeout (e.g. timed out awaiting tools/call), do the same. Do not re-send content; asks are saved.",
+      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
     ].join("\n"),
     input: obj({
       session_id: str("Active session ID from open_rabbithole", { maxLength: 200 }),
