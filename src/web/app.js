@@ -5,7 +5,7 @@ import { detectPdfTranscriptionCapability, pdfTranscriptionCapability } from "./
 import { isHttpUrl } from "./brain/model-endpoint.js";
 import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings/preferences-store.js";
 import { getApiKey } from "./settings/credential-store.js";
-import { createSettingsPopover } from "./settings/settings-popover.js";
+import { createModelSettings } from "./settings/model-settings.js";
 import { createOllamaRecoveryDialog } from "./settings/ollama-recovery.js";
 import { takeBridgeTokenFromFragment } from "./settings/bridge-pairing.js";
 import { BRIDGE_AGENT_LABELS, bridgeAgentOf } from "./brain/bridge-catalog.js";
@@ -25,6 +25,8 @@ import { setSnapshotHooks, buildSnapshotProjection, buildSnapshotHtml } from "..
 import { flushPendingSaves } from "../ui/transport-status.js";
 import { registerRendererAssetName } from "../ui/renderer.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
+import { initSettingsSheet, registerSettingsSection } from "../ui/settings-sheet.js";
+import { applyTheme, toggleTheme } from "../ui/preferences.js";
 import { openUrlToStoredHole } from "./ingest/url.js";
 import { describePdfImportFailure, ingestPdfToStoredHole } from "./ingest/pdf.js";
 import { buildRabbitholeExport, downloadRabbitholeExport, importRabbitholeFile, importSnapshotFile, rabbitholeFilename } from "./portable.js";
@@ -256,7 +258,7 @@ function initAppChrome() {
       if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
     },
   });
-  settingsController = createSettingsPopover({
+  settingsController = createModelSettings({
     trigger: settingsTrigger,
     onSettingsChange: () => {
       refreshCurrentBrain();
@@ -267,12 +269,11 @@ function initAppChrome() {
     openOllamaRecovery: ({ settings, trigger }) => ollamaRecoveryController.open({ settings, trigger }),
   });
   settingsController.syncSubscriptionStream();
-  // The gear toggles: the layer stack ignores pointerdown on its own trigger,
-  // so a second click reaches us with the popover still open — close it.
-  settingsTrigger?.addEventListener("click", () => {
-    if (settingsController.isOpen()) settingsController.close();
-    else settingsController.open();
-  });
+  /* BYOK is a property of this host, not of the product: the shared sheet ships
+     Appearance everywhere and the web app registers Model on top of it. The
+     gear itself is wired by the sheet, in both hosts. */
+  registerSettingsSection({ id: "model", label: "Model", order: 10, mount: (host) => settingsController.mountPane(host) });
+  initSettingsSheet({ hostLabel: "Web" });
   document.getElementById("blank-start-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: event.currentTarget }));
   document.getElementById("blank-start-setup")?.addEventListener("click", (event) => openModelSetup({ trigger: event.currentTarget }));
   syncGenerationSetupUi();
@@ -302,8 +303,9 @@ function initAppChrome() {
     setRailOpen(false);
   });
   document.getElementById("t-theme")?.addEventListener("click", () => {
+    // A live hole wires the same button inside the canvas client.
     if (currentHoleId) return;
-    toggleBlankTheme();
+    toggleTheme();
   });
   document.getElementById("t-zin")?.addEventListener("click", () => {
     if (!currentHoleId) setBlankZoom(blankZoom * 1.15);
@@ -1270,13 +1272,6 @@ function setBlankZoom(value) {
   if (label && !currentHoleId) label.textContent = `${Math.round(blankZoom * 100)}%`;
 }
 
-function toggleBlankTheme() {
-  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  const next = current === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem("rh-theme", next); } catch {}
-}
-
 function isPdfFile(file) {
   const name = String(file?.name || "").toLowerCase();
   const type = String(file?.type || "").toLowerCase();
@@ -1356,12 +1351,7 @@ function isEditableTarget(target) {
 }
 
 function applyInitialWebTheme() {
-  try {
-    let savedTheme = localStorage.getItem("rh-theme");
-    if (savedTheme !== "dark" && savedTheme !== "light") savedTheme = "";
-    if (!savedTheme && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) savedTheme = "dark";
-    if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
-  } catch {}
+  try { applyTheme(); } catch {}
 }
 
 function safeLocalStorageGet(key) {

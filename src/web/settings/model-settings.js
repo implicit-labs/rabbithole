@@ -24,7 +24,7 @@ import {
   reasoningLabel,
 } from "../brain/bridge-catalog.js";
 import { escapeHtml } from "../../core/utils.js";
-import { openPopover } from "../../ui/primitives/popover.js";
+import { closeSettingsSheet, openSettingsSheet } from "../../ui/settings-sheet.js";
 import { fieldMarkup, wireField } from "../../ui/primitives/field.js";
 import { comboboxMarkup, wireCombobox } from "../../ui/primitives/combobox.js";
 import { isCommandEnter } from "../../ui/input-intent.js";
@@ -59,20 +59,18 @@ function eyeSvg(open) {
   return iconSvg(open ? "eye-off" : "eye");
 }
 
-export function createSettingsPopover({
+export function createModelSettings({
   trigger: defaultTrigger,
   onSettingsChange = () => {},
   openOllamaRecovery = () => {}
 } = {}) {
   let activeTrigger = defaultTrigger;
   let surface = null;
-  let popover = null;
   let modelCatalogCache = null;
   let keyToken = 0;
   let purpose = "settings";
   let readyCallback = null;
   let recoveryStatus = "";
-  let scrim = null;
   let localModels = null;
   let localDiscovery = "idle";
   let localDiscoveryMessage = "";
@@ -212,7 +210,6 @@ export function createSettingsPopover({
     const focused = setConditionalHtml(host, html, { morph: true });
     wireConditionalSections(host);
     restoreTransitionFocus(host, focused);
-    popover?.update();
   }
 
   function renderSubscriptionsSections(host, settings) {
@@ -313,7 +310,6 @@ export function createSettingsPopover({
       ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`);
     restoreTextBeingTyped(host, typed);
     wireConditionalSections(host);
-    popover?.update();
   }
 
   function bridgeModelsFor(agentId) {
@@ -822,7 +818,6 @@ export function createSettingsPopover({
       pair();
     });
     host.querySelector(".bridge-paste-fallback")?.addEventListener("toggle", (event) => {
-      popover?.update();
       if (event.target.open) host.querySelector("#bridge-pairing-token")?.focus({ preventScroll: true });
     });
     host.querySelectorAll("[data-copy-command]").forEach((button) => button.addEventListener("click", () => {
@@ -1290,61 +1285,70 @@ export function createSettingsPopover({
     return result;
   }
 
-  function open({ focusKey = false, trigger = defaultTrigger, purpose: nextPurpose = "settings", status = "", onReady = null } = {}) {
-    if (surface) {
-      purpose = nextPurpose;
-      recoveryStatus = status;
-      readyCallback = onReady;
-      lastBridgeRenderKey = "";
-      renderConditionalSections();
-      return;
-    }
-    activeTrigger = trigger || defaultTrigger; purpose = nextPurpose; readyCallback = onReady; recoveryStatus = status;
-    lastKeyCommit = { value: null, result: false };
+  /*
+   * The pane is mounted by the settings sheet, not by this module: there is one
+   * settings surface in the product, and Model is a section of it. Everything
+   * below the provider list is the same code the anchored popover ran.
+   */
+  function mountPane(host) {
+    surface = host;
     const settings = loadSettings();
-    if (purpose === "setup" && !getGenerationSetupStatus(settings).ready) {
-      localDiscoveryToken += 1;
-      localModels = null; localDiscovery = "idle"; localDiscoveryMessage = "";
-    }
     const preset = providerFor(settings.preset);
-    surface = document.createElement("div"); surface.id = "web-settings-popover"; surface.className = "web-settings-dialog popover-surface"; surface.tabIndex = -1; surface.setAttribute("aria-label", "Model settings");
-    const title = purpose === "recovery" ? "Reconnect AI" : purpose === "setup" ? "Set up AI" : "Model settings";
     const selectedRow = selectedRowId(settings);
-    surface.innerHTML = `<section id="settings-panel" class="settings-panel" aria-labelledby="settings-title"><header class="settings-header"><h2 id="settings-title">${title}</h2></header><div class="settings-inner"><div class="settings-section provider-list-section"><div class="provider-list" role="radiogroup" aria-label="Where answers come from">${PROVIDER_ROWS.map((row) => providerRowMarkup(row, row.id === selectedRow)).join("")}</div></div></div></section>`;
+    surface.innerHTML = `<section id="settings-panel" class="settings-panel"><div class="settings-inner"><div class="settings-section provider-list-section"><div class="provider-list" role="radiogroup" aria-label="Where answers come from">${PROVIDER_ROWS.map((row) => providerRowMarkup(row, row.id === selectedRow)).join("")}</div></div></div></section>`;
     const conditionalHost = document.createElement("div");
     conditionalHost.id = "settings-conditional-sections";
     surface.querySelector(`[data-provider-item="${selectedRow}"] .provider-body-slot`).append(conditionalHost);
-    document.body.append(surface); activeTrigger.setAttribute("aria-controls", surface.id); wireProviderControl(); renderConditionalSections();
-    if (activeTrigger?.id === "blank-start-setup") {
-      surface.classList.add("settings-setup-surface");
-      scrim = document.createElement("div");
-      scrim.className = "settings-scrim";
-      document.body.append(scrim);
-    }
-    const panel = surface.querySelector("#settings-panel"); if (panel.querySelector("#api-key")?.value.trim()) commitSettingsKey();
-    const placement = activeTrigger?.id === "blank-start-setup" ? "center" : "bottom-end";
-    const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
-    popover = openPopover({ trigger: activeTrigger, surface, placement, initialFocus: focusKey && !coarsePointer ? surface.querySelector("#api-key") : surface, onClose: close });
-    // Discovery failures stay in Local settings. The guided dialog opens only
+    wireProviderControl();
+    renderConditionalSections();
+    if (surface.querySelector("#api-key")?.value.trim()) commitSettingsKey();
+    // Discovery failures stay in Model settings. The guided dialog opens only
     // from the explicit Set up Local action rendered for error/empty states.
     if (preset.id === "local") void runLocalDiscovery();
     if (preset.id === "custom_endpoint") void runEndpointDiscovery();
     if (preset.id === "subscriptions") startBridgeStream();
+    return unmountPane;
   }
 
-  function close() {
+  function unmountPane() {
     if (!surface) return;
     disposeConditionalComboboxes();
     lastBridgeRenderKey = "";
-    const old = surface; surface = null;
-    scrim?.remove(); scrim = null;
-    const activePopover = popover; popover = null; activePopover?.close(); old.remove();
-    activeTrigger?.removeAttribute("aria-controls"); activeTrigger?.setAttribute("aria-expanded", "false");
+    surface = null;
     readyCallback = null;
     bridgeRecoveryAgent = "";
     pairingSetupPending = false;
     pairingSetupComplete = null;
     stopBridgeProbe();
+  }
+
+  function open({ focusKey = false, trigger = defaultTrigger, purpose: nextPurpose = "settings", status = "", onReady = null } = {}) {
+    activeTrigger = trigger || defaultTrigger;
+    purpose = nextPurpose;
+    readyCallback = onReady;
+    recoveryStatus = status;
+    lastBridgeRenderKey = "";
+    if (surface) {
+      renderConditionalSections();
+      openSettingsSheet({ section: "model", trigger: activeTrigger });
+      return;
+    }
+    lastKeyCommit = { value: null, result: false };
+    if (purpose === "setup" && !getGenerationSetupStatus(loadSettings()).ready) {
+      localDiscoveryToken += 1;
+      localModels = null; localDiscovery = "idle"; localDiscoveryMessage = "";
+    }
+    const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
+    openSettingsSheet({
+      section: "model",
+      trigger: activeTrigger,
+      initialFocus: () => (focusKey && !coarsePointer ? surface?.querySelector("#api-key") : null),
+    });
+  }
+
+  function close() {
+    if (!surface) return;
+    closeSettingsSheet();
   }
 
   function completeLocalSetup() {
@@ -1403,6 +1407,7 @@ export function createSettingsPopover({
   return {
     open,
     close,
+    mountPane,
     completeLocalSetup,
     isOpen: () => !!surface,
     beginPairingSetup,

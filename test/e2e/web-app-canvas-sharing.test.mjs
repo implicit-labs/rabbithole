@@ -1094,13 +1094,45 @@ async function verifyStandaloneNotesAndEditing() {
     await page.keyboard.press("Control+K");
     await page.waitForSelector("#palette:not([hidden])");
     const commands = await page.locator(".pal-item").evaluateAll((rows) => rows.map((row) => row.querySelector(".pal-title")?.textContent));
-    assert(commands.includes("New note"), "the canvas palette should expose New note");
-    assert(commands.includes("Zoom to fit"), "the canvas palette should expose Zoom to fit");
-    assert(commands.includes("Increase reading size") && commands.includes("Decrease reading size") && commands.includes("Reset reading size"),
-      "the canvas palette should expose the current-node reading-size commands");
+    /* ⌘K holds navigation and actions and nothing else: global preferences live
+       behind the gear, per-card ones in the card ⋯ menu. */
+    assert.deepEqual(commands.slice(-4), ["New note", "Zoom to fit", "Tidy up layout", "Open settings"],
+      `the canvas palette should expose exactly the command set, got ${JSON.stringify(commands)}`);
+    assert.equal(commands.some((name) => /reading size/i.test(name)), false, "reading size is a setting and must not appear in ⌘K");
     const zoomCommand = page.locator(".pal-item", { hasText: "Zoom to fit" });
     assert.equal(await zoomCommand.locator("kbd:visible").count(), 0, "Zoom to fit must not advertise the deleted global F shortcut");
+    /* An absent badge or status flag must leave the layout entirely: a class
+       that sets display beats [hidden], and an empty span still eats its flex
+       gap, so every row wore a blank pill and every title sat a gap off. */
+    const rowPolish = await page.evaluate(() => {
+      const row = [...document.querySelectorAll(".pal-item")].find((item) => {
+        const snippet = item.querySelector(".pal-s");
+        return snippet && !snippet.hidden && !item.querySelector(".lens-badge")?.textContent;
+      });
+      if (!row) return null;
+      const title = row.querySelector(".pal-title").getBoundingClientRect();
+      const snippet = row.querySelector(".pal-s").getBoundingClientRect();
+      const badge = row.querySelector(".lens-badge");
+      return {
+        badgeDisplay: getComputedStyle(badge).display,
+        badgeWidth: badge.getBoundingClientRect().width,
+        titleLeft: title.left,
+        snippetLeft: snippet.left,
+      };
+    });
+    assert(rowPolish, "expected at least one palette node row without a lens badge");
+    assert.equal(rowPolish.badgeDisplay, "none", "an empty lens badge must not render as a blank accent pill");
+    assert.equal(rowPolish.badgeWidth, 0, "a hidden badge must take no space");
+    assert(Math.abs(rowPolish.titleLeft - rowPolish.snippetLeft) < 0.5,
+      `a palette row's title and snippet must share one left edge, off by ${(rowPolish.titleLeft - rowPolish.snippetLeft).toFixed(2)}px`);
+    /* Open settings is a command, and it opens the one settings surface. */
+    await page.fill("#pal-text", "open settings");
+    await page.waitForFunction(() => document.querySelector(".pal-item:not([hidden]) .pal-title")?.textContent === "Open settings");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#settings-sheet");
+    assert.equal(await page.locator("#settings-pane-title").innerText(), "Appearance");
     await page.keyboard.press("Escape");
+    await page.waitForSelector("#settings-sheet", { state: "detached" });
 
     await ensureRailOpen(page);
     const visibleCenter = await page.evaluate(() => {
@@ -2207,73 +2239,85 @@ async function verifyCanvasBranching() {
   });
   assert(Math.abs(toolbarAlignment.settingsTop - toolbarAlignment.themeTop) < 0.5, "settings control should align with toolbar peers");
   assert.equal(toolbarAlignment.settingsHeight, toolbarAlignment.themeHeight, "settings control should match toolbar peer height");
-  const settingsPlacement = await page.evaluate(() => {
-    const button = document.getElementById("t-settings").getBoundingClientRect();
-    const dialog = document.querySelector(".web-settings-dialog").getBoundingClientRect();
-    const styles = getComputedStyle(document.documentElement);
-    const edge = parseFloat(styles.getPropertyValue("--surface-edge"));
-    const gap = parseFloat(styles.getPropertyValue("--surface-gap"));
+  /* Settings is a centered modal sheet, not an anchored popover: fixed 640px
+     width, 176px sidebar, content-driven height, and a scrim you can still read
+     the canvas through while appearance changes land behind it. */
+  const sheetStandard = await page.evaluate(() => {
+    const sheet = document.getElementById("settings-sheet");
+    const scrim = document.getElementById("settings-sheet-scrim");
+    const rect = sheet.getBoundingClientRect();
+    const styles = getComputedStyle(sheet);
+    const scrimStyles = getComputedStyle(scrim);
     return {
-      rightAlignment: Math.abs(dialog.right - button.right),
-      leftEdge: dialog.left,
-      triggerGap: dialog.top - button.bottom,
-      edge,
-      gap,
-      withinViewport: dialog.left >= edge && dialog.right <= innerWidth - edge && dialog.top >= edge && dialog.bottom <= innerHeight - edge,
-    };
-  });
-  assert(settingsPlacement.rightAlignment < 1 || Math.abs(settingsPlacement.leftEdge - settingsPlacement.edge) < 1,
-    `settings panel should anchor to its gear or the safe page edge, right offset ${settingsPlacement.rightAlignment.toFixed(2)}px, left ${settingsPlacement.leftEdge.toFixed(2)}px`);
-  assert(Math.abs(settingsPlacement.triggerGap - settingsPlacement.gap) < 1, `settings panel should use the token gap from its trigger, got ${settingsPlacement.triggerGap.toFixed(2)}px`);
-  assert.equal(settingsPlacement.withinViewport, true, "settings panel should stay within the viewport");
-  await page.evaluate(() => {
-    const trigger = document.getElementById("t-settings");
-    trigger.style.position = "fixed";
-    trigger.style.bottom = "8px";
-    trigger.style.right = "14px";
-    window.dispatchEvent(new Event("resize"));
-  });
-  await page.waitForTimeout(50);
-  const flipped = await page.evaluate(() => {
-    const trigger = document.getElementById("t-settings").getBoundingClientRect();
-    const dialog = document.querySelector(".web-settings-dialog").getBoundingClientRect();
-    const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--surface-gap"));
-    return { placement: document.querySelector(".web-settings-dialog").dataset.placement, gap: trigger.top - dialog.bottom, tokenGap: gap };
-  });
-  assert.equal(flipped.placement, "top-end", "settings should flip above when below-space cannot fit the rendered surface");
-  assert(Math.abs(flipped.gap - flipped.tokenGap) < 1, "flipped settings should preserve the token gap");
-  await page.evaluate(() => {
-    document.getElementById("t-settings").removeAttribute("style");
-    window.dispatchEvent(new Event("resize"));
-  });
-  await page.waitForTimeout(50);
-  const growthBefore = await page.locator(".web-settings-dialog").boundingBox();
-  await page.evaluate(() => {
-    const growth = document.createElement("div");
-    growth.id = "anchor-growth-probe";
-    growth.style.height = "120px";
-    document.getElementById("settings-panel").appendChild(growth);
-  });
-  await page.waitForTimeout(50);
-  const growthAfter = await page.evaluate(() => {
-    const dialog = document.querySelector(".web-settings-dialog").getBoundingClientRect();
-    const edge = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--surface-edge"));
-    return { top: dialog.top, height: dialog.height, bottom: dialog.bottom, limit: innerHeight - edge };
-  });
-  assert(growthAfter.height > growthBefore.height || growthAfter.top < growthBefore.y,
-    "content growth should resize or reposition the measured settings surface");
-  assert(growthAfter.bottom <= growthAfter.limit + 1, "content growth should re-clamp settings within the token edge");
-  await page.evaluate(() => document.getElementById("anchor-growth-probe").remove());
-  const settingsSurfaceStandard = await page.evaluate(() => {
-    const styles = getComputedStyle(document.querySelector(".web-settings-dialog"));
-    return {
-      background: styles.backgroundColor,
-      border: styles.border,
-      radius: styles.borderRadius,
+      width: Math.round(rect.width),
+      sidebar: Math.round(document.querySelector(".settings-sheet-side").getBoundingClientRect().width),
+      offCenterX: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
+      offCenterY: Math.abs((rect.top + rect.bottom) / 2 - innerHeight / 2),
+      height: rect.height,
+      maxHeight: parseFloat(styles.maxHeight),
+      radius: styles.borderTopLeftRadius,
       shadow: styles.boxShadow,
-      backdrop: styles.backdropFilter,
+      role: sheet.getAttribute("role"),
+      modal: sheet.getAttribute("aria-modal"),
+      labelledby: sheet.getAttribute("aria-labelledby"),
+      title: document.getElementById("settings-sheet-title").textContent,
+      scrimBackdrop: scrimStyles.backdropFilter || scrimStyles.webkitBackdropFilter,
+      scrimBackground: scrimStyles.backgroundColor,
+      nav: [...document.querySelectorAll("[data-settings-section]")].map((item) => item.textContent),
+      identity: [...document.querySelectorAll(".settings-sheet-identity span")].map((span) => span.textContent),
+      paneTitle: document.getElementById("settings-pane-title").textContent,
     };
   });
+  assert.equal(sheetStandard.width, 640, "the settings sheet is a fixed 640px column");
+  assert.equal(sheetStandard.sidebar, 176, "the settings sidebar is 176px");
+  assert(sheetStandard.offCenterX < 1 && sheetStandard.offCenterY < 1, `settings should be centered, off by ${sheetStandard.offCenterX},${sheetStandard.offCenterY}px`);
+  assert(sheetStandard.height <= sheetStandard.maxHeight + 1, "the sheet height is content-driven under its ceiling, never fixed");
+  assert.equal(sheetStandard.radius, "12px", "the sheet uses the popover radius token");
+  assert.notEqual(sheetStandard.shadow, "none", "the sheet carries the modal shadow");
+  assert.equal(sheetStandard.role, "dialog");
+  assert.equal(sheetStandard.modal, "true");
+  assert.equal(sheetStandard.labelledby, "settings-sheet-title");
+  assert.equal(sheetStandard.title, "Settings");
+  assert.match(sheetStandard.scrimBackdrop, /blur/, "the scrim blurs the canvas behind it");
+  assert.match(sheetStandard.scrimBackground, /^rgba\(/, "the scrim stays translucent so appearance changes read through");
+  assert.deepEqual(sheetStandard.nav, ["Appearance", "Model"], "the web host registers Model beside the shared Appearance section");
+  assert.deepEqual(sheetStandard.identity, ["Rabbithole", "Web"], "the sidebar footer names the product and the host");
+  assert.equal(sheetStandard.paneTitle, "Appearance", "the gear lands on Appearance");
+  assert.equal(await page.getAttribute("#t-settings", "aria-haspopup"), "dialog");
+
+  // Appearance: three-state theme and a global reading size that composes with
+  // each card's own font scale.
+  assert.deepEqual(await page.locator("[data-theme-choice]").allTextContents(), ["Light", "Dark", "System"]);
+  assert.equal(await page.locator("#settings-reading-size-row .settings-sheet-sub").innerText(), "Scales text in every card.");
+  assert.equal(await page.locator("[data-reading-reset]").isVisible(), false, "Reset appears only when the size is not 100%");
+  await page.click('[data-reading-step="1"]');
+  assert.equal(await page.locator("[data-reading-value]").innerText(), "110%");
+  assert.equal(await page.locator("[data-reading-reset]").isVisible(), true);
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), "1.1", "the global reading size lives in localStorage, never in the hole");
+  await page.click("[data-reading-reset]");
+  assert.equal(await page.locator("[data-reading-value]").innerText(), "100%");
+  await page.click('[data-theme-choice="dark"]');
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-theme")), "dark");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-theme")), "dark");
+  await page.click('[data-theme-choice="system"]');
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-theme")), "system");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "dark");
+  // The taskbar button stays a quick toggle: it always writes an explicit
+  // choice, so pressing it leaves "system" behind.
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  await page.click("#t-theme");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-theme")), "light", "the taskbar toggle leaves system behind");
+  await page.emulateMedia({ colorScheme: null });
+  await page.click("#t-settings");
+  await page.waitForSelector("#settings-sheet");
+  await page.click('[data-settings-section="model"]');
+  assert.equal(await page.locator("#settings-pane-title").innerText(), "Model");
+  await page.waitForSelector("#settings-panel");
+
   const gearOffset = await page.evaluate(() => {
     const button = document.getElementById("t-settings");
     const glyph = button.querySelector("svg");
@@ -2286,6 +2330,7 @@ async function verifyCanvasBranching() {
   });
   assert(Math.abs(gearOffset.dx) < 0.25 && Math.abs(gearOffset.dy) < 0.25,
     `settings gear glyph should be optically centered in its button, off by ${gearOffset.dx.toFixed(2)},${gearOffset.dy.toFixed(2)}px`);
+  await page.waitForFunction(() => /Connected|Stored only in this browser/i.test(document.getElementById("settings-panel")?.innerText || ""));
   assert.match(await page.locator("#settings-panel").innerText(), /Connected|Stored only in this browser/i);
   assert.equal(await page.locator("#model-select").count(), 1, "settings should expose one model picker");
   assert.equal(await page.locator(".settings-advanced").count(), 0, "OpenRouter settings should not duplicate model choices or expose link-relay plumbing");
@@ -2319,29 +2364,35 @@ async function verifyCanvasBranching() {
   await page.waitForSelector("#model-select-listbox");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#model-select-listbox").count(), 0, "first Escape should close only the nested model combobox");
-  assert.equal(await page.locator("#web-settings-popover").getAttribute("hidden"), null, "settings should remain open after its child closes");
+  assert.equal(await page.locator("#settings-sheet").count(), 1, "settings should remain open after its child closes");
   await page.keyboard.press("Escape");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
-  assert.equal(await page.locator("#web-settings-popover").count(), 0, "outside pointer must remove the settings surface from the DOM");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  assert.equal(await page.locator("#settings-sheet").count(), 0, "Escape must remove the settings sheet from the DOM");
   assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "false");
+  assert.equal(await page.getAttribute("#t-settings", "aria-controls"), null, "a closed sheet must not be referenced by the gear");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", "closing settings should restore focus to its trigger");
+  // Esc, the ×, and the scrim all close, and all three hand the gear back.
   await page.click("#t-settings");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
+  assert.equal(await page.getAttribute("#t-settings", "aria-controls"), "settings-sheet", "the gear should point at the live sheet");
+  await page.click("[data-settings-close]");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  await page.waitForTimeout(30);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", "the close button should restore settings focus");
   await page.click("#t-settings");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
-  assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "false", "clicking the gear while settings is open must close it");
-  await page.click("#t-settings");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
   await page.mouse.click(4, 300);
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
   await page.waitForTimeout(30);
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", "outside-pointer close should restore settings focus");
   await page.click("#t-settings");
+  await page.waitForSelector("#settings-sheet");
+  await page.click('[data-settings-section="model"]');
   await page.fill("#api-key", MOCK_KEY);
   await page.press("#api-key", "Enter");
   await page.waitForSelector("#api-key-status.valid");
   await page.keyboard.press("Escape");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
 
   const smokeCode = "console.log('math branch');";
   const markdown = [
@@ -2423,20 +2474,55 @@ async function verifyCanvasBranching() {
   await page.mouse.move(collapseBox.x + 50, collapseBox.y + 40);
   await page.mouse.up();
   assert.deepEqual(await childCard.evaluate((card) => ({ left: card.style.left, top: card.style.top })), childPosition, "card controls should remain excluded from card dragging");
+  /* Per-card text size lives in the card ⋯ menu — the palette holds navigation
+     and actions, never settings. */
   await page.keyboard.press("Control+K");
-  await page.fill("#pal-text", "Increase reading size");
+  await page.fill("#pal-text", "Zoom to fit");
   await page.press("#pal-text", "Enter");
+  await page.waitForSelector("#palette[hidden]", { state: "attached" });
+  await page.locator(".node.root .node-more").click();
+  await page.locator("#cardmenu").locator("#cm-textup").click();
+  await page.keyboard.press("Escape");
   assert.deepEqual(await page.locator(".node").evaluateAll((cards) => cards.map((card) => ({
     root: card.classList.contains("root"), fontSize: parseFloat(getComputedStyle(card.querySelector(".doc-content")).fontSize),
   }))), [{ root: true, fontSize: 15 }, { root: false, fontSize: 14 }],
-  "a reading-size command should update only the current card document");
-  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), null, "per-node reading size should not persist in localStorage");
+  "the card menu should update only that card's document");
+  assert.equal(await page.evaluate(() => Number(localStorage.getItem("rh-reading-scale") ?? 1)), 1, "per-card text size must not move the reader's global preference");
   assert.deepEqual((await page.evaluate(() => window.__rabbitholeTest.exportPortable())).hole.nodes.map((node) => node.font_scale), [1.1, 1],
-    "the reading-size command should rewrite only the current node's font_scale");
+    "the card menu should rewrite only that node's font_scale");
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".node:not(.root)");
   assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 14],
     "the current node's saved font_scale should apply when the Rabbithole reloads");
+
+  /* The global reading size composes with each card's own scale instead of
+     replacing it — effective = base x global x font_scale — and it belongs to
+     the reader, so it never enters the document, the wire, or an export. */
+  await page.click("#t-settings");
+  await page.waitForSelector("#settings-sheet");
+  assert.deepEqual(await page.locator(".settings-sheet-identity span").allTextContents(), ["Rabbithole", "Web"],
+    "an open hole must not relabel the host the sheet already belongs to");
+  await page.click('[data-reading-step="1"]');
+  await page.click('[data-reading-step="1"]');
+  assert.equal(await page.locator("[data-reading-value]").innerText(), "120%");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [18, 17],
+    "a global 120% must compose live with the root card's own 110% (14 x 1.2 x 1.1 = 18, 14 x 1.2 x 1 = 17)");
+  assert.deepEqual((await page.evaluate(() => window.__rabbitholeTest.exportPortable())).hole.nodes.map((node) => node.font_scale), [1.1, 1],
+    "the reader's global size must stay out of the document and its export");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), "1.2");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(".node:not(.root)");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [18, 17],
+    "the global reading size should survive a reload");
+  await page.click("#t-settings");
+  await page.waitForSelector("#settings-sheet");
+  await page.click("[data-reading-reset]");
+  assert.equal(await page.locator("[data-reading-value]").innerText(), "100%");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+
   await page.locator(".node.root .node-more").click();
   await page.locator("#cardmenu").locator("#cm-textreset").click();
   await page.keyboard.press("Escape");
@@ -2546,7 +2632,10 @@ async function verifyCanvasBranching() {
       menuItems: menu.querySelectorAll('[role="menuitem"]').length,
     };
   });
-  assert.deepEqual(shareStandard.surface, settingsSurfaceStandard, "Share and Settings should use the same popover surface standard");
+  assert.equal(shareStandard.surface.radius, "12px", "anchored surfaces share the popover radius token");
+  assert.match(shareStandard.surface.backdrop, /blur\(16px\)/, "anchored surfaces share the popover blur token");
+  assert.match(shareStandard.surface.border, /^1px solid/, "anchored surfaces share the popover border token");
+  assert.notEqual(shareStandard.surface.shadow, "none", "anchored surfaces carry the popover shadow");
   assert(shareStandard.rightAlignment < 1, `Share should anchor to its trigger, off by ${shareStandard.rightAlignment.toFixed(2)}px`);
   assert(Math.abs(shareStandard.triggerGap - shareStandard.tokenGap) < 1, `Share should use the token gap from its trigger, got ${shareStandard.triggerGap.toFixed(2)}px`);
   assert.equal(shareStandard.shellPadding, "6px");

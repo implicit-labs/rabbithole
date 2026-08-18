@@ -58,6 +58,7 @@ async function modernJourney() {
     await page.goto(liveUrl);
     await assertRendered(page, "Select this exact phrase", true);
     await assertCodeCopy(page, { scope: ".doc-content:visible", rawCode: JOURNEY_CODE, click: true, label: "live MCP" });
+    await assertAppearanceOnlySettings(page, "live MCP");
     await selectAndAsk(page, "Select this exact phrase", "Explain the selected phrase");
     const branch = await openPromise;
     assert.equal(branch.status, "branch_request", `modern MCP open result: ${JSON.stringify(branch)}`);
@@ -75,6 +76,9 @@ async function modernJourney() {
       await snapshotPage.setContent(snapshotText, { waitUntil: "load" });
       await assertRendered(snapshotPage, "Select this exact phrase", true);
       await assertCodeCopy(snapshotPage, { scope: ".doc-content:visible", rawCode: JOURNEY_CODE, hover: false, label: "MCP snapshot" });
+      // Appearance is a way of looking, so it survives into a snapshot the same
+      // way collapse does — and nothing about providers ever ships with one.
+      await assertAppearanceOnlySettings(snapshotPage, "frozen snapshot");
     } finally {
       await snapshotPage.close();
     }
@@ -98,6 +102,32 @@ async function modernJourney() {
     await authorContext?.close();
     await mcp.close();
   }
+}
+
+/* Hosts compose sections: the MCP page and a frozen snapshot register none, so
+   both get the shared Appearance section and nothing else. */
+async function assertAppearanceOnlySettings(page, label) {
+  assert.equal(await page.getAttribute("#t-settings", "aria-haspopup"), "dialog", `${label}: the gear should announce a dialog`);
+  await page.click("#t-settings");
+  await page.waitForSelector("#settings-sheet");
+  assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance"],
+    `${label}: a host that registers nothing should get Appearance and only Appearance`);
+  assert.deepEqual(await page.locator(".settings-sheet-identity span").allTextContents(), ["Rabbithole", "Local"],
+    `${label}: the sidebar footer should name the product and the host`);
+  assert.equal(await page.locator("#settings-panel, .provider-list, #api-key").count(), 0,
+    `${label}: no provider code path may reach a host that never registered Model`);
+  assert.deepEqual(await page.locator("[data-theme-choice]").allTextContents(), ["Light", "Dark", "System"],
+    `${label}: theme should be a three-state choice`);
+  await page.click('[data-theme-choice="dark"]');
+  assert.equal(await page.evaluate(() => document.documentElement.getAttribute("data-theme")), "dark", `${label}: theme should apply live`);
+  await page.click('[data-reading-step="1"]');
+  assert.equal(await page.locator("[data-reading-value]").innerText(), "110%", `${label}: reading size should step`);
+  assert.equal(await page.locator(".doc-content").first().evaluate((doc) => parseFloat(getComputedStyle(doc).fontSize)) >= 15, true,
+    `${label}: the global reading size should reach the cards`);
+  await page.click("[data-reading-reset]");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", `${label}: closing should restore focus to the gear`);
 }
 
 async function resumePortableOverMcp(text, prefix, title, rootMarkdown, branchMarkdown) {

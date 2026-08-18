@@ -57,7 +57,7 @@ async function openSettingsOnCustom(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForSelector("#blank-start:not([hidden])");
   await page.click("#blank-start-setup");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
   await clickCustomEndpointMode(page);
   await page.waitForSelector("#provider-base");
 }
@@ -212,7 +212,7 @@ async function verifyGenerationSendsTheKey() {
     await page.fill("#api-key", KEY);
     await page.waitForSelector("#endpoint-status.valid");
     await page.click("#complete-model-setup");
-    await page.waitForSelector("#web-settings-popover", { state: "detached" });
+    await page.waitForSelector("#settings-sheet", { state: "detached" });
 
     assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "finishing setup should unlock the app");
     await page.click("#blank-start-new");

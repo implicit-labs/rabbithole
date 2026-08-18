@@ -77,11 +77,12 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await assertShellPolish(page);
   await page.click("#t-settings");
+  await page.click('[data-settings-section="model"]');
   await page.fill("#api-key", MOCK_KEY);
   await page.press("#api-key", "Enter");
   await page.waitForSelector("#api-key-status.valid");
   await page.click("#complete-model-setup");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
 
   await page.evaluate(() => window.__rabbitholeTest.createDocument(
     "# Author Check\n\nraw notes about a streamed authoring pass",
@@ -167,6 +168,7 @@ async function assertShellPolish(page) {
   assert.equal(await page.locator("#taskbar #t-new").count(), 1, "new Rabbithole button should live in the toolbar");
   assert.equal(await page.locator(".composer-path").count(), 4, "new Rabbithole should present four clear starting paths");
   await page.click("#t-settings");
+  await page.click('[data-settings-section="model"]');
   const keyLinkCount = await page.locator(`a[href="${"https://openrouter.ai/keys"}"]`).count();
   assert.equal(keyLinkCount, 1, "OpenRouter key link should appear exactly once in settings");
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
@@ -183,7 +185,7 @@ async function assertShellPolish(page) {
   await page.click('[data-provider="openrouter"]');
   assert.equal(await page.locator(".settings-advanced").count(), 0, "OpenRouter should not duplicate model choices or expose link-relay plumbing");
   await page.keyboard.press("Escape");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
 }
 
 async function waitForCanvasText(page, text) {

@@ -3,6 +3,7 @@ import { BUNNY_MARK_SVG } from "../core/html/icons.js";
 import { createCleanupScope } from "./lifecycle.js";
 import { mountVisuals } from "./visuals.js";
 import { mountCodeCopy } from "./code-copy.js";
+import { onPreferenceChange, readingScale, toggleTheme } from "./preferences.js";
 
 export var SVGNS = "http://www.w3.org/2000/svg";
 export var MIN_SCALE = 0.15, MAX_SCALE = 2.5;
@@ -128,7 +129,10 @@ export function initCore(inputHydration) {
   // Session-level chrome is wired once here — it lives in the shared taskbar
   // and stays put whichever mode is up.
   coreScope.listen(document.getElementById("tb-done"), "click", function(){ if (!closed) coreHooks.post({ type: "done" }); });
-  coreScope.listen(document.getElementById("t-theme"), "click", toggleTheme);
+  coreScope.listen(document.getElementById("t-theme"), "click", function(){ toggleTheme(); });
+  coreScope.addCleanup(onPreferenceChange(function(kind){
+    if (kind === "reading-scale") refreshDocumentTextSizes();
+  }));
   coreScope.interval(updateLoadingTimers, 1000);
   coreScope.addCleanup(function(){
     hintNotice?.hide();
@@ -253,10 +257,28 @@ export function isVisible(node, cache){
     }
     return visible;
   }
-export function fontPx(base, scale){ return Math.round(base * normalizeFontScale(scale)); }
+/*
+ * Two scales compose here and neither replaces the other. The global reading
+ * size belongs to the reader (eyes, monitor) and lives in localStorage; the
+ * per-node font_scale is authorial and lives in the document. Effective size =
+ * base × global × font_scale.
+ */
+export function fontPx(base, scale){ return Math.round(base * readingScale() * normalizeFontScale(scale)); }
 function normalizeFontScale(value){
     if (!Number.isFinite(value)) return 1;
-    return Math.round(Math.min(MAX_FS, Math.max(MIN_FS, value)) * 10) / 10;
+    return Math.round(Math.min(MAX_FS, Math.max(MIN_FS, value)) * 100) / 100;
+  }
+// The global scale changed under every card at once — repaint the sizes the
+// document itself never knew about.
+export function refreshDocumentTextSizes(){
+    var surfaces = document.querySelectorAll(".doc-content, .note-editor");
+    for (var i = 0; i < surfaces.length; i++){
+      var surface = surfaces[i];
+      var node = nodes[surface.dataset.nodeId];
+      var base = surface.dataset.surface === "reader" ? READER_BASE : CANVAS_BASE;
+      surface.style.fontSize = fontPx(base, node ? node.font_scale : 1) + "px";
+    }
+    coreHooks.scheduleEdges();
   }
 export function setNodeFontScale(node, value){
     if (!node) return 1;
@@ -487,13 +509,6 @@ export function buildDocContent(node, base){
     }
     return dc;
   }
-
-function toggleTheme(){
-  var cur = document.documentElement.getAttribute("data-theme");
-  var next = cur === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem("rh-theme", next); } catch(e){}
-}
 
 export function flashHint(msg){
   hintNotice.show({ message: msg, duration: 4000 });

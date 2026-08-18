@@ -60,8 +60,8 @@ async function verifyReducedMotionOverlays() {
     assert.equal(await page.locator(".node.root").evaluate((node) => getComputedStyle(node).opacity), "1", "reduced motion should render the generated root without an entrance transition");
 
     await page.click("#t-settings");
-    await page.waitForSelector("#web-settings-popover");
-    assert.equal(await page.locator("#web-settings-popover").evaluate((popover) => getComputedStyle(popover).opacity), "1", "reduced motion should leave settings usable when its entrance animation is disabled");
+    await page.waitForSelector("#settings-sheet");
+    assert.equal(await page.locator("#settings-sheet").evaluate((popover) => getComputedStyle(popover).opacity), "1", "reduced motion should leave settings usable when its entrance animation is disabled");
   } finally {
     await context.close();
   }
@@ -99,7 +99,7 @@ async function verifyExistingWebUserUpgrade() {
     await page.route(LOCAL_VERSION_URL, (route) => route.abort());
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.click("#blank-start-setup");
-    await page.waitForSelector("#web-settings-popover");
+    await page.waitForSelector("#settings-sheet");
     await page.waitForTimeout(180);
 
     assert.equal(localModelRequests, 1, "opening setup should probe the explicitly chosen Local provider");
@@ -189,9 +189,9 @@ async function verifyMobileSetupExperience() {
     await page.keyboard.press("Escape");
     await page.waitForSelector("#project-menu[hidden]", { state: "attached" });
     await page.click("#blank-start-setup");
-    await page.waitForSelector("#web-settings-popover");
+    await page.waitForSelector("#settings-sheet");
 
-    const initial = await page.locator("#web-settings-popover").evaluate((surface) => {
+    const initial = await page.locator("#settings-sheet").evaluate((surface) => {
       const input = document.getElementById("api-key");
       const rect = surface.getBoundingClientRect();
       const inputRect = input.getBoundingClientRect();
@@ -227,14 +227,15 @@ async function verifyMobileSetupExperience() {
 
     await page.setViewportSize({ width: 390, height: 430 });
     await page.waitForFunction(() => {
-      const surface = document.getElementById("web-settings-popover");
+      const surface = document.getElementById("settings-sheet");
       const viewport = window.visualViewport;
       return surface && viewport && surface.getBoundingClientRect().height <= viewport.height - 15;
     });
-    const keyboardSized = await page.locator("#web-settings-popover").evaluate((surface) => {
+    const keyboardSized = await page.locator("#settings-sheet").evaluate((surface) => {
       const rect = surface.getBoundingClientRect();
       const viewport = window.visualViewport;
-      return { top: rect.top, bottom: rect.bottom, viewportTop: viewport.offsetTop, viewportBottom: viewport.offsetTop + viewport.height, scrollable: surface.scrollHeight > surface.clientHeight };
+      const body = document.getElementById("settings-pane-body");
+      return { top: rect.top, bottom: rect.bottom, viewportTop: viewport.offsetTop, viewportBottom: viewport.offsetTop + viewport.height, scrollable: body.scrollHeight > body.clientHeight };
     });
     assert(keyboardSized.top >= keyboardSized.viewportTop && keyboardSized.bottom <= keyboardSized.viewportBottom, `setup surface must remain reachable when the keyboard shrinks the visual viewport (${JSON.stringify(keyboardSized)})`);
     assert.equal(keyboardSized.scrollable, true, "keyboard-sized setup should scroll internally instead of escaping the viewport");
@@ -328,7 +329,7 @@ async function verifyLandingAndComposer() {
     transitionDelay: getComputedStyle(tooltip).transitionDelay,
   })), { role: "tooltip", opacity: "1", visibility: "visible", transitionDuration: "0s", transitionDelay: "0s" }, "New Rabbithole setup guidance should appear immediately as a tooltip");
   await page.click("#blank-start-new");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
   assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true", "setup should select OpenRouter by default");
   assert.equal(await page.locator("#api-key").count(), 1, "setup should open the full OpenRouter form immediately");
@@ -340,7 +341,7 @@ async function verifyLandingAndComposer() {
   await page.waitForSelector("#api-key-status.valid");
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "New Rabbithole should stay actionable while setup awaits explicit completion");
   await page.click("#complete-model-setup");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false);
   assert.equal(await page.locator("#blank-start-setup").innerText(), "Model settings");
   assert.equal(await page.locator("#blank-start-status").isVisible(), false, "setup tooltip should stay hidden once creation is enabled");
@@ -999,7 +1000,7 @@ async function verifySubscriptionsPanelStates() {
 
     // Clicking the pairing link is the setup: the panel opens by itself on the
     // live bridge state instead of leaving the user on a silent blank canvas.
-    await page.waitForSelector("#web-settings-popover");
+    await page.waitForSelector("#settings-sheet");
     assert.equal(await page.getAttribute('[data-provider="claude"]', "aria-checked"), "true", "the auto-opened panel lands on the paired provider's agent row");
     await pushBridgeState(page, bridgeStateFixture("starting"));
     await page.waitForSelector('.bridge-surface[data-state="starting"]');
@@ -1192,7 +1193,7 @@ async function verifySubscriptionsPanelStates() {
       { text: "# Subscription root\n\nRetried with the fresh catalog." },
     ), bridgeStateFixture("ready", "ready", { claude: { includeOpus: false } }));
     await page.click("#complete-model-setup");
-    await page.waitForSelector("#web-settings-popover", { state: "detached" });
+    await page.waitForSelector("#settings-sheet", { state: "detached" });
     await page.click("#blank-start-new");
     await page.waitForSelector("#composer-modal:not([hidden])");
     await page.click("#composer-path-ask");
@@ -1223,13 +1224,13 @@ async function verifyCrossTabPairing() {
     await pageA.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await pageA.waitForSelector("#blank-start:not([hidden])");
     await pageA.click("#blank-start-setup");
-    await pageA.waitForSelector("#web-settings-popover");
+    await pageA.waitForSelector("#settings-sheet");
     await pageA.click('[data-provider="claude"]');
     await pageA.waitForSelector('.bridge-surface[data-state="re_pair"]');
 
     const pageB = await context.newPage();
     await pageB.goto(`${baseUrl}/#bridge=linked-token`, { waitUntil: "domcontentloaded" });
-    await pageB.waitForSelector("#web-settings-popover");
+    await pageB.waitForSelector("#settings-sheet");
 
     await pageA.waitForSelector('.bridge-surface[data-state="starting"], .bridge-surface[data-state="ready"]', { timeout: 5_000 });
     assert.equal(
@@ -1247,17 +1248,19 @@ async function openFreshSettings(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.keyboard.press("Escape");
   await page.click("#t-settings");
-  await page.waitForSelector("#web-settings-popover");
-  assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "true", "settings trigger must expose the open popover state");
-  assert.equal(await page.getAttribute("#t-settings", "aria-controls"), "web-settings-popover", "settings trigger must control only the live surface");
+  await page.waitForSelector("#settings-sheet");
+  assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "true", "settings trigger must expose the open sheet state");
+  assert.equal(await page.getAttribute("#t-settings", "aria-controls"), "settings-sheet", "settings trigger must control only the live surface");
+  await page.click('[data-settings-section="model"]');
+  await page.waitForSelector("#settings-panel");
 }
 
 async function openFreshSetup(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.click("#blank-start-setup");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
   assert.equal(await page.getAttribute("#blank-start-setup", "aria-expanded"), "true", "setup trigger must expose the open first-run surface");
-  assert.equal(await page.getAttribute("#blank-start-setup", "aria-controls"), "web-settings-popover", "setup trigger must control only the live surface");
+  assert.equal(await page.getAttribute("#blank-start-setup", "aria-controls"), "settings-sheet", "setup trigger must control only the live surface");
 }
 
 async function switchSettingsToLocal(page) {
@@ -1292,7 +1295,7 @@ async function verifyAskKeyUxAndRail() {
   await page.fill("#api-key", MOCK_KEY);
   await page.waitForSelector("#api-key-status.valid");
   await page.click("#complete-model-setup");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
   await page.click("#blank-start-new");
   await page.click("#composer-path-ask");
   await page.fill("#composer-input", "Explain the attention mechanism");
@@ -1427,10 +1430,12 @@ async function verifyAskKeyUxAndRail() {
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
   await page.click("#t-settings");
-  await page.waitForSelector("#web-settings-popover");
+  await page.waitForSelector("#settings-sheet");
+  await page.click('[data-settings-section="model"]');
+  await page.waitForSelector("#settings-panel");
   await page.waitForFunction(() => {
-    const popover = document.getElementById("web-settings-popover");
-    return popover && !popover.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
+    const sheet = document.getElementById("settings-sheet");
+    return sheet && !sheet.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
   }, null, { timeout: 5000 });
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
   assert.equal(await page.locator(".settings-section").first().getAttribute("class"), "settings-section provider-list-section", "provider should be the first settings decision");
@@ -1480,8 +1485,8 @@ async function verifyAskKeyUxAndRail() {
   assert.equal(pickedSettings.model, "openai/gpt-5", "model pick should apply instantly, no save button");
   assert.equal(pickedSettings.model, "openai/gpt-5", "one model choice should drive authoring too");
   await page.keyboard.press("Escape");
-  await page.waitForSelector("#web-settings-popover", { state: "detached" });
-  assert.equal(await page.locator("#web-settings-popover").count(), 0, "Escape must remove the settings surface from the DOM");
+  await page.waitForSelector("#settings-sheet", { state: "detached" });
+  assert.equal(await page.locator("#settings-sheet").count(), 0, "Escape must remove the settings surface from the DOM");
   assert.equal(await page.getAttribute("#t-settings", "aria-expanded"), "false", "settings trigger must expose the closed state");
   assert.equal(await page.getAttribute("#t-settings", "aria-controls"), null, "closed settings must not reference a dead surface");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", "settings Escape should restore its trigger after the Select child closes first");
@@ -1501,7 +1506,7 @@ async function verifyAskKeyUxAndRail() {
   await sessionPage.fill("#api-key", MOCK_KEY);
   await sessionPage.waitForSelector("#api-key-status.valid");
   await sessionPage.click("#complete-model-setup");
-  await sessionPage.waitForSelector("#web-settings-popover", { state: "detached" });
+  await sessionPage.waitForSelector("#settings-sheet", { state: "detached" });
   await sessionPage.click("#blank-start-new");
   await sessionPage.click("#composer-path-ask");
   await sessionPage.fill("#composer-input", "Check session-only storage");

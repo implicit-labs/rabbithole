@@ -33,8 +33,10 @@ export const CANVAS_SHELL = `
          reader is the current card maximized. You enter by expanding a card
          and leave through Back to canvas in the session cluster (or Esc). -->
     <span class="tb-group" data-mode="reader">
-      ${buttonMarkup({ id: "r-textdown", title: "Decrease reading size", ariaLabel: "Decrease reading size", label: "A−" })}
-      ${buttonMarkup({ id: "r-textup", title: "Increase reading size", ariaLabel: "Increase reading size", label: "A+" })}
+      <!-- Per-card, like the ⋯ menu's Text size stepper. "Reading size" now
+           names the global scale that lives behind the gear. -->
+      ${buttonMarkup({ id: "r-textdown", title: "Decrease text size", ariaLabel: "Decrease text size", label: "A−" })}
+      ${buttonMarkup({ id: "r-textup", title: "Increase text size", ariaLabel: "Increase text size", label: "A+" })}
     </span>
     <span class="tb-group" data-mode="canvas">
       <span class="zoom-controls">
@@ -57,7 +59,9 @@ export const CANVAS_SHELL = `
     <span class="sep" id="context-usage-sep" hidden aria-hidden="true"></span>
     ${iconButtonMarkup({ id: "t-share", title: "Share and export", ariaLabel: "Share and export", ariaHaspopup: "menu", ariaControls: "sharemenu", ariaExpanded: "false", svgIconHtml: iconSvg("share") })}
     ${iconButtonMarkup({ id: "t-theme", title: "Toggle theme", ariaLabel: "Toggle theme", svgIconHtml: iconSvg("theme") })}
-    ${iconButtonMarkup({ id: "t-settings", title: "Model settings", ariaLabel: "Model settings", ariaExpanded: "false", svgIconHtml: iconSvg("settings") })}
+    <!-- The gear holds global preferences in every host: appearance always,
+         plus whatever the host registers (the web app adds Model). -->
+    ${iconButtonMarkup({ id: "t-settings", title: "Settings", ariaLabel: "Settings", ariaHaspopup: "dialog", ariaExpanded: "false", svgIconHtml: iconSvg("settings") })}
     </div>
     <div class="tb-pill" id="tb-done-pill">
       ${buttonMarkup({ id: "tb-done", title: "End the session (the hole stays saved)", label: "Done" })}

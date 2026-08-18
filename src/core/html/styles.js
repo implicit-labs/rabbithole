@@ -621,6 +621,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .pal-t .pal-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pal-kbd { margin-left: auto; line-height: 1.4; flex-shrink: 0; }
 .pal-t .lens-badge { flex-shrink: 0; }
+/* A row's badge, shortcut, and status flag are optional. A class that sets
+   display beats the hidden attribute, and an empty span still eats its share
+   of the flex gap — so an absent part must leave the layout entirely, or every
+   row wears a blank pill and every title sits a phantom gap off the snippet. */
+.pal-t > [hidden], .pal-t > :empty { display: none; }
 .pal-t .pal-writing { flex-shrink: 0; font-size: 10.5px; color: var(--accent); font-weight: 500; }
 .pal-s { font-size: 11.5px; color: var(--fg-dim); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-s mark { background: none; color: var(--fg-bold); font-weight: 600; }
@@ -652,6 +657,104 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .cm-text-btn:hover { background: var(--hl); color: var(--fg-bold); }
 .cm-text-btn:focus-visible, .sm-item:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .cm-text-value { min-width: 44px; color: var(--fg); }
+
+/* ---------- settings sheet ---------- */
+/* One surface for every global preference: the gear holds what is true of the
+   whole app, the card ⋯ menu holds what is true of one card. The scrim stays
+   deliberately translucent — a theme or reading-size change has to be visible
+   on the canvas behind it, while the sheet is still open. */
+.settings-sheet-scrim { position: fixed; inset: 0; z-index: var(--layer-settings); display: grid; place-items: center;
+  padding: var(--space-10); background: var(--scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  animation: settings-sheet-scrim-in var(--duration-enter) var(--ease-out) both; }
+.settings-sheet-scrim[hidden] { display: none; }
+.settings-sheet-scrim.closing { pointer-events: none; animation: settings-sheet-scrim-out var(--duration-fast) var(--ease-standard) both; }
+@keyframes settings-sheet-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes settings-sheet-scrim-out { from { opacity: 1; } to { opacity: 0; } }
+/* Height is content-driven: an Appearance-only sheet shrinks to fit rather
+   than opening a void under two rows. */
+.settings-sheet { display: grid; grid-template-columns: 176px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: min(640px, 100%);
+  max-height: min(560px, 100dvh - 96px); min-height: 0; overflow: hidden; outline: none;
+  border: 1px solid color-mix(in srgb, var(--border-focus) 58%, var(--border)); border-radius: var(--radius-popover);
+  background: color-mix(in srgb, var(--node-bg) 96%, var(--bg)); box-shadow: var(--shadow-modal);
+  font-family: var(--font-ui); color: var(--fg);
+  animation: settings-sheet-in var(--duration-enter) var(--ease-out) both; }
+.settings-sheet-scrim.closing .settings-sheet { animation: settings-sheet-out var(--duration-fast) var(--ease-standard) both; }
+@keyframes settings-sheet-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: scale(1); } }
+@keyframes settings-sheet-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.99); } }
+.settings-sheet-side { display: flex; flex-direction: column; min-height: 0; padding: var(--space-7) var(--space-5) var(--space-6);
+  border-right: 1px solid var(--border); background: color-mix(in srgb, var(--bar-bg) 55%, transparent); }
+.settings-sheet-title { margin: 0 0 var(--space-5); padding-inline: var(--space-3); color: var(--fg-bold);
+  font: var(--weight-bold) 15px/1.2 var(--font-ui); letter-spacing: -0.01em; }
+.settings-nav { display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; overflow: auto; }
+.settings-nav-item { appearance: none; display: flex; align-items: center; height: 32px; padding: 0 var(--space-3); border: 0;
+  border-radius: var(--radius-control); background: none; color: var(--fg-dim);
+  font: var(--weight-medium) var(--text-body)/1 var(--font-ui); text-align: left; cursor: pointer; transition: var(--transition-color); }
+.settings-nav-item:hover { color: var(--fg-bold); background: var(--hl); }
+.settings-nav-item[aria-selected="true"] { color: var(--fg-bold); background: var(--hl); }
+/* Quiet identity, pinned low: the sidebar keeps its job even with one item. */
+.settings-sheet-identity { display: flex; flex-direction: column; margin-top: auto; padding: var(--space-9) var(--space-3) 0;
+  color: var(--fg-faint); font-size: var(--text-sm); line-height: var(--leading-ui); }
+.settings-sheet-identity span:first-child { color: var(--fg-dim); font-weight: var(--weight-medium); }
+.settings-sheet-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+.settings-pane-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6);
+  padding: var(--space-7) var(--space-6) var(--space-6) var(--space-9); border-bottom: 1px solid var(--border); }
+.settings-pane-title { margin: 0; color: var(--fg-bold); font: var(--weight-semibold) var(--text-title)/1.2 var(--font-ui); letter-spacing: -0.015em; }
+.settings-sheet-close { appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-h-xs); height: var(--control-h-xs); border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--fg-dim); cursor: pointer; transition: var(--transition-color); }
+.settings-sheet-close:hover { color: var(--fg-bold); background: var(--hl); }
+.settings-sheet-close svg { display: block; width: 16px; height: 16px; }
+.settings-pane-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-9) var(--space-9); }
+/* Space groups rows; lines only ever separate sections. */
+.settings-sheet-section { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5) 0; }
+.settings-sheet-section + .settings-sheet-section { border-top: 1px solid var(--border); margin-top: var(--space-5); }
+.settings-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); min-height: 40px; }
+.settings-sheet-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.settings-sheet-label { color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-medium); }
+.settings-sheet-sub { color: var(--fg-faint); font-size: var(--text-ui); line-height: var(--leading-ui); }
+.settings-sheet-control { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.settings-segmented { display: inline-flex; gap: 2px; padding: 2px; border: var(--border-default);
+  border-radius: var(--radius-control-lg); background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.settings-segment { appearance: none; min-width: 56px; height: var(--control-h-xs); padding: 0 var(--space-4); border: 0;
+  border-radius: var(--radius-control); background: none; color: var(--fg-dim);
+  font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
+.settings-segment:hover { color: var(--fg-bold); }
+.settings-segment[aria-checked="true"] { color: var(--fg-bold); background: var(--node-head); box-shadow: 0 1px 2px rgba(0, 0, 0, .16); }
+.settings-stepper { display: inline-flex; align-items: center; gap: var(--space-1); }
+.settings-step { appearance: none; min-width: var(--control-h-xs); height: var(--control-h-xs); padding: 0 var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: none; color: var(--fg-dim);
+  font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
+.settings-step:hover:not(:disabled) { color: var(--fg-bold); background: var(--hl); }
+.settings-step:disabled { opacity: .4; cursor: default; }
+.settings-step-value { min-width: 46px; text-align: center; color: var(--fg); font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
+/* Reset earns its place only while there is something to reset. */
+.settings-reset { appearance: none; height: var(--control-h-xs); margin-left: var(--space-3); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: none; color: var(--accent);
+  font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; }
+.settings-reset[hidden] { display: none; }
+.settings-reset:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.settings-nav-item:focus-visible, .settings-sheet-close:focus-visible, .settings-segment:focus-visible,
+.settings-step:focus-visible, .settings-reset:focus-visible, .settings-pane-body:focus-visible {
+  outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+@media (max-width: 760px) {
+  .settings-sheet-scrim { padding: var(--space-6); }
+  .settings-sheet { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); max-height: min(560px, 100dvh - 48px); }
+  .settings-sheet-side { flex-direction: row; align-items: center; gap: var(--space-6); padding: var(--space-5) var(--space-6);
+    border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-sheet-title { margin: 0; padding-inline: 0; }
+  .settings-nav { flex-direction: row; overflow-x: auto; }
+  .settings-sheet-identity { display: none; }
+  .settings-pane-head { padding: var(--space-6); }
+  .settings-pane-body { padding: 0 var(--space-6) var(--space-7); }
+  .settings-sheet-row { gap: var(--space-5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-sheet-scrim, .settings-sheet, .settings-sheet-scrim.closing, .settings-sheet-scrim.closing .settings-sheet { animation: none; }
+}
+/* A palette swap must land in one frame; animating every colour through it
+   smears the whole page. */
+html.theme-swapping, html.theme-swapping *, html.theme-swapping *::before, html.theme-swapping *::after {
+  transition: none !important; }
 
 /* ---------- branch undo toast ---------- */
 /* The hint pill's interactive sibling: same bottom-center station, same glass

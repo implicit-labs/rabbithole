@@ -9,6 +9,8 @@ import { setMode, tidy } from "./canvas-view.js";
 import { togglePalette } from "./palette.js";
 import { hydrateInitialState } from "./hydrate.js";
 import { createCleanupScope } from "./lifecycle.js";
+import { applyTheme } from "./preferences.js";
+import { isSettingsSheetOpen } from "./settings-sheet.js";
 
 var chromeScope = null;
 
@@ -81,6 +83,7 @@ function onGlobalKeydown(e){
 function overlayOpen(){
   var palette = document.getElementById("palette");
   if (palette && !palette.hidden) return true;
+  if (isSettingsSheetOpen()) return true;
   var surfaces = ["ask", "sharemenu", "cardmenu"];
   for (var i = 0; i < surfaces.length; i++){
     var el = document.getElementById(surfaces[i]);
@@ -89,11 +92,8 @@ function overlayOpen(){
   return false;
 }
 
-  // A saved choice wins; otherwise the page follows the system preference.
+  // An explicit light/dark choice wins; otherwise the page follows the system
+  // preference and keeps following it while it stays on "system".
 function applyInitialTheme(){
-  try {
-    var savedTheme = localStorage.getItem("rh-theme");
-    if (!savedTheme && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) savedTheme = "dark";
-    if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
-  } catch(e){}
+  try { applyTheme(); } catch(e){}
 }

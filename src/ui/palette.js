@@ -1,20 +1,17 @@
 import {
-  changeNodeFontScale,
-  currentNodeId,
-  flashHint,
   goToNode,
   mode,
   motionSourceFromEvent,
   nodes,
   palResults,
   palText,
-  paletteEl,
-  resetNodeFontScale
+  paletteEl
 } from "./core.js";
 import { lensLabel, truncate } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
 import { createStandaloneNoteAtViewportCenter, frameAll, tidy } from "./canvas-view.js";
 import { openDialog } from "./primitives/dialog.js";
+import { openSettingsSheet } from "./settings-sheet.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { ensureNodeHtml } from "./renderer.js";
 import { isCommandEnter } from "./input-intent.js";
@@ -211,11 +208,11 @@ function closePalette(settings){
     if (palRows[palSel] && !palRows[palSel].hidden) palText.setAttribute("aria-activedescendant", palRows[palSel].id);
     else palText.removeAttribute("aria-activedescendant");
   }
+  // ⌘K is navigation and actions. Settings — global or per-card — are never
+  // here: the gear holds the first, the card ⋯ menu holds the second.
   function paletteCommandItems(tokens){
     var commands = [
-      { type: "command", name: "Increase reading size", run: function(){ showReadingSize(changeNodeFontScale(nodes[currentNodeId], 0.1)); } },
-      { type: "command", name: "Decrease reading size", run: function(){ showReadingSize(changeNodeFontScale(nodes[currentNodeId], -0.1)); } },
-      { type: "command", name: "Reset reading size", run: function(){ showReadingSize(resetNodeFontScale(nodes[currentNodeId])); } }
+      { type: "command", name: "Open settings", run: function(){ openSettingsSheet({ trigger: document.getElementById("t-settings") }); } }
     ];
     if (palCanvasCommands) commands.unshift(
       { type: "command", name: "New note", run: createStandaloneNoteAtViewportCenter },
@@ -234,7 +231,6 @@ function closePalette(settings){
     }
     return out;
   }
-  function showReadingSize(scale){ flashHint("Reading size " + Math.round(scale * 100) + "%"); }
   function palSnippet(n, tokens){
     var body = getPlain(n);
     var lower = body.toLowerCase();

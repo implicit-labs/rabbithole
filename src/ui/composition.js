@@ -31,6 +31,7 @@ import {
   registerBranchHooks
 } from "./branch-surfaces.js";
 import { disposeChrome, initChrome } from "./chrome-init.js";
+import { closeSettingsSheet, initSettingsSheet } from "./settings-sheet.js";
 import { ensureNodeHtml, setRendererAssetData } from "./renderer.js";
 
 var activeRuntime = null;
@@ -106,6 +107,12 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       exportSnapshot: capabilities.exportSnapshot || null,
       exportPortable: capabilities.exportPortable || null
     });
+
+    /* The gear lives in the shared taskbar, which outlives any one hole: the
+       sheet binds once per host and every hole simply re-confirms it. Sections
+       are data — a host that registers none still gets Appearance. */
+    initSettingsSheet({ hostLabel: capabilities.settingsHostLabel });
+    own(function(){ closeSettingsSheet({ restoreFocus: false }); });
 
     initReader(); own(disposeReader);
     initCanvasView(); own(disposeCanvasView);
