@@ -16,7 +16,7 @@ import { iconSvg } from "./icons.js";
  * @param {string} prefix
  */
 function collapseGroupMarkup(/** @type {string} */ prefix) {
-  const row = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ icon) => buttonMarkup({ bare: true, className: "sm-item", id: prefix + id, role: "menuitem", tabIndex: -1,
+  const row = (/** @type {string} */ id, /** @type {string} */ label, /** @type {Parameters<typeof iconSvg>[0]} */ icon) => buttonMarkup({ bare: true, className: "sm-item", id: prefix + id, role: "menuitem", tabIndex: -1,
     label: label, labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg(icon) + '</span>' });
   return row("collapse", "Collapse", "fold-self") + row("collapse-branch", "Collapse branch", "fold-branch")
     + row("collapse-children", "Collapse children", "fold-children");
