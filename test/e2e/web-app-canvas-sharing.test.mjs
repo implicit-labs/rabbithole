@@ -762,6 +762,32 @@ async function verifyDockedNotes() {
       return hole.nodes.find((node) => node.markdown === markdown).id;
     }
 
+    // The unadvertised power chord keeps the pre-docking outcome: one note
+    // born with geometry and a standard parent edge, never a transient dot.
+    await selectText(page, "this document");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "A directly placed selection note");
+    assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
+      chips: Array.from(surface.querySelectorAll("kbd")).map((chip) => chip.textContent),
+      commitKinds: Array.from(surface.querySelectorAll("[data-commit]")).map((button) => button.dataset.commit),
+      advertisesShift: Array.from(surface.querySelectorAll("button")).some((button) => /shift|⇧/i.test(button.title + button.textContent)),
+    })), { chips: ["1", "2", "3", "4", "↵", "⌘↵"], commitKinds: ["note", "ask"], advertisesShift: false },
+    "the selection composer must not advertise the direct-placement chord");
+    await page.press("#ask-text", "Control+Shift+Enter");
+    const directPlaced = page.locator(".node-note", { hasText: "A directly placed selection note" });
+    await directPlaced.waitFor();
+    const directPlacedId = await directPlaced.getAttribute("data-id");
+    const directStored = await waitForStoredHole(page, (hole) => {
+      const note = hole.nodes.find((node) => node.id === directPlacedId);
+      return note?.position && note?.size && !note.extensions?.note?.docked;
+    }, "the power-chord note to persist with geometry").then((hole) => hole.nodes.find((node) => node.id === directPlacedId));
+    assert.deepEqual({ docked: directStored.extensions?.note?.docked ?? false, size: directStored.size,
+      edge: await page.locator(`#edges path[data-child="${directPlacedId}"]`).count(),
+      dot: await page.locator(`.note-dot[data-note="${directPlacedId}"]`).count(),
+      selected: directStored.origin.selected_text },
+    { docked: false, size: { w: 420, h: 460 }, edge: 1, dot: 0, selected: "this document" },
+    "Cmd/Ctrl+Shift+Enter should create a placed note window with its parent edge in one commit");
+
     const firstId = await dockNote("first anchor", "The first docked note");
     const secondId = await dockNote("second anchor", "The second docked note");
 
@@ -770,27 +796,65 @@ async function verifyDockedNotes() {
     const column = await page.locator(".node.root .note-dot").evaluateAll((dots) => dots.map((dot) => {
       const box = dot.getBoundingClientRect();
       const mark = document.querySelector(`mark[data-child="${dot.dataset.note}"]`).getBoundingClientRect();
+      const style = getComputedStyle(dot);
+      const hit = getComputedStyle(dot, "::before");
       return { id: dot.dataset.note, top: parseFloat(dot.style.top),
-        offLine: (box.top + box.height / 2) - (mark.top + mark.height / 2) };
+        offLine: (box.top + box.height / 2) - (mark.top + mark.height / 2),
+        size: { width: box.width, height: box.height }, hit: { width: hit.width, height: hit.height },
+        transition: { duration: style.transitionDuration, timing: style.transitionTimingFunction } };
     }));
     assert.deepEqual(column.map((dot) => dot.id), [firstId, secondId], "dots follow the order of the anchors they mark");
     assert(Math.abs(column[0].offLine) < 2, `the first dot should sit on its anchor's line: ${JSON.stringify(column)}`);
     assert(column[1].top - column[0].top >= 14 && column[1].offLine >= 12,
       `a second dot on the same line should nudge off it, not overlap: ${JSON.stringify(column)}`);
+    assert.deepEqual(column.map(({ size, hit }) => ({ size, hit })), [
+      { size: { width: 7, height: 7 }, hit: { width: "24px", height: "24px" } },
+      { size: { width: 7, height: 7 }, hit: { width: "24px", height: "24px" } },
+    ], "anchored note dots should shrink to 7px without shrinking their 24px targets");
+    assert(column.every((dot) => dot.transition.duration.startsWith("0.12s")
+      && dot.transition.timing.startsWith("cubic-bezier(0.23, 1, 0.32, 1)")),
+    `dot motion should use the fast, restrained ease-out transition: ${JSON.stringify(column)}`);
 
     // Click reads, double click edits — on the dot and on the wash alike.
     await page.locator(`.note-dot[data-note="${firstId}"]`).click();
     await popover.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.getElementById("notepop").contains(document.activeElement));
     assert.deepEqual(await popover.evaluate((surface) => ({
       role: surface.getAttribute("role"),
       text: surface.querySelector(".note-pop-view").textContent.trim(),
       focusInside: surface.contains(document.activeElement),
       actions: Array.from(surface.querySelectorAll(".note-pop-actions button"))
-        .filter((button) => getComputedStyle(button).display !== "none").map((button) => button.textContent.trim()),
+        .filter((button) => getComputedStyle(button).display !== "none").map((button) => ({
+          label: Array.from(button.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim(),
+          chip: button.querySelector("kbd")?.textContent,
+          chipClass: button.querySelector("kbd")?.className,
+          shortcuts: button.getAttribute("aria-keyshortcuts"),
+        })),
+      viewStyle: (() => {
+        const style = getComputedStyle(surface.querySelector(".note-pop-view"));
+        return { background: style.backgroundColor, borderLeft: style.borderLeftWidth,
+          padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft] };
+      })(),
       editors: surface.querySelectorAll(".note-editor").length,
     })), { role: "dialog", text: "The first docked note", focusInside: true,
-      actions: ["Place on canvas", "Delete"], editors: 0 },
-    "a click opens a non-modal read dialog that takes focus and offers exactly two verbs");
+      actions: [
+        { label: "Place on canvas", chip: "⌘↵", chipClass: "", shortcuts: "Meta+Enter Control+Enter" },
+        { label: "Delete", chip: "⌫", chipClass: "", shortcuts: "Backspace Delete" },
+      ], viewStyle: { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", padding: ["8px", "10px", "8px", "10px"] },
+      editors: 0 },
+    "read state should be direct popover prose with the composer's exact kbd-chip markup");
+    const chipParity = await popover.evaluate((surface) => {
+      const signature = (chip) => {
+        const style = getComputedStyle(chip);
+        return [style.display.replace(/^inline-/, ""), style.fontFamily, style.fontSize, style.fontWeight, style.minWidth,
+          style.height, style.padding, style.lineHeight, style.borderRadius, style.backgroundColor];
+      };
+      return {
+        composer: signature(document.querySelector('#ask .ask-commit[data-commit="ask"] kbd')),
+        note: signature(surface.querySelector(".note-pop-place kbd")),
+      };
+    });
+    assert.deepEqual(chipParity.note, chipParity.composer, "read actions must reuse the composer chip pixel for pixel");
 
     await popover.locator(".note-pop-view").dblclick();
     await popover.locator(".note-editor").waitFor();
@@ -838,7 +902,7 @@ async function verifyDockedNotes() {
     await popover.locator(".note-editor").waitFor();
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
-    assert.deepEqual((await noteIds()).length, 2, "an empty new note is discarded, never persisted");
+    assert.deepEqual((await noteIds()).length, 3, "an empty new note is discarded, never persisted");
 
     await rootCard.locator(".node-more").click();
     await page.click("#cm-note");
@@ -846,13 +910,20 @@ async function verifyDockedNotes() {
     await popover.locator(".note-editor").fill("A note about this whole card");
     await popover.locator(".note-editor").press("Control+s");
     await page.waitForSelector(".note-dot-whole");
-    const wholeId = (await noteIds()).find((id) => id !== firstId && id !== secondId);
+    const wholeId = await waitForStoredHole(page, (hole) => hole.nodes.some((node) => node.markdown === "A note about this whole card"),
+      "the whole-card note to persist").then((hole) => hole.nodes.find((node) => node.markdown === "A note about this whole card").id);
     assert.deepEqual(await page.locator(".note-dot").evaluateAll((dots) => dots.map((dot) => ({
       id: dot.dataset.note, label: dot.getAttribute("aria-label"), whole: dot.classList.contains("note-dot-whole"),
       top: parseFloat(dot.style.top) }))).then((dots) => ({
       first: dots[0].id, leadsColumn: dots[0].whole && dots[0].top < dots[1].top, label: dots[0].label })),
     { first: wholeId, leadsColumn: true, label: "Note on this card" },
     "a whole-card note is a hollow ring at the top of the column");
+    assert.deepEqual(await page.locator(`.note-dot[data-note="${wholeId}"]`).evaluate((dot) => {
+      const box = dot.getBoundingClientRect();
+      const style = getComputedStyle(dot);
+      return { size: { width: box.width, height: box.height }, border: style.borderTopWidth };
+    }), { size: { width: 9, height: 9 }, border: "2px" },
+    "the whole-card ring should stay proportional at 9px with a 2px stroke");
     await page.keyboard.press("Escape");
 
     // Reader: the same notes, in the reader's real margin.
@@ -863,8 +934,8 @@ async function verifyDockedNotes() {
       const column = document.querySelector(".reader-col").getBoundingClientRect();
       return dots.map((dot) => Math.round(dot.getBoundingClientRect().left - column.right));
     }), [12, 12, 12], "reader dots stand in the real margin, 12px past the column edge");
-    assert.equal(await page.locator("#margin-notes .side-item").count(), 0,
-      "docked notes are not branches and must not fill the branch rail");
+    assert.deepEqual(await page.locator("#margin-notes .side-item").evaluateAll((items) => items.map((item) => item.dataset.child)),
+      [directPlacedId], "only the placed note belongs in the branch rail; docked notes must stay out");
     await page.keyboard.press("Escape");
     await page.waitForSelector("body.mode-canvas");
     await page.waitForTimeout(300);
@@ -880,8 +951,13 @@ async function verifyDockedNotes() {
     const cardsBefore = await page.locator(".node").count();
     await page.locator(`.note-dot[data-note="${secondId}"]`).click();
     await popover.waitFor({ state: "visible" });
-    await page.click("#notepop .note-pop-place");
+    await page.waitForFunction(() => document.getElementById("notepop").contains(document.activeElement));
+    await page.keyboard.press("Control+Enter");
     await page.waitForSelector(`.node[data-id="${secondId}"]`);
+    await waitForStoredHole(page, (hole) => {
+      const note = hole.nodes.find((node) => node.id === secondId);
+      return note?.size && !note.extensions?.note?.docked;
+    }, "the read-shortcut placement to persist");
     await page.waitForTimeout(700);
     const placed = await page.evaluate(async (id) => {
       const stored = (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id);
@@ -901,7 +977,7 @@ async function verifyDockedNotes() {
     assert.deepEqual({ docked: placed.docked, size: placed.size, dots: placed.dots, edges: placed.edges,
       dashed: placed.dashed, flights: placed.flights, mark: placed.mark, rightOfParent: placed.rightOfParent },
     { docked: false, size: { w: 420, h: 460 }, dots: 0, edges: 1, dashed: "none", flights: 0, mark: 1, rightOfParent: true },
-    `placing clears the flag, lands a standard-edged card near its parent, and retires the dot: ${JSON.stringify(placed)}`);
+    `the read-state place shortcut clears the flag, lands a standard-edged card near its parent, and retires the dot: ${JSON.stringify(placed)}`);
     assert.equal(await page.locator(".node").count(), cardsBefore + 1, "placing adds exactly one card");
     assert.equal(placed.markdown, "The second docked note", "placement never touches the note's words");
 
@@ -917,7 +993,8 @@ async function verifyDockedNotes() {
     // Delete from the read state, no confirmation.
     await page.locator(`.note-dot[data-note="${firstId}"]`).click();
     await popover.waitFor({ state: "visible" });
-    await page.click("#notepop .note-pop-delete");
+    await page.waitForFunction(() => document.getElementById("notepop").contains(document.activeElement));
+    await page.keyboard.press("Backspace");
     await page.waitForFunction((id) => !document.querySelector(`.note-dot[data-note="${id}"]`), firstId);
     assert.equal(await rootCard.locator(`mark[data-child="${firstId}"]`).count(), 0, "deleting a docked note takes its wash with it");
     // Deletion keeps the product's one exact undo: the removal commits when the
@@ -931,7 +1008,7 @@ async function verifyDockedNotes() {
       dots: document.querySelectorAll(".note-dot").length,
       whole: document.querySelectorAll(".note-dot-whole").length,
       noteCards: document.querySelectorAll(".node-note").length,
-    })), { dots: 1, whole: 1, noteCards: 1 },
+    })), { dots: 1, whole: 1, noteCards: 2 },
     "a reload rebuilds docked notes on their card and placed notes as windows");
 
     // Asking from a docked note is one motion: the note gains a place and then
@@ -952,6 +1029,49 @@ async function verifyDockedNotes() {
     assert.deepEqual({ question: asked.origin.question, selected: asked.origin.selected_text, docked: asked.extensions?.note?.docked ?? false,
       placed: asked.position.x > 0 }, { question: "Why does the third anchor matter?", selected: "third anchor", docked: false, placed: true },
     "the ask keeps the note's anchor, loses the dock, and keeps the place it was just given");
+    const treatments = await page.evaluate(({ noteId, askId }) => {
+      const html = document.documentElement;
+      const previous = html.getAttribute("data-theme");
+      const rgb = (value) => {
+        const channels = (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+        return value.startsWith("color(srgb") ? channels.map((channel) => channel * 255) : channels;
+      };
+      const luminance = (value) => {
+        const channels = rgb(value).map((channel) => {
+          channel /= 255;
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+      };
+      const contrast = (a, b) => {
+        const values = [luminance(a), luminance(b)].sort((x, y) => y - x);
+        return (values[0] + 0.05) / (values[1] + 0.05);
+      };
+      const signature = (card) => ({
+        body: getComputedStyle(card).backgroundColor,
+        head: getComputedStyle(card.querySelector(".node-head")).backgroundColor,
+        border: getComputedStyle(card).borderTopColor,
+      });
+      const result = ["light", "dark"].map((theme) => {
+        html.setAttribute("data-theme", theme);
+        const note = document.querySelector(`.node[data-id="${noteId}"]`);
+        const noteStyle = signature(note);
+        const text = getComputedStyle(note.querySelector(".doc-content")).color;
+        return { theme, note: noteStyle, plain: signature(document.querySelector(".node.root")),
+          ask: signature(document.querySelector(`.node[data-id="${askId}"]`)),
+          contrast: contrast(text, noteStyle.body) };
+      });
+      if (previous == null) html.removeAttribute("data-theme"); else html.setAttribute("data-theme", previous);
+      return result;
+    }, { noteId: directPlacedId, askId });
+    for (const treatment of treatments) {
+      assert.notEqual(treatment.note.body, treatment.plain.body, `${treatment.theme}: a placed note needs its own body wash`);
+      assert.notEqual(treatment.note.head, treatment.plain.head, `${treatment.theme}: a placed note needs its own header wash`);
+      assert.notEqual(treatment.note.body, treatment.ask.body, `${treatment.theme}: note and ask bodies must not collapse to one treatment`);
+      assert.notEqual(treatment.note.head, treatment.ask.head, `${treatment.theme}: note and ask headers must not collapse to one treatment`);
+      assert.notEqual(treatment.note.border, treatment.ask.border, `${treatment.theme}: note and ask borders must not collapse to one treatment`);
+      assert(treatment.contrast >= 4.5, `${treatment.theme}: placed-note prose contrast should remain accessible (${treatment.contrast})`);
+    }
     console.log("ok web app: docked notes read, edit, place, delete, ask, and rehydrate on their card");
   } finally {
     await context.close();
@@ -1931,7 +2051,7 @@ async function verifyNoteToAskConversion() {
     const imageMarkdown = await editor.inputValue();
     const imageAsset = imageMarkdown.match(/asset:(paste-[a-f0-9-]+\.png)/)?.[1];
     assert(imageAsset, "the image-note fixture should contain a durable pasted asset ref");
-    await editor.press("Control+Shift+Enter");
+    await editor.press("Control+Enter");
     await imageNote.card.locator(".origin-attachment-strip img").waitFor();
     await imageNote.card.locator(".doc-content", { hasText: "The converted note delivered its pasted image." }).waitFor();
     const imageUserContent = providerBodies[3].messages.find((message) => message.role === "user").content;
@@ -1946,7 +2066,7 @@ async function verifyNoteToAskConversion() {
     await editor.fill("Rejected note exactly as edited.");
     const rejectedBefore = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), rejected.id);
     rejectProvider = true;
-    await editor.press("Control+Shift+Enter");
+    await editor.press("Control+Enter");
     await rejected.card.locator(".doc-content", { hasText: "Rejected note exactly as edited." }).waitFor();
     await page.waitForTimeout(900);
     await page.waitForFunction(async (id) => {

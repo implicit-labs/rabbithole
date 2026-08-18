@@ -352,10 +352,10 @@ async function verifyStandaloneComposer(page, calls) {
   assert.equal(await page.locator(".node.note-draft").count(), 1,
     "plain Enter must leave the standalone draft uncommitted");
   assert.equal(calls(), 5, "plain Enter must not call the provider or commit the standalone draft");
-  await page.locator('.node.note-draft [data-commit="note"]').click();
+  await page.keyboard.press("Control+Shift+Enter");
   await page.locator(".node-note", { hasText: "line one" }).last().waitFor();
   await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
-  assert.equal(calls(), 5, "the standalone Note button should save without calling the provider");
+  assert.equal(calls(), 5, "the direct-placement chord should degrade to Note on a standalone window");
 
   point = await findCanvasBackground(page);
   await page.mouse.dblclick(point.x, point.y);

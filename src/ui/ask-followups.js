@@ -42,7 +42,7 @@ import {
   renderVisibility,
   scheduleEdges
 } from "./canvas-view.js";
-import { createDockedNote, placedChildrenOf } from "./docked-notes.js";
+import { createDockedNote, createPlacedNote, placedChildrenOf } from "./docked-notes.js";
 import { renderMarginNotes } from "./reader.js";
 import { charOffset, mountPdfRectMark, wrapInContainer } from "./text-marks.js";
 import { easeOutMotion } from "./easing.js";
@@ -74,7 +74,10 @@ export function initAskFollowups(){
     if (!inAsk(e) && usesMobileAskSurface()) queueMobileAsk(80);
   }, { passive: true });
   wireComposerActions({ text: askText, actions: document.getElementById("ask-actions"), listen: scopeListen,
-    onCommit: function(kind, e){ if (kind === "note") submitNote(composerSource(e)); else submitAsk(null, composerSource(e)); },
+    onCommit: function(kind, e){
+      if (kind === "ask") submitAsk(null, composerSource(e));
+      else submitNote(composerSource(e), kind === "note-window");
+    },
     onLens: function(lens, e){ submitAsk(lens, composerSource(e)); } });
   askScope.listen(askText, "input", function(){
     autoGrowEl(askText, 110);
@@ -351,10 +354,10 @@ export function updateSelectionComposerState(){
     }
   }
 
-  // A note written from a selection is docked: it belongs to the card whose
-  // words it marks, not to a window of its own. The composer above is unchanged
-  // — only where the committed note lands is.
-  function submitNote(source){
+  // An ordinary Note commit docks on the words it marks. The hidden place
+  // chord takes the same note path but asks the shared placement primitive to
+  // give it geometry immediately.
+  function submitNote(source, placed){
     if (!selectionDraft || closed) return;
     var markdown = askText.value.trim();
     if (!markdown) return;
@@ -362,7 +365,9 @@ export function updateSelectionComposerState(){
     if (!parent){ hideAsk(); return; }
     var anchor = { offset_start: draft.startOff, offset_end: draft.endOff };
     if (draft.pdfAnchor) anchor.pdf = draft.pdfAnchor;
-    var node = createDockedNote(parent, markdown, { anchor: anchor, selectedText: draft.selectedText });
+    var create = placed ? createPlacedNote : createDockedNote;
+    var node = create(parent, markdown, { anchor: anchor, selectedText: draft.selectedText,
+      sourceRect: placed ? ask.getBoundingClientRect() : null });
     if (!node) return;
     var sel = window.getSelection(); if (sel) sel.removeAllRanges();
     hideAsk();
@@ -469,7 +474,9 @@ export function animateScroll(el, target, source){
     var parent = readerComposerParent();
     var question = composerText.value.trim();
     if (!parent || !question) return;
-    var node = commit === "note" ? createDockedNote(parent, question) : sendFollowup(parent, question, null);
+    var node = commit === "note" ? createDockedNote(parent, question)
+      : commit === "note-window" ? createPlacedNote(parent, question)
+      : sendFollowup(parent, question, null);
     if (!node) return;
     composerText.value = "";
     autoGrowComposer();

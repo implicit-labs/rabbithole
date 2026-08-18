@@ -11,6 +11,8 @@ export function isSubmitEnter(event) {
 }
 
 export function followupCommitFromEnter(event) {
-  if (!isSubmitEnter(event) || event.altKey) return null;
+  if (!isCommandEnter(event) || event.altKey) return null;
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey) return "note-window";
+  if (event.shiftKey) return null;
   return event.metaKey || event.ctrlKey ? "ask" : "note";
 }

@@ -109,6 +109,7 @@ function defaultCanvasHooks(){
     hideAsk: function(){},
     sendFollowup: function(){ return null; },
     sendNote: function(){ return null; },
+    sendPlacedNote: function(){ return null; },
     rollbackBranch: function(){},
     copyNodeMarkdown: function(){},
     removeBranch: function(){},
@@ -632,8 +633,8 @@ export function updateCardComposer(node){
     if (cardComposerBlocked(node)) return;
     var question = node.ncText.value.trim();
     if (!question) return;
-    var kid = commit === "note"
-      ? canvasLifecycle.hooks.sendNote(node, question)
+    var kid = commit === "note" ? canvasLifecycle.hooks.sendNote(node, question)
+      : commit === "note-window" ? canvasLifecycle.hooks.sendPlacedNote(node, question)
       : canvasLifecycle.hooks.sendFollowup(node, question, null);
     if (!kid) return;
     node.ncText.value = "";
@@ -729,7 +730,8 @@ export function noteComposerActions(){
     return cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
   }
 export function noteCommitFromEnter(e){
-    return !e.altKey && (e.metaKey || e.ctrlKey) && isCommandEnter(e) ? "ask" : null;
+    if (e.altKey || !(e.metaKey || e.ctrlKey) || !isCommandEnter(e)) return null;
+    return e.shiftKey ? "note-window" : "ask";
   }
   // Whatever the editor sits under inside the card body — an origin quote, an
   // origin crop — belongs to the body, not to the surface, so its height comes
@@ -1027,7 +1029,7 @@ export function noteCommitFromEnter(e){
     wireComposerActions({ text: editor, actions: actions, listen: scope.listen,
       hasDraft: function(){ return !!editor.value.trim() || attachments.length > 0; },
       commitFromEnter: noteCommitFromEnter,
-      onCommit: function(kind, e){ e.stopPropagation(); submit(kind, e); },
+      onCommit: function(kind, e){ e.stopPropagation(); submit(kind === "note-window" ? "note" : kind, e); },
       onLens: function(){} });
     // Moving between the textarea and its actions stays inside one surface.
     // Once focus truly leaves, an empty draft vanishes and a written draft
@@ -1369,11 +1371,10 @@ export function convertNoteToAsk(node, text){
     });
     wireComposerActions({ text: editor, actions: actions,
       hasDraft: function(){ return !!editor.value.trim(); },
-      // The composer's own Enter contract, unchanged: ⌘↵ asks. On a note that
-      // cannot be converted the ask falls through to a plain save, which is the
-      // only thing the bar still offers.
+      // A note card already has a place, so the hidden place chord degrades to
+      // the same save as Note. Plain ⌘↵ remains Ask.
       commitFromEnter: noteCommitFromEnter,
-      onCommit: function(kind, e){ e.stopPropagation(); finish(kind); },
+      onCommit: function(kind, e){ e.stopPropagation(); finish(kind === "note-window" ? "note" : kind); },
       onLens: function(){} });
     surface.addEventListener("focusout", function(){
       setTimeout(function(){ if (!settled && !surface.contains(document.activeElement)) finish("note"); }, 0);

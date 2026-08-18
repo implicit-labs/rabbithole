@@ -148,8 +148,8 @@ export const CANVAS_SHELL = `
 <div id="notepop" class="anchored-menu note-pop" role="dialog" aria-label="Note">
   <div class="note-pop-body"></div>
   <div class="note-pop-actions">
-    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-place", id: "np-place", label: "Place on canvas" })}
-    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-delete", id: "np-delete", label: "Delete" })}
+    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-place", id: "np-place", label: "Place on canvas ", kbdHint: "⌘↵", aria: { keyshortcuts: "Meta+Enter Control+Enter" } })}
+    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-delete", id: "np-delete", label: "Delete ", kbdHint: "⌫", aria: { keyshortcuts: "Backspace Delete" } })}
   </div>
 </div>
 

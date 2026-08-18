@@ -60,7 +60,7 @@ import { teardownNode } from "./node-teardown.js";
  */
 
 var DOT_STACK_GAP = 14;   // minimum vertical rhythm between two dots
-var DOT_RADIUS = 4;
+var DOT_RADIUS = 3.5;
 var WHOLE_CARD_TOP = 2;   // the ring leads the column, level with the first line
 
 var dockedLifecycle = createModuleLifecycle({ defaults: function(){ return {}; } });
@@ -86,6 +86,7 @@ export function initDockedNotes(){
     var surface = popEl();
     scope.listen(surface, "click", onPopoverClick);
     scope.listen(surface, "dblclick", onPopoverDblClick);
+    scope.listen(surface, "keydown", onPopoverKeydown);
     scope.addCleanup(function(){ closeNotePopover({ restoreFocus: false, commit: false }); });
     return disposeDockedNotes;
   } catch (error) {
@@ -113,30 +114,48 @@ function popEl(){ return document.getElementById("notepop"); }
 /* One optimistic note path serves anchored selection notes and anchor-less
    whole-card notes. The anchor alone decides whether there is a wash to mark;
    the durable origin stays the reducer's canonical {kind:"note"}. */
-export function createDockedNote(parent, markdown, options){
+function createNoteChild(parent, markdown, options){
   options = options || {};
   markdown = String(markdown || "").trim();
   if (!parent || !markdown || closed || parent.extensions?.pdf?.converting) return null;
   var anchor = options.anchor || null;
+  var placed = options.placed === true;
   var origin = anchor
     ? { kind: "note", selected_text: options.selectedText || "", anchor: anchor, branch_type: BRANCH_SELECTION }
     : { kind: "note" };
-  var node = registerNode({
+  var node = {
     id: uuid(), parent_id: parent.id, title: "Note", html: "", md: markdown,
     base_url: null, base_url_source: null, read: true, origin: origin,
-    // A docked note has no place yet. It still carries the default card size so
-    // that placing it later is a move, not a measurement.
     x: 0, y: 0, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
-    status: "answered", _order: nextOrder(), _startTs: 0, extensions: { note: { docked: true } }
-  });
+    status: "answered", _order: nextOrder(), _startTs: 0,
+    extensions: placed ? {} : { note: { docked: true } }
+  };
+  if (placed){
+    var pos = placeNoteChild(parent, branchTypeOfNode(node));
+    node.x = pos.x; node.y = pos.y;
+  }
+  registerNode(node);
   paintNoteMarks(parent, node, anchor);
-  renderDockedNotes(parent);
-  scheduleEdges();
-  if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
-  postBrowserEvent({ type: "node_create", id: node.id, parent_id: parent.id,
-    markdown: markdown, origin: origin, docked: true })
-    .then(function(res){ if (!res || !res.ok) rollbackDockedNote(node); });
+  if (placed) presentPlacedNote(node, parent, options.sourceRect);
+  else {
+    renderDockedNotes(parent);
+    scheduleEdges();
+    if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
+  }
+  var payload = placed
+    ? { type: "node_create", id: node.id, parent_id: parent.id, markdown: markdown, origin: origin,
+      position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } }
+    : { type: "node_create", id: node.id, parent_id: parent.id, markdown: markdown, origin: origin, docked: true };
+  postBrowserEvent(payload).then(function(res){ if (!res || !res.ok) rollbackCreatedNote(node); });
   return node;
+}
+
+export function createDockedNote(parent, markdown, options){
+  return createNoteChild(parent, markdown, options);
+}
+
+export function createPlacedNote(parent, markdown, options){
+  return createNoteChild(parent, markdown, Object.assign({}, options, { placed: true }));
 }
 
 function paintNoteMarks(parent, node, anchor){
@@ -152,7 +171,7 @@ function paintNoteMarks(parent, node, anchor){
   wrapInContainer(cardDoc, anchor, node.id, "hl mark-ready mark-note");
 }
 
-function rollbackDockedNote(node){
+function rollbackCreatedNote(node){
   if (nodes[node.id] !== node) return;
   var parent = nodes[node.parent_id];
   teardownNode(node.id);
@@ -180,6 +199,15 @@ export function placedChildrenOf(id){
   return childrenOf(id).filter(function(node){ return !isDockedNote(node); });
 }
 
+function presentPlacedNote(node, parent, sourceRect){
+  if (canvasBuilt && !node.el) createNodeEl(node, false);
+  renderVisibility();
+  renderDockedNotes(parent);
+  drawEdges();
+  if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
+  flyNoteToCard(sourceRect, node);
+}
+
 export function placeDockedNote(node, sourceRect){
   var parent = node && node.parent_id != null ? nodes[node.parent_id] : null;
   if (!parent || frozen || closed || !isDockedNote(node)) return false;
@@ -187,15 +215,10 @@ export function placeDockedNote(node, sourceRect){
   node.x = pos.x; node.y = pos.y;
   node.extensions = Object.assign({}, node.extensions);
   delete node.extensions.note;
-  if (canvasBuilt && !node.el) createNodeEl(node, false);
-  renderVisibility();
-  renderDockedNotes(parent);
-  drawEdges();
-  if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
+  presentPlacedNote(node, parent, sourceRect);
   postBrowserEvent({ type: "node_extensions_patch", node_id: node.id, namespace: "note", value: {} });
   postBrowserEvent({ type: "node_update", node_id: node.id,
     position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } });
-  flyNoteToCard(sourceRect, node);
   return true;
 }
 
@@ -595,6 +618,15 @@ function commitEditor(session, kind){
     else if (kind !== "close") renderPopoverState("read");
     return;
   }
+  if (!node && kind === "note-window"){
+    var sourceRect = session.trigger && session.trigger.getBoundingClientRect
+      ? session.trigger.getBoundingClientRect() : null;
+    node = createPlacedNote(nodes[session.parentId], text, { sourceRect: sourceRect });
+    if (!node) return;
+    session.node = node;
+    closeNotePopover({ restoreFocus: false, commit: false });
+    return;
+  }
   if (!node){
     node = createDockedNote(nodes[session.parentId], text);
     if (!node) return;
@@ -607,6 +639,10 @@ function commitEditor(session, kind){
   }
   if (kind === "ask" && placeDockedNote(node, affordanceRect(node)) && convertNoteToAsk(node, text)){
     closeNotePopover({ commit: false });
+    return;
+  }
+  if (kind === "note-window" && placeDockedNote(node, affordanceRect(node))){
+    closeNotePopover({ restoreFocus: false, commit: false });
     return;
   }
   if (kind === "close"){
@@ -634,22 +670,46 @@ function affordanceRect(node){
   return affordance ? affordance.getBoundingClientRect() : null;
 }
 
+function placePopoverNote(session){
+  var node = session && session.node, rect = affordanceRect(node);
+  if (!node || !isDockedNote(node)) return;
+  closeNotePopover({ restoreFocus: false, commit: false });
+  placeDockedNote(node, rect);
+}
+
+function deletePopoverNote(session){
+  var doomed = session && session.node;
+  if (!doomed) return;
+  closeNotePopover({ restoreFocus: false, commit: false });
+  removeBranch(doomed);
+  renderDockedNotes(nodes[doomed.parent_id]);
+}
+
 function onPopoverClick(event){
   var session = popSession;
   var button = event.target.closest ? event.target.closest("button") : null;
   if (!session || !button) return;
   if (button.classList.contains("note-pop-place")){
     event.stopPropagation();
-    var node = session.node, rect = affordanceRect(node);
-    closeNotePopover({ restoreFocus: false, commit: false });
-    placeDockedNote(node, rect);
+    placePopoverNote(session);
   } else if (button.classList.contains("note-pop-delete")){
     event.stopPropagation();
-    var doomed = session.node;
-    closeNotePopover({ restoreFocus: false, commit: false });
-    removeBranch(doomed);
-    renderDockedNotes(nodes[doomed.parent_id]);
+    deletePopoverNote(session);
   }
+}
+
+function onPopoverKeydown(event){
+  var session = popSession, surface = popEl();
+  if (!session || session.state !== "read" || !surface.contains(document.activeElement) || !editingAllowed()) return;
+  var commandEnter = event.key === "Enter" && (event.metaKey || event.ctrlKey)
+    && !event.altKey && !event.shiftKey && !event.isComposing;
+  var deleteKey = (event.key === "Backspace" || event.key === "Delete")
+    && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!commandEnter && !deleteKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (commandEnter) placePopoverNote(session);
+  else deletePopoverNote(session);
 }
 
 function onPopoverDblClick(event){

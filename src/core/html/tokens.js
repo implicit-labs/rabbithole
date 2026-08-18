@@ -80,6 +80,9 @@ export const DESIGN_TOKENS = `:root {
   --note-ink: color-mix(in srgb, var(--fg) 70%, var(--bg));
   --note-hl: color-mix(in srgb, var(--fg) 8%, transparent);
   --note-hl-strong: color-mix(in srgb, var(--fg) 15%, transparent);
+  --note-card-bg: color-mix(in srgb, var(--note-ink) 6%, var(--node-bg));
+  --note-card-head: color-mix(in srgb, var(--note-ink) 14%, var(--node-head));
+  --note-card-border: color-mix(in srgb, var(--note-ink) 32%, var(--border));
   --warn: #d9a866; --success: #5fbd8d; --sk-base: rgba(255, 255, 255, .06);
   --scrim: rgba(26, 25, 24, .62);
   --shadow: var(--shadow-card);

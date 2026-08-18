@@ -336,7 +336,7 @@ body.mode-flight #viewport { display: block; }
 /* overflow stays visible so the follow-up drawer can slide out below the card;
    the head carries its own top radius instead. */
 .node { --card-head-bg: var(--node-head); position: absolute; display: flex; flex-direction: column; background: var(--node-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
-.node.node-note { --card-head-bg: color-mix(in srgb, var(--note-ink) 7%, var(--node-head)); }
+.node.node-note { --card-head-bg: var(--note-card-head); background: var(--note-card-bg); border-color: var(--note-card-border); }
 .node${""}::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: 0; pointer-events: none; transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .node.node-enter { opacity: 0; transform: translateY(8px); transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .node.node-enter.entered { opacity: 1; transform: translateY(0); }
@@ -529,11 +529,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* Every chip — 1 2 3 4 ↵ ⌘↵ — is the same fixed block, flex-centered so the
    glyph sits optically dead-center regardless of its own metrics (↵ carries
    its ink low-left; a text box with line-height centering never looks right). */
-.lens kbd, .ask-commit kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
+.lens kbd, .ask-commit kbd, .note-pop-btn kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
   display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
   min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline); flex-shrink: 0;
   background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.lens:hover kbd, .ask-commit:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
+.lens:hover kbd, .ask-commit:hover kbd, .note-pop-btn:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
 .ask-commit { flex: 1 1 50%; min-width: 0; }
 .ask-commit-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The row swap: lenses at rest, the commit pair once the surface (#ask or a
@@ -601,27 +601,28 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-dots { position: absolute; inset: 0; pointer-events: none; }
 .note-dots.note-dots-reader { left: 100%; right: auto; margin-left: 12px; width: 12px; }
 .note-dots.note-dots-inside { left: auto; right: 0; margin-left: 0; }
-.note-dot { position: absolute; right: 4px; width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--note-ink); box-shadow: 0 0 0 3px var(--node-bg); cursor: pointer; pointer-events: auto;
-  transition: transform var(--duration-fast) var(--ease-spring), background var(--duration-fast) var(--ease-standard); }
-.note-dots-reader .note-dot { right: auto; left: 0; box-shadow: 0 0 0 3px var(--bg); }
+.note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--note-ink); box-shadow: 0 0 0 2px var(--node-bg); cursor: pointer; pointer-events: auto;
+  transition: transform var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-standard); }
+.note-dots-reader .note-dot { right: auto; left: 0; box-shadow: 0 0 0 2px var(--bg); }
 .note-dots-inside .note-dot { left: auto; right: 4px; }
-/* 8px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
+/* 7px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
 .note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
-.note-dot:hover, .note-dot.note-dot-partner { transform: scale(1.35); background: color-mix(in srgb, var(--note-ink) 74%, var(--fg-bold)); }
+.note-dot:hover, .note-dot.note-dot-partner { transform: scale(1.12); background: color-mix(in srgb, var(--note-ink) 74%, var(--fg-bold)); }
 /* A note about the whole card has no line to sit beside, so it reads as an
    outline at the top of the column instead of a filled anchor. */
-.note-dot-whole { width: 10px; height: 10px; background: var(--node-bg); border: 2px solid var(--note-ink); box-shadow: 0 0 0 2px var(--node-bg); }
-.note-dots-reader .note-dot-whole { background: var(--bg); box-shadow: 0 0 0 2px var(--bg); }
+.note-dot-whole { width: 9px; height: 9px; background: var(--node-bg); border: 2px solid var(--note-ink); box-shadow: 0 0 0 1.5px var(--node-bg); }
+.note-dots-reader .note-dot-whole { background: var(--bg); box-shadow: 0 0 0 1.5px var(--bg); }
 .note-dot:focus { outline: none; }
 .note-dot:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
 /* The note's own surface: the product's popover, sized to a paragraph. No
-   header and no ×; the note's quiet left rule is the only identity it needs. */
+   header and no ×; read prose sits directly on that surface like a comment. */
 .note-pop { width: 304px; min-width: 0; }
-.note-pop-view, .note-pop-edit { border-left: 2px solid var(--note-ink); border-radius: var(--radius-control); background: var(--note-hl); }
-.note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain; padding: 10px 12px; }
-.note-pop-edit { display: flex; flex-direction: column; overflow: hidden; }
+.note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain;
+  padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
+.note-pop-edit { display: flex; flex-direction: column; overflow: hidden;
+  border-left: 2px solid var(--note-ink); border-radius: var(--radius-control); background: var(--note-hl); }
 .note-pop-edit > .ask-input { align-items: flex-start; padding: 10px 12px 6px; }
 /* The textarea is the prose it replaces, pixel for pixel — same face, same
    rhythm — so switching states never moves a word. */
