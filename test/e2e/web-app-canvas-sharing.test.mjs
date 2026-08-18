@@ -908,6 +908,20 @@ async function verifyStandaloneNotesAndEditing() {
     await page.waitForTimeout(1000);
     await assertEditedStored("the edited note must remain durable after pending saves settle");
 
+    // ⌘S/Ctrl+S is the editor's save key: no Enter of any shape commits here,
+    // so the keyboard needs one gesture that means "done".
+    await anchoredSurface.dblclick({ position: clickedWordBox });
+    await anchoredEditor.waitFor();
+    await anchoredEditor.fill("Saved anchored **with the save key**");
+    await anchoredEditor.press("Control+s");
+    await anchoredCard.locator(".doc-content strong", { hasText: "with the save key" }).waitFor();
+    assert.equal(await anchoredCard.locator(".note-editor").count(), 0,
+      "Control+S should close the note editor by committing it, not by cancelling");
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return node?.markdown === "Saved anchored **with the save key**";
+    }, anchoredId);
+
     let point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
     await page.waitForSelector(".node-note .note-editor");
@@ -980,7 +994,7 @@ async function verifyStandaloneNotesAndEditing() {
       lenses: 0,
       collapseVisible: false,
       commits: [
-        { commit: "note", title: "Save note", hint: undefined, disabled: true, visible: true },
+        { commit: "note", title: "Save note (Command/Control+S)", hint: "⌘S", disabled: true, visible: true },
         { commit: "ask", title: "Ask (Command/Control+Enter)", hint: "⌘↵", disabled: true, visible: true },
       ],
     }, "standalone drafts should start compact and focused with honest disabled commit actions but no lenses");
@@ -1213,7 +1227,7 @@ async function verifyStandaloneNotesAndEditing() {
     await page.reload({ waitUntil: "networkidle" });
     await page.waitForSelector(".node-note", { state: "attached" });
     const reloadedNoteText = await page.locator(".node-note .doc-content").evaluateAll((docs) => docs.map((dc) => dc.textContent).join(" "));
-    assert(reloadedNoteText.includes("Edited anchored durably") && reloadedNoteText.includes("Standalone note survives reload"),
+    assert(reloadedNoteText.includes("Saved anchored with the save key") && reloadedNoteText.includes("Standalone note survives reload"),
       `committed note markdown should hydrate after reload (${JSON.stringify(reloadedNoteText)})`);
     assert.equal(await page.locator(`.node[data-id="${anchoredId}"] .node-title`).innerText(), "Renamed note window",
       "a renamed note title should survive reload");
@@ -1603,7 +1617,7 @@ async function verifyNoteToAskConversion() {
       flushBottom: true, flushSides: true, footerCorners: true, resizeHidden: true,
       hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
       commits: [
-        { kind: "note", hint: undefined, label: "Note", title: "Save note" },
+        { kind: "note", hint: "⌘S", label: "Note", title: "Save note (Command/Control+S)" },
         { kind: "ask", hint: "⌘↵", label: "Ask", title: "Ask (Command/Control+Enter)" },
       ],
     }, "editing an existing note should use the standalone composer's flush footer and its verbatim Note/Ask bar");

@@ -49,6 +49,15 @@ export function wireComposerActions(surface) {
   listen(surface.text, "keydown", function (e) {
     var commit = commitFromEnter(e);
     if (commit) { e.preventDefault(); surface.onCommit(commit, e); return; }
+    // ⌘S/Ctrl+S saves the draft wherever the bar offers a Note action. The
+    // browser's save dialog must never open over a focused composer, so the
+    // key is swallowed even on surfaces that have nothing to save.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "s") {
+      e.preventDefault();
+      var note = surface.actions.querySelector('[data-commit="note"]');
+      if (note && note.isConnected && hasDraft()) surface.onCommit("note", e);
+      return;
+    }
     if (hasLenses && !isComposingText(e) && surface.text.value === "" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && LENS_KEYS[e.key]) {
       e.preventDefault();
       surface.onLens(LENS_KEYS[e.key], e);

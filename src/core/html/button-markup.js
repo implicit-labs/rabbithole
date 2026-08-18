@@ -62,7 +62,9 @@ export function buttonMarkup(options = {}) {
 /** @param {{ id?: string, includeLenses?: boolean, noteEnterShortcut?: boolean }} [options] */
 export function composerActionsMarkup(options = {}) {
   const noteEnterShortcut = options.noteEnterShortcut !== false;
-  const noteKbdHint = noteEnterShortcut ? "↵" : undefined;
+  // One chip per button: ⌘S saves on every surface, but only surfaces that
+  // gave Enter away to the text advertise it.
+  const noteKbdHint = noteEnterShortcut ? "↵" : "⌘S";
   const lenses = options.includeLenses === false ? "" :
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" }) +
@@ -72,7 +74,7 @@ export function composerActionsMarkup(options = {}) {
     lenses +
     '<div class="commit-actions">' +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "note" },
-      title: noteEnterShortcut ? "Save note (Enter)" : "Save note",
+      title: noteEnterShortcut ? "Save note (Enter)" : "Save note (Command/Control+S)",
       label: "Note ", labelClass: "ask-commit-label", kbdHint: noteKbdHint }) +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "ask" },
       title: "Ask (Command/Control+Enter)",

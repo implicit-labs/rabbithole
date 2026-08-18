@@ -330,9 +330,9 @@ async function verifyStandaloneComposer(page, calls) {
     { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
   ], "card composers must retain their existing Enter shortcuts");
   assert.deepEqual(actionParity.standalone.map(({ title, hint }) => ({ title, hint: hint || null })), [
-    { title: "Save note", hint: null },
+    { title: "Save note (Command/Control+S)", hint: "⌘S" },
     { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
-  ], "standalone drafts must advertise Note as a button action and Ask as Cmd/Ctrl+Enter");
+  ], "standalone drafts must advertise Note as Cmd/Ctrl+S and Ask as Cmd/Ctrl+Enter");
   assert.equal(actionParity.standaloneLenses, 0, "the root-level standalone composer must not expose document lenses");
   assert.deepEqual(actionParity.disabled, [true, true], "an empty standalone composer must disable both commit actions");
 
