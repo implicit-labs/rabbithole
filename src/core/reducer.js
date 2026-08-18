@@ -189,6 +189,10 @@ function reduceNodeCreate(state, event, options) {
   const origin = parentId !== null && rawOrigin.anchor
     ? { kind: "note", selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection" }
     : { kind: "note" };
+  // Docking is presentation and only means anything on a parent: the note has
+  // no canvas geometry until it is placed, and the flag lives in the
+  // extensions bag so nothing about the note's identity changes with it.
+  const docked = parentId !== null && event.docked === true;
 
   const node = /** @type {HoleNode} */ ({
     id: nodeId,
@@ -205,7 +209,7 @@ function reduceNodeCreate(state, event, options) {
     status: "answered",
     read: true,
     created_at: options.now ?? new Date().toISOString(),
-    extensions: {},
+    extensions: docked ? { note: { docked: true } } : {},
   });
   const nodes = cloneNodes(state, options);
   nodes.set(nodeId, node);

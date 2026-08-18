@@ -84,7 +84,7 @@ function overlayOpen(){
   var palette = document.getElementById("palette");
   if (palette && !palette.hidden) return true;
   if (isSettingsSheetOpen()) return true;
-  var surfaces = ["ask", "sharemenu", "cardmenu"];
+  var surfaces = ["ask", "sharemenu", "cardmenu", "notepop"];
   for (var i = 0; i < surfaces.length; i++){
     var el = document.getElementById(surfaces[i]);
     if (el && el.classList.contains("visible")) return true;

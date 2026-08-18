@@ -13,7 +13,7 @@ import {
   setCurrentNodeId,
   shareMenu
 } from "./core.js";
-import { lensLabel, lineageNodesFromMap, truncate } from "../core/model.js";
+import { isDockedNote, lensLabel, lineageNodesFromMap, truncate } from "../core/model.js";
 import {
   clearEdgeHighlight,
   createNodeEl,
@@ -238,7 +238,8 @@ export function removeBranch(node){
     if (canvasBuilt){
       for (var j = 0; j < removal.ids.length; j++){
         var restored = nodes[removal.ids[j]];
-        if (restored && !restored.el) createNodeEl(restored, true);
+        // A docked note comes back onto its parent's margin, never as a card.
+        if (restored && !restored.el && !isDockedNote(restored)) createNodeEl(restored, true);
       }
     }
     refreshAfterRemoval(removal.parentId, false);

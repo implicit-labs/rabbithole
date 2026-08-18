@@ -3,7 +3,6 @@ import {
   ask,
   askText,
   canvasBuilt,
-  childrenOf,
   closed,
   composerActions,
   composerInner,
@@ -43,6 +42,7 @@ import {
   renderVisibility,
   scheduleEdges
 } from "./canvas-view.js";
+import { createDockedNote, placedChildrenOf } from "./docked-notes.js";
 import { renderMarginNotes } from "./reader.js";
 import { charOffset, mountPdfRectMark, wrapInContainer } from "./text-marks.js";
 import { easeOutMotion } from "./easing.js";
@@ -351,6 +351,9 @@ export function updateSelectionComposerState(){
     }
   }
 
+  // A note written from a selection is docked: it belongs to the card whose
+  // words it marks, not to a window of its own. The composer above is unchanged
+  // — only where the committed note lands is.
   function submitNote(source){
     if (!selectionDraft || closed) return;
     var markdown = askText.value.trim();
@@ -359,49 +362,11 @@ export function updateSelectionComposerState(){
     if (!parent){ hideAsk(); return; }
     var anchor = { offset_start: draft.startOff, offset_end: draft.endOff };
     if (draft.pdfAnchor) anchor.pdf = draft.pdfAnchor;
-    var node = sendNote(parent, markdown, { anchor: anchor, selectedText: draft.selectedText });
+    var node = createDockedNote(parent, markdown, { anchor: anchor, selectedText: draft.selectedText });
     if (!node) return;
     var sel = window.getSelection(); if (sel) sel.removeAllRanges();
     hideAsk();
     revealNode(node, source);
-  }
-
-  // One optimistic note path serves anchored selection notes and anchor-less
-  // follow-up notes. The anchor alone determines marks and branch placement;
-  // the durable origin stays the reducer's canonical bare {kind:"note"} for
-  // a document-level follow-up.
-export function sendNote(parent, markdown, options){
-    options = options || {};
-    markdown = String(markdown || "").trim();
-    if (!parent || !markdown || closed || parent.extensions?.pdf?.converting) return null;
-    var anchor = options.anchor || null;
-    var branchType = anchor ? BRANCH_SELECTION : BRANCH_FOLLOWUP;
-    var childId = uuid(), pos = placeChild(parent, branchType);
-    var origin = anchor
-      ? { kind: "note", selected_text: options.selectedText || "", anchor: anchor, branch_type: BRANCH_SELECTION }
-      : { kind: "note" };
-    var node = {
-      id: childId, parent_id: parent.id, title: "Note", html: "", md: markdown,
-      base_url: null, base_url_source: null, read: true,
-      origin: origin,
-      x: pos.x, y: pos.y, w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h, font_scale: 1, collapsed: false,
-      status: "answered", _order: nextOrder(), _startTs: 0, extensions: {}
-    };
-    registerNode(node);
-    if (canvasBuilt){ createNodeEl(node, true); renderVisibility(); drawEdges(); }
-    if (anchor?.pdf) {
-      if (mode === "reader") mountPdfRectMark(readerMain.querySelector('.doc-content[data-node-id="' + parent.id + '"]'), anchor, childId, "rh-pdf-mark mark-ready mark-note");
-      if (parent.bodyEl) mountPdfRectMark(parent.bodyEl.querySelector(".doc-content"), anchor, childId, "rh-pdf-mark mark-ready mark-note");
-    } else if (anchor) {
-      if (mode === "reader") wrapInContainer(readerMain.querySelector('.doc-content[data-node-id="' + parent.id + '"]'), anchor, childId, "hl mark-ready mark-note");
-      if (parent.bodyEl) wrapInContainer(parent.bodyEl.querySelector(".doc-content"), anchor, childId, "hl mark-ready mark-note");
-    }
-    scheduleEdges();
-    if (mode === "reader" && currentNodeId === parent.id) renderMarginNotes();
-    postBrowserEvent({ type: "node_create", id: childId, parent_id: parent.id,
-      markdown: markdown, origin: node.origin, position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } })
-      .then(function(res){ if (!res || !res.ok) rollbackNote(node); });
-    return node;
   }
 
   // ---------- follow-up composer ----------
@@ -504,7 +469,7 @@ export function animateScroll(el, target, source){
     var parent = readerComposerParent();
     var question = composerText.value.trim();
     if (!parent || !question) return;
-    var node = commit === "note" ? sendNote(parent, question) : sendFollowup(parent, question, null);
+    var node = commit === "note" ? createDockedNote(parent, question) : sendFollowup(parent, question, null);
     if (!node) return;
     composerText.value = "";
     autoGrowComposer();
@@ -536,20 +501,14 @@ export function rollbackBranch(node, restore){
     flashHint("Couldn't reach the agent — that ask was undone.");
   }
 
-function rollbackNote(node){
-    if (nodes[node.id] !== node) return;
-    teardownNode(node.id);
-    if (canvasBuilt) drawEdges();
-    if (mode === "reader" && currentNodeId === node.parent_id) renderMarginNotes();
-    flashHint("Couldn't save that note — it was undone.");
-  }
-
 function subtreeBounds(node){
-    return sharedSubtreeBounds(node, { childrenOf: childrenOf, effH: effH, sort: nodeOrder });
+    return sharedSubtreeBounds(node, { childrenOf: placedChildrenOf, effH: effH, sort: nodeOrder });
   }
+  // Only cards take up room: a docked note is drawn on its parent and has no
+  // bounds a new branch could collide with.
 function placeChild(parent, branchType){
     return sharedPlaceChild(parent, branchType, {
-      childrenOf: childrenOf,
+      childrenOf: placedChildrenOf,
       effH: effH,
       sort: nodeOrder,
       childSize: DEFAULT_CHILD

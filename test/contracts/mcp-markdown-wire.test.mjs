@@ -324,13 +324,21 @@ async function runMarkdownWireFixture() {
   assert.equal(persistedStandalone.parent_id, null);
   assert.equal(persistedStandalone.markdown, "The answer remains disconnected on the canvas.");
 
+  // Docking is presentation: this note lives on its parent card rather than on
+  // the canvas, and the agent must not be able to tell.
   await postEvent(session, {
     type: "node_create",
     id: "anchored-wire-note",
     parent_id: session.rootId,
     markdown: "Remember the root definition.",
     origin: { kind: "note", selected_text: "Root", anchor: { offset_start: 2, offset_end: 6 } },
+    docked: true,
   });
+  const dockedNode = session.nodes.get("anchored-wire-note");
+  assert.deepEqual(dockedNode.extensions, { note: { docked: true } },
+    "a docked note carries its presentation flag in the extensions bag alone");
+  assert.deepEqual({ position: dockedNode.position, size: dockedNode.size }, { position: { x: 0, y: 0 }, size: null },
+    "a docked note takes no canvas geometry");
   await postEvent(session, {
     type: "node_create",
     id: "standalone-wire-note",
@@ -363,7 +371,9 @@ async function runMarkdownWireFixture() {
   });
   const notesBranch = await openRabbithole({ holeId: session.holeId });
   assert.deepEqual(notesBranch.notes, [standaloneNoteEntry, anchoredNoteEntry],
-    "branch_request carries exactly the standalone-first relevant note entries");
+    "branch_request carries exactly the standalone-first relevant note entries, docked or placed");
+  assert.equal(JSON.stringify(notesBranch.notes).includes("docked"), false,
+    "how a note is shown is the human's business, never the agent's");
   assertCancelledShape(await answerBranch({
     sessionId: session.id,
     requestId: notesRequestId,
@@ -405,7 +415,12 @@ async function runMarkdownWireFixture() {
   const exportHydration = snapshotProjectionToFrozenHydration(projection);
   assert.equal(exportHtml.split(SNAPSHOT_PAYLOAD_OPEN).length - 1, 1, "export should contain exactly one inert payload");
   assertNoContentHtml(projection, "export projection");
-  assert(projection.hole.nodes.every((node) => Object.keys(node.extensions).length === 0), "snapshot payload clears learner extensions");
+  // Personal extension state is stripped from a share; how a note is shaped on
+  // the page is not personal state but the page itself, so docking survives.
+  assert(projection.hole.nodes.every((node) => Object.keys(node.extensions).every((namespace) => namespace === "note")),
+    "snapshot payload clears learner extensions");
+  assert.deepEqual(projection.hole.nodes.find((node) => node.id === "anchored-wire-note").extensions, { note: { docked: true } },
+    "a docked note is still docked in a frozen snapshot");
   assertIncludes(exportHtml, "RabbitholeFrozenClient.startPortableSnapshot", "export should use the portable snapshot bootstrap");
   assert.deepEqual(Object.keys(projection.assets), ["diagram-1.png"], "export should include referenced assets only");
   assert.equal(projection.assets["diagram-1.png"], PNG_BYTES.toString("base64"));

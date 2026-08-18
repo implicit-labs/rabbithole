@@ -86,6 +86,7 @@ export interface NodeCreateEvent {
   position?: unknown;
   size?: unknown;
   origin?: unknown;
+  docked?: unknown;
 }
 export interface NodeProgressEvent extends NodeTarget, BaseUrlFields {
   type: "node_progress";

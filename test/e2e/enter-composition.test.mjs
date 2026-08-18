@@ -201,15 +201,15 @@ async function verifyReaderComposer(page, calls) {
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue("#composer-text"), "line one\nline two", "Shift+Enter should insert a newline in the reader follow-up composer");
   await page.keyboard.press("Enter");
-  const readerNote = page.locator(".node-note", { hasText: "line one" }).last();
-  await readerNote.waitFor({ state: "attached" });
-  const readerNoteId = await readerNote.getAttribute("data-id");
-  await page.waitForFunction(async (id) => {
-    const hole = await window.__rabbitholeTest.readStoredHole();
-    return hole.nodes.some((node) => node.id === id && node.origin?.kind === "note" && !node.origin.anchor && node.markdown === "line one\nline two");
-  }, readerNoteId);
-  assert.equal(await page.locator(`#margin-notes .side-item[data-child="${readerNoteId}"].followup`).count(), 1,
-    "a reader Enter note should render as a follow-up tile");
+  // A note about the document you are reading docks onto it: a ring in the
+  // reader's own margin, never a card and never a branch tile.
+  const readerRing = page.locator("#reader-main .note-dot.note-dot-whole").last();
+  await readerRing.waitFor();
+  const readerNoteId = await readerRing.getAttribute("data-note");
+  assert.deepEqual(await storedNote(page, readerNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: true, size: null },
+    "a reader Enter note should persist as a docked, place-less note");
+  assert.equal(await page.locator(`#margin-notes .side-item[data-child="${readerNoteId}"]`).count(), 0,
+    "a docked note is not a branch and must not take a rail tile");
   assert.equal(calls(), 1, "plain Enter should save a reader note without calling the provider");
   await page.waitForFunction(() => Array.from(document.querySelectorAll("#composer-actions .ask-commit"))
     .every((button) => getComputedStyle(button).display === "none"));
@@ -274,20 +274,14 @@ async function verifyCardComposer(page, calls) {
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue(selector), "line one\nline two", "Shift+Enter should insert a newline in the card follow-up composer");
   await page.keyboard.press("Enter");
-  const cardNote = page.locator(".node-note", { hasText: "line one" }).last();
-  await cardNote.waitFor();
-  const cardNoteId = await cardNote.getAttribute("data-id");
-  const storedCardNote = await page.waitForFunction(async (id) => {
-    const hole = await window.__rabbitholeTest.readStoredHole();
-    const note = hole.nodes.find((node) => node.id === id);
-    const parent = note && hole.nodes.find((node) => node.id === note.parent_id);
-    return note && parent ? { origin: note.origin, parentId: note.parent_id, x: note.position.x, y: note.position.y,
-      parentX: parent.position.x, parentY: parent.position.y, markdown: note.markdown } : null;
-  }, cardNoteId).then((handle) => handle.jsonValue());
-  assert.deepEqual(storedCardNote.origin, { kind: "note" }, "card Enter should persist an anchor-less note origin");
-  assert.equal(storedCardNote.x, storedCardNote.parentX, "card notes should use the follow-up lane's parent-aligned x position");
-  assert(storedCardNote.y > storedCardNote.parentY, "card notes should be placed below their parent in the follow-up lane");
-  assert.equal(storedCardNote.markdown, "line one\nline two");
+  // The same on the canvas: the card composer's Note commit docks a whole-card
+  // note onto the card it was written from.
+  const cardRing = page.locator(".node.root .note-dot.note-dot-whole").last();
+  await cardRing.waitFor();
+  const cardNoteId = await cardRing.getAttribute("data-note");
+  assert.deepEqual(await storedNote(page, cardNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: true, size: null },
+    "card Enter should persist an anchor-less docked note with no canvas geometry");
+  assert.equal(await page.locator(`.node[data-id="${cardNoteId}"]`).count(), 0, "a docked note has no card of its own");
   assert.equal(calls(), 3, "plain Enter should save a card note without calling the provider");
 
   await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
@@ -503,4 +497,18 @@ async function findCanvasBackground(page) {
     }
     throw new Error("No empty canvas point found");
   });
+}
+
+/* The persisted shape of one note. Polled rather than waited on: Playwright's
+   waitForFunction resolves on a returned Promise instead of its value. */
+async function storedNote(page, id, timeout = 8000) {
+  const deadline = Date.now() + timeout;
+  let node = null;
+  while (Date.now() < deadline) {
+    node = await page.evaluate(async (noteId) =>
+      (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === noteId) || null, id);
+    if (node) return { origin: node.origin, markdown: node.markdown, docked: node.extensions?.note?.docked ?? false, size: node.size };
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`note ${id} never persisted`);
 }

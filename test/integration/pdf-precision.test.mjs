@@ -493,8 +493,12 @@ try {
   assert.equal(answerBodies.length, answerCountBeforeNote, "PDF notes must not invoke the model provider");
   assert.equal(await page.locator(`.node .rh-pdf-mark.mark-ready.mark-note[data-child="${pdfNote.id}"]`).count(), 1,
     "a PDF note should paint an SVG mark-note group immediately");
+  assert.equal(pdfNote.extensions?.note?.docked, true, "a PDF note docks onto the page it marks");
+  assert.equal(pdfNote.size, null, "a docked PDF note takes no canvas geometry");
 
-  const expectedReaderBranches = noteState.hole.nodes.filter((node) => node.parent_id === root.id).length;
+  // Docked notes are not branches: the rail lists cards, the margin lists notes.
+  const expectedReaderBranches = noteState.hole.nodes
+    .filter((node) => node.parent_id === root.id && node.origin?.kind !== "note").length;
   await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
@@ -610,11 +614,14 @@ async function selectAndAsk(page, itemText, start, end, question) {
   await page.waitForFunction((count) => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }
 
+// A note about a PDF selection docks onto the PDF's own card: an SVG mark-note
+// group plus a margin dot, and deliberately no new card on the canvas.
 async function selectAndNote(page, itemText, start, end, markdown) {
-  const expected = await selectAndFill(page, itemText, start, end, markdown);
+  const before = await selectAndFill(page, itemText, start, end, markdown) - 1;
   await page.click('#ask .ask-commit[data-commit="note"]');
-  await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
   await page.waitForSelector(".node .rh-pdf-mark.mark-note");
+  await page.waitForSelector(".node .note-dot");
+  assert.equal(await page.locator(".node").count(), before, "a docked PDF note must not spawn a card");
 }
 
 async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, lastOffset, question }) {

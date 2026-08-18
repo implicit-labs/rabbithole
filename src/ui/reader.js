@@ -19,6 +19,7 @@ import {
 import {
   BRANCH_FOLLOWUP,
   branchTypeOfNode,
+  isDockedNote,
   lensLabel,
   lineageNodesFromMap,
   truncate
@@ -52,7 +53,10 @@ function defaultReaderHooks(){
     scheduleViewSave: function(){},
     setMode: function(){},
     mountDocImages: null,
-    animateScroll: function(){}
+    animateScroll: function(){},
+    // Docked notes belong to the document on screen; the reader gives them its
+    // real right margin and asks their module to fill it.
+    renderDockedNotes: function(){}
   };
 }
 
@@ -269,6 +273,7 @@ export function renderReaderBody(){
     col.classList.toggle("pdf-reader-col", isPdfReader);
     col.classList.toggle("pdf-reader-viewport", isPdfViewport);
     readerMain.appendChild(col);
+    readerLifecycle.hooks.renderDockedNotes(node);
     // Each document remembers where you were; a first open starts at the top.
     readerMain.scrollTop = node._scrollTop || 0;
   }
@@ -296,20 +301,22 @@ function scrollMarkIntoView(mark, viewportRatio, source){
     readerLifecycle.hooks.scheduleViewSave();
   }
 
+  // A mark takes you to its branch — unless the branch is a docked note, whose
+  // whole point is that there is nowhere to go: its own module opens it in place.
   function onMarkClick(e){
     var m = e.target.closest("[data-child].rh-pdf-mark, mark[data-child]");
     if (!m) return;
     if (!window.getSelection().isCollapsed) return; // user was selecting, not clicking
     var k = nodes[m.dataset.child];
     // Pending branches open too — the reader shows the answer streaming in live.
-    if (k) openNode(k.id);
+    if (k && !isDockedNote(k)) openNode(k.id);
   }
   function onMarkKeydown(e){
     if (e.key !== "Enter") return;
     var m = e.target.closest && e.target.closest("[data-child].rh-pdf-mark, mark[data-child]");
     if (!m) return;
     var k = nodes[m.dataset.child];
-    if (!k) return;
+    if (!k || isDockedNote(k)) return;
     e.preventDefault();
     openNode(k.id);
   }
@@ -318,14 +325,14 @@ function scrollMarkIntoView(mark, viewportRatio, source){
     if (!m) return;
     if (!window.getSelection().isCollapsed) return; // the human was selecting, not clicking
     var k = nodes[m.dataset.child];
-    if (k) goToNode(k, motionSourceFromEvent(e));
+    if (k && !isDockedNote(k)) goToNode(k, motionSourceFromEvent(e));
   }
   function onCanvasMarkKeydown(e){
     if (e.key !== "Enter") return;
     var m = e.target.closest && e.target.closest("mark[data-child]");
     if (!m) return;
     var k = nodes[m.dataset.child];
-    if (!k) return;
+    if (!k || isDockedNote(k)) return;
     e.preventDefault();
     goToNode(k, motionSourceFromEvent(e));
   }
@@ -336,7 +343,9 @@ function scrollMarkIntoView(mark, viewportRatio, source){
 export function renderMarginNotes(){
     var layer = marginNotesLayer();
     if (!layer) return;
-    var kids = childrenOf(currentNodeId).sort(function(a,b){
+    // Docked notes are not branches: they already show themselves in the
+    // margin beside the very words they mark.
+    var kids = childrenOf(currentNodeId).filter(function(k){ return !isDockedNote(k); }).sort(function(a,b){
       var aAnchored = !!(a.origin && a.origin.anchor), bAnchored = !!(b.origin && b.origin.anchor);
       if (aAnchored !== bAnchored) return aAnchored ? -1 : 1;
       return (aAnchored ? anchorStart(a) - anchorStart(b) : 0) || ((a._order||0) - (b._order||0));

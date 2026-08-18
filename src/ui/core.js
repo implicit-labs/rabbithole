@@ -63,6 +63,7 @@ function defaultCoreHooks(){
     ensureNodeHtml: function(){},
     persistNode: function(){},
     scheduleEdges: function(){},
+    revealDockedNote: function(){ return false; },
     mountDocImages: null,
     mountPdfView: null
   };
@@ -346,6 +347,9 @@ export function setSurfaceOrigin(el, anchorRect){
   // (streaming answers render live), the canvas dives to the card and flashes it.
 export function goToNode(node, source){
     if (!node) return;
+    // A docked note has no card of its own to travel to: it is shown where it
+    // lives, on the card it was written about.
+    if (coreHooks.revealDockedNote(node, source)) return;
     if (mode === "canvas"){
       coreHooks.ensureCanvasBuilt();
       coreHooks.diveToNode(node, source);

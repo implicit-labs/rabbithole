@@ -66,6 +66,11 @@ async function modernJourney() {
     await streamAnswer(mcp.client, branch, "Modern branch");
     await page.locator(".doc-content", { hasText: "Second final paragraph" }).waitFor();
 
+    // Docked notes are a pure client feature: the MCP host takes the same
+    // node_create and the snapshot must carry the note the same way.
+    await selectAndNote(page, "Inline math", "A note the snapshot must keep.");
+    const dockedNoteId = await page.locator(".note-dot").getAttribute("data-note");
+
     const snapshotPath = await downloadShare(page, "#sm-export", "modern-snapshot.html");
     const snapshotText = await fs.readFile(snapshotPath, "utf8");
     const snapshot = JSON.parse(extractSnapshotPayload(snapshotText));
@@ -75,6 +80,7 @@ async function modernJourney() {
     try {
       await snapshotPage.setContent(snapshotText, { waitUntil: "load" });
       await assertRendered(snapshotPage, "Select this exact phrase", true);
+      await assertFrozenDockedNote(snapshotPage, dockedNoteId);
       await assertCodeCopy(snapshotPage, { scope: ".doc-content:visible", rawCode: JOURNEY_CODE, hover: false, label: "MCP snapshot" });
       // Appearance is a way of looking, so it survives into a snapshot the same
       // way collapse does — and nothing about providers ever ships with one.
@@ -204,6 +210,13 @@ async function callTool(client, name, args, options = {}) {
 }
 
 async function selectAndAsk(page, phrase, question) {
+  await selectPhrase(page, phrase);
+  await page.waitForSelector("#ask.visible");
+  await page.fill("#ask-text", question);
+  await page.press("#ask-text", "Control+Enter");
+}
+
+async function selectPhrase(page, phrase) {
   await page.locator(".doc-content:visible", { hasText: phrase }).first().waitFor();
   const selected = await page.evaluate((needle) => {
     const root = [...document.querySelectorAll(".doc-content")].find((el) => el.offsetParent !== null && el.textContent.includes(needle));
@@ -216,9 +229,36 @@ async function selectAndAsk(page, phrase, question) {
     return "";
   }, phrase);
   assert.equal(selected, phrase, `selection mismatch: ${JSON.stringify({ selected, phrase })}`);
+}
+
+async function selectAndNote(page, phrase, markdown) {
+  await selectPhrase(page, phrase);
   await page.waitForSelector("#ask.visible");
-  await page.fill("#ask-text", question);
-  await page.press("#ask-text", "Control+Enter");
+  await page.fill("#ask-text", markdown);
+  await page.click('#ask .ask-commit[data-commit="note"]');
+  await page.waitForSelector(".note-dot");
+}
+
+/* A frozen snapshot is a way of looking: the wash, the dot and the note itself
+   survive it, while every way of changing the note is simply gone. */
+async function assertFrozenDockedNote(page, noteId) {
+  await page.waitForSelector(`.note-dot[data-note="${noteId}"]`);
+  assert.equal(await page.locator(`mark[data-child="${noteId}"].mark-note`).count(), 1,
+    "a frozen snapshot keeps the docked note's wash");
+  assert.equal(await page.locator(`.node[data-id="${noteId}"]`).count(), 0,
+    "a docked note must not turn into a card in a snapshot");
+  await page.locator(`.note-dot[data-note="${noteId}"]`).click();
+  await page.waitForSelector("#notepop.visible");
+  assert.equal((await page.locator("#notepop .note-pop-view").innerText()).trim(), "A note the snapshot must keep.",
+    "a frozen docked note still reads");
+  assert.equal(await page.locator("#notepop .note-pop-actions button:visible").count(), 0,
+    "a snapshot offers no place-on-canvas and no delete");
+  await page.locator(`.note-dot[data-note="${noteId}"]`).dblclick();
+  assert.equal(await page.locator("#notepop .note-editor").count(), 0, "a snapshot cannot be edited");
+  await page.click(".node.root .node-more");
+  assert.equal(await page.locator("#cm-note:visible").count(), 0, "a snapshot offers no Add note");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
 }
 
 async function streamAnswer(client, request, title) {
@@ -257,7 +297,10 @@ function assertProjection(projection, expected) {
   assert.equal(projection.hole.schema_version, 2);
   assertHole(projection.hole, expected.title, expected.rootMarkdown, expected.branchMarkdown);
   assert.deepEqual(Buffer.from(projection.assets["journey.png"], "base64"), expected.asset, `asset bytes differ: ${projection.assets["journey.png"]}`);
-  if (expected.stripExtensions) assert(projection.hole.nodes.every((node) => Object.keys(node.extensions).length === 0), `snapshot projection leaked extensions: ${JSON.stringify(projection.hole.nodes)}`);
+  // A share strips personal extension state; a note's docked flag is how the
+  // page is shaped, so it travels with the page.
+  if (expected.stripExtensions) assert(projection.hole.nodes.every((node) => Object.keys(node.extensions).every((namespace) => namespace === "note")),
+    `snapshot projection leaked extensions: ${JSON.stringify(projection.hole.nodes)}`);
   assertNoCredentials(JSON.stringify(projection), "projection");
 }
 

@@ -18,6 +18,18 @@ export function isNoteNode(node) {
     && /** @type {{ kind?: unknown }} */ (node.origin).kind === "note";
 }
 
+/*
+ * Docking is presentation, never identity: a docked note is an ordinary note
+ * node that renders on its parent card (wash + margin dot) instead of owning a
+ * place on the canvas. The flag rides in the extensions bag — the same idiom
+ * the native-PDF representation uses — so older documents rehydrate untouched
+ * and every note payload (MCP, exports, lineage) stays exactly what it was.
+ */
+/** @param {{ origin?: unknown, parent_id?: unknown, extensions?: any } | null | undefined} node */
+export function isDockedNote(node) {
+  return isNoteNode(node) && (node?.parent_id ?? null) !== null && node?.extensions?.note?.docked === true;
+}
+
 /** @type {Readonly<Record<PropertyKey, { label: string, q: string }>>} */
 export const LENSES = Object.freeze({
   explain: Object.freeze({

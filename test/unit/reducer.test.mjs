@@ -230,6 +230,35 @@ assertGoldens(nodeResults, "node");
   assert.equal(recommitted.state.nodes.get("standalone-note").status, "pending");
   assert.equal(recommitted.state.nodes.get("standalone-note").markdown, "");
 
+  // Docking is presentation and only means anything on a parent: it rides in
+  // the extensions bag, leaves the note itself untouched, and clears when the
+  // note is later given a place.
+  const docked = reduceHoleEvent(standalone.state, {
+    type: "node_create",
+    id: "docked-note",
+    parent_id: "root",
+    markdown: "Kept on the card it marks.",
+    origin: { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 } },
+    docked: true,
+  }, { now: "2026-08-11T00:00:02.000Z" });
+  const dockedNote = docked.state.nodes.get("docked-note");
+  assert.deepEqual(dockedNote.extensions, { note: { docked: true } }, "node_create docks a note through the extensions bag");
+  assert.deepEqual({ position: dockedNote.position, size: dockedNote.size }, { position: { x: 0, y: 0 }, size: null },
+    "a docked note is created without canvas geometry");
+  assert.deepEqual(dockedNote.origin, { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 }, branch_type: "selection" },
+    "docking leaves the note's own identity exactly as any other anchored note's");
+  const placed = reduceHoleEvent(reduceHoleEvent(docked.state, {
+    type: "node_extensions_patch", node_id: "docked-note", namespace: "note", value: {},
+  }).state, { type: "node_update", node_id: "docked-note", position: { x: 550, y: 0 }, size: { w: 420, h: 460 } });
+  assert.deepEqual(placed.state.nodes.get("docked-note").extensions, { note: {} }, "placing a note clears the docked flag");
+  assert.deepEqual(placed.state.nodes.get("docked-note").size, { w: 420, h: 460 }, "placing a note gives it geometry");
+  assert.equal(placed.state.nodes.get("docked-note").markdown, "Kept on the card it marks.", "placing a note never touches its words");
+  const standaloneDocked = reduceHoleEvent(standalone.state, {
+    type: "node_create", id: "docked-standalone", markdown: "No parent to dock to.", origin: { kind: "note" }, docked: true,
+  });
+  assert.deepEqual(standaloneDocked.state.nodes.get("docked-standalone").extensions, {},
+    "a parentless note has no card to dock to and stays a window");
+
   assert.throws(
     () => reduceHoleEvent(standalone.state, { type: "node_create", id: "standalone-note", markdown: "Duplicate", origin: { kind: "note" } }),
     /Node standalone-note already exists/,

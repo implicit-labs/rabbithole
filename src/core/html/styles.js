@@ -360,7 +360,9 @@ body.mode-flight #viewport { display: block; }
 .tool-icon:active, .node-btn:active { background-color: color-mix(in srgb, currentColor 13%, transparent); }
 .tool-icon:focus, .node-btn:focus { outline: none; }
 .tool-icon:focus-visible, .node-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.node-body { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
+/* position: relative so a docked note's margin dots hang off the body's own
+   padding box — inside the card, scrolling with the words they mark. */
+.node-body { position: relative; padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
 .note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
@@ -512,17 +514,17 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .ask-actions { display: flex; flex-wrap: wrap; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
 .commit-actions { position: relative; display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; }
 .commit-actions::before { content: ""; position: absolute; z-index: 1; top: 6px; bottom: 6px; left: 50%; width: 1px; transform: translateX(-0.5px); background: var(--border); pointer-events: none; }
-.lens, .ask-commit { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
+.lens, .ask-commit, .note-pop-btn { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: 11px; font-weight: 500;
   color: var(--fg-dim); background: none; border: none; border-radius: 8px; padding: 5.5px 9px; cursor: pointer; white-space: nowrap;
   transition: color 0.12s, background 0.12s; }
-.lens:hover, .ask-commit:hover { color: var(--fg-bold); background: var(--hl); }
-.lens:active, .ask-commit:active { background: var(--hl-strong); }
+.lens:hover, .ask-commit:hover, .note-pop-btn:hover { color: var(--fg-bold); background: var(--hl); }
+.lens:active, .ask-commit:active, .note-pop-btn:active { background: var(--hl-strong); }
 .ask-commit:disabled { cursor: default; opacity: 0.5; }
 .ask-commit:disabled:hover, .ask-commit:disabled:active { color: var(--fg-dim); background: none; }
 /* A 2px ring floating outside a bare pill collides with the popover's own hairline
    in a 5px gutter. Draw the keyboard state inside the pill instead: the hover fill
    plus a tinted edge on the exact same 8px radius — unmistakable, never loud. */
-.lens:focus-visible, .ask-commit:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
+.lens:focus-visible, .ask-commit:focus-visible, .note-pop-btn:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
 /* Every chip — 1 2 3 4 ↵ ⌘↵ — is the same fixed block, flex-centered so the
    glyph sits optically dead-center regardless of its own metrics (↵ carries
@@ -589,6 +591,61 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-edit-surface .note-editor { max-height: none; padding: 0; min-height: 1.72em;
   font-family: var(--font-doc); line-height: 1.72; color: var(--fg); }
 .note-edit-surface > .ask-actions { flex: 0 0 auto; }
+
+/* ---------- docked notes ----------
+   A note written about a card lives ON that card: the wash marks the words and
+   a graphite dot sits in the card's own right padding, level with the anchor's
+   line. Never an outboard rail — outboard dots read as orphans on a crowded
+   canvas and get clipped by the neighbouring card — and never a reflow. The
+   reader has a real margin, so there the same dots move to the column edge. */
+.note-dots { position: absolute; inset: 0; pointer-events: none; }
+.note-dots.note-dots-reader { left: 100%; right: auto; margin-left: 12px; width: 12px; }
+.note-dots.note-dots-inside { left: auto; right: 0; margin-left: 0; }
+.note-dot { position: absolute; right: 4px; width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--note-ink); box-shadow: 0 0 0 3px var(--node-bg); cursor: pointer; pointer-events: auto;
+  transition: transform var(--duration-fast) var(--ease-spring), background var(--duration-fast) var(--ease-standard); }
+.note-dots-reader .note-dot { right: auto; left: 0; box-shadow: 0 0 0 3px var(--bg); }
+.note-dots-inside .note-dot { left: auto; right: 4px; }
+/* 8px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
+.note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
+.note-dot:hover, .note-dot.note-dot-partner { transform: scale(1.35); background: color-mix(in srgb, var(--note-ink) 74%, var(--fg-bold)); }
+/* A note about the whole card has no line to sit beside, so it reads as an
+   outline at the top of the column instead of a filled anchor. */
+.note-dot-whole { width: 10px; height: 10px; background: var(--node-bg); border: 2px solid var(--note-ink); box-shadow: 0 0 0 2px var(--node-bg); }
+.note-dots-reader .note-dot-whole { background: var(--bg); box-shadow: 0 0 0 2px var(--bg); }
+.note-dot:focus { outline: none; }
+.note-dot:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+/* The note's own surface: the product's popover, sized to a paragraph. No
+   header and no ×; the note's quiet left rule is the only identity it needs. */
+.note-pop { width: 304px; min-width: 0; }
+.note-pop-view, .note-pop-edit { border-left: 2px solid var(--note-ink); border-radius: var(--radius-control); background: var(--note-hl); }
+.note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain; padding: 10px 12px; }
+.note-pop-edit { display: flex; flex-direction: column; overflow: hidden; }
+.note-pop-edit > .ask-input { align-items: flex-start; padding: 10px 12px 6px; }
+/* The textarea is the prose it replaces, pixel for pixel — same face, same
+   rhythm — so switching states never moves a word. */
+.note-pop-edit .note-editor { max-height: 190px; padding: 0; font-family: var(--font-doc); font-size: var(--doc-size-canvas); line-height: var(--leading-doc); color: var(--fg); }
+.note-pop-edit > .ask-actions { flex: 0 0 auto; border-top: 1px solid color-mix(in srgb, var(--fg) 9%, transparent); background: none; }
+/* The read state's two verbs wear the composer's own pill — one control
+   vocabulary across every surface (see .lens, .ask-commit above). */
+.note-pop-actions { display: flex; align-items: center; gap: var(--space-1); padding-top: var(--space-3); }
+.note-pop.note-pop-editing .note-pop-actions { display: none; }
+.note-pop-place { color: var(--note-ink); }
+/* Delete reads as ordinary text until you are on it, like every other
+   destructive row in the product. */
+.note-pop-delete { margin-left: auto; }
+.note-pop-delete:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+/* Placing a note is the one moment the note travels: a ghost of the note flies
+   from the mark it lived on to the card it becomes. */
+.note-flight { position: fixed; z-index: var(--layer-lightbox); overflow: hidden; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-popover); background: var(--node-bg); box-shadow: var(--shadow-popover);
+  color: var(--fg); font-family: var(--font-doc); font-size: var(--doc-size-canvas); line-height: var(--leading-doc);
+  pointer-events: none; opacity: 1; }
+.note-flight.note-flight-landing { opacity: 0.06;
+  transition: left var(--duration-slow) var(--ease-out), top var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out), height var(--duration-slow) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-standard) var(--duration-slow); }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */

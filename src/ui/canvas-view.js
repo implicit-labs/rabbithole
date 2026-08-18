@@ -56,6 +56,7 @@ import {
   BRANCH_SELECTION,
   LENSES,
   branchTypeOfNode,
+  isDockedNote,
   isNoteNode,
   lensLabel,
   truncate
@@ -113,7 +114,13 @@ function defaultCanvasHooks(){
     removeBranch: function(){},
     persistNode: function(){},
     persistNodesBulk: function(){},
-    scheduleViewSave: function(){}
+    scheduleViewSave: function(){},
+    // Docked notes render on the cards this module owns, so the canvas asks
+    // for them by hook rather than reaching into their module.
+    renderDockedNotes: function(){},
+    positionDockedNotes: function(){},
+    closeDockedNotePopover: function(){},
+    addDockedNote: function(){}
   };
 }
 
@@ -230,6 +237,7 @@ function applyTransform(){
     // mid-canvas, so the view moving dismisses it.
     if (cardMenuController && cardMenuController.isOpen()) cardMenuController.close({ restoreFocus: false });
     if (collapseMenuController && collapseMenuController.isOpen()) collapseMenuController.close({ restoreFocus: false });
+    canvasLifecycle.hooks.closeDockedNotePopover({ restoreFocus: false, commit: true });
     world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
     zoomLabel.textContent = Math.round(view.scale * 100) + "%";
     canvasLifecycle.hooks.scheduleViewSave();
@@ -305,7 +313,7 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     if (!node || node._ephemeral || node.moreBtn || !node.actsEl) return;
     node.actsEl.appendChild(nodeMenuButton(node));
   }
-  function canConvertNote(node){
+export function canConvertNote(node){
     return !!node && !node._ephemeral && !frozen && !closed && node.id !== rootId && isNoteNode(node) && childrenOf(node.id).length === 0;
   }
   function openCardMenu(node, trigger, openedByKeyboard){
@@ -322,6 +330,9 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     // collapse button does.
     syncCollapseGroup(node, "cm-");
     document.getElementById("cm-rename").style.display = frozen ? "none" : "";
+    // A note about the whole card: an ephemeral draft has nothing to note about
+    // yet, and a snapshot takes no new writing.
+    document.getElementById("cm-note").style.display = frozen || closed ? "none" : "";
     document.getElementById("cm-convert").style.display = canConvertNote(node) && !!(node.md || "").trim() ? "" : "none";
     var showDelete = !frozen && node.id !== rootId;
     document.getElementById("cm-delete").style.display = showDelete ? "" : "none";
@@ -341,6 +352,7 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     cardMenuController.close();
     if (button.id === "cm-copy") canvasLifecycle.hooks.copyNodeMarkdown(node);
     else if (button.id === "cm-rename") startTitleEditing(node, node.titleEl);
+    else if (button.id === "cm-note") canvasLifecycle.hooks.addDockedNote(node, node.moreBtn);
     else if (button.id === "cm-convert") convertNoteToAsk(node, node.md);
     else if (button.id.indexOf("cm-collapse") === 0) runCollapseAction(node, button.id.slice(3));
     else if (button.id === "cm-delete") canvasLifecycle.hooks.removeBranch(node);
@@ -351,14 +363,19 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
   // gets a vote (a half-open grandchild must not keep the label saying
   // "collapse" when the row under the card is already shut).
   function childrenAllCollapsed(node){
-    var kids = childrenOf(node.id);
+    var kids = placedChildren(node.id);
     return kids.length > 0 && kids.every(function(kid){ return !!kid.collapsed; });
+  }
+  // Docked notes are drawn on their parent, not beside it: they have no card to
+  // fold, no place to tidy into, and no bounds to frame.
+  function placedChildren(id){
+    return childrenOf(id).filter(function(kid){ return !isDockedNote(kid); });
   }
   // Three scopes, three rows, each flipping on exactly the thing its own noun
   // names: the card, the card plus its subtree, the subtree alone. A card with
   // nothing under it keeps only the row about itself.
   function syncCollapseGroup(node, prefix){
-    var hasChildren = childrenOf(node.id).length > 0;
+    var hasChildren = placedChildren(node.id).length > 0;
     syncCollapseRow(document.getElementById(prefix + "collapse"), !!node.collapsed, "", true);
     syncCollapseRow(document.getElementById(prefix + "collapse-branch"), !!node.collapsed, " branch", hasChildren);
     syncCollapseRow(document.getElementById(prefix + "collapse-children"), childrenAllCollapsed(node), " children", hasChildren);
@@ -644,7 +661,7 @@ function animatePan(tx, ty, source, duration, ease){ animateView(tx, ty, view.sc
   // search/activity jumps. A newer glide cancels an in-flight one; hidden windows jump
   // instantly (rAF never fires there).
   var viewAnimId = 0, viewAnimRaf = 0;
-  function cancelViewAnimation(){
+export function cancelViewAnimation(){
     viewAnimId++;
     if (viewAnimRaf){ cancelAnimationFrame(viewAnimRaf); viewAnimRaf = 0; }
   }
@@ -689,6 +706,8 @@ export function fillBody(node){
     body.appendChild(dc);
     body.classList.toggle("pdf-body", dc.classList.contains("rh-pdf"));
     applyChildHighlights(dc, node);
+    // The marks exist now, so the margin column that points at them can be built.
+    canvasLifecycle.hooks.renderDockedNotes(node);
   }
   function noteSurface(node, surface){
     var dc = buildDocContent(node, surface === "reader" ? READER_BASE : CANVAS_BASE);
@@ -706,10 +725,10 @@ export function fillBody(node){
   // One bar for every note surface — the composer's own Note/Ask pair, built
   // and keyed the same way whether the note is being written for the first time
   // or edited afterwards. Note commits the text, Ask branches it, ⌘↵ asks.
-  function noteComposerActions(){
+export function noteComposerActions(){
     return cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
   }
-  function noteCommitFromEnter(e){
+export function noteCommitFromEnter(e){
     return !e.altKey && (e.metaKey || e.ctrlKey) && isCommandEnter(e) ? "ask" : null;
   }
   // Whatever the editor sits under inside the card body — an origin quote, an
@@ -1136,7 +1155,7 @@ export function rollbackNoteConversion(node){
     delete node._noteConversionRollback;
     canvasLifecycle.hooks.rollbackBranch(node, restore);
   }
-  function convertNoteToAsk(node, text){
+export function convertNoteToAsk(node, text){
     var question = (text || "").trim();
     if (!question || !canConvertNote(node)) return false;
     var parentId = node.parent_id == null ? null : node.parent_id;
@@ -1659,6 +1678,8 @@ export function drawEdges(){
     for (var childId in edgeEls){
       if (!live[childId]) removeEdge(childId);
     }
+    // Whatever moved the edges moved the marks: the margin dots ride along.
+    canvasLifecycle.hooks.positionDockedNotes();
   }
   // Highlight state lives here, not just on the elements — edges can be removed
   // and recreated when visibility changes, so hover state needs a stable source.
@@ -1895,7 +1916,7 @@ export function frameAll(animate, source){
     var ids = Object.keys(nodes).filter(function(id){
       var node = nodes[id];
       var emptyDraft = node._ephemeral && !node._noteEditor?.value.trim() && !node._noteAttachments?.length && !node._notePastePending;
-      return !emptyDraft && isVisible(node, visCache);
+      return !emptyDraft && !isDockedNote(node) && isVisible(node, visCache);
     });
     if (!ids.length) return;
     var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
@@ -1944,7 +1965,7 @@ export function tidy(source){
     var visited={};
     function moveSubtree(node, dx, dy){
       node.x += dx; node.y += dy;
-      childrenOf(node.id).filter(function(k){ return visited[k.id]; }).sort(nodeOrder).forEach(function(k){ moveSubtree(k, dx, dy); });
+      placedChildren(node.id).filter(function(k){ return visited[k.id]; }).sort(nodeOrder).forEach(function(k){ moveSubtree(k, dx, dy); });
     }
     function place(node, x, y){
       visited[node.id] = true;
@@ -1952,7 +1973,7 @@ export function tidy(source){
       var bounds = nodeBounds(node, { effH: effH });
       if (node.collapsed) return bounds;
 
-      var kids = childrenOf(node.id).sort(nodeOrder);
+      var kids = placedChildren(node.id).sort(nodeOrder);
       var selectionKids = kids.filter(isSelectionBranch);
       var followupKids = kids.filter(isFollowup);
       var sideBounds = null;
@@ -1995,7 +2016,9 @@ export function tidy(source){
 function ensureCanvasBuilt(){
     if (canvasBuilt) return;
     setCanvasBuilt(true);
-    Object.keys(nodes).forEach(function(id){ if (!nodes[id].el) createNodeEl(nodes[id]); });
+    // Docked notes get no card: they are drawn onto their parent's, which
+    // fillBody does as each card is built.
+    Object.keys(nodes).forEach(function(id){ if (!nodes[id].el && !isDockedNote(nodes[id])) createNodeEl(nodes[id]); });
     renderVisibility();
     applyTransform();
   }

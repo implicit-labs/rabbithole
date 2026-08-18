@@ -13,10 +13,18 @@ import { createPortableProjection } from "./portable-projection.js";
 export function createSnapshotProjection(hole, viewState, assets) {
   const projection = createPortableProjection({ ...hole, view_state: viewState }, assets);
   // Shares exclude personal extension state. Native PDF provenance is document
-  // content, not a preference, and is required to render the embedded source.
+  // content, not a preference, and is required to render the embedded source;
+  // a note's docked flag is likewise how that note is shaped on the page, so a
+  // snapshot that dropped it would strand the note as a card with no place.
   projection.hole = {
     ...projection.hole,
-    nodes: projection.hole.nodes.map((node) => ({ ...node, extensions: node.extensions?.pdf ? { pdf: node.extensions.pdf } : {} })),
+    nodes: projection.hole.nodes.map((node) => ({
+      ...node,
+      extensions: {
+        ...(node.extensions?.pdf ? { pdf: node.extensions.pdf } : {}),
+        ...(node.extensions?.note ? { note: node.extensions.note } : {}),
+      },
+    })),
   };
   return projection;
 }

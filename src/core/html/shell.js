@@ -126,6 +126,9 @@ export const CANVAS_SHELL = `
   <div class="sm-sep"></div>
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-copy", role: "menuitem", tabIndex: -1, label: "Copy as Markdown", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("copy") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-rename", role: "menuitem", tabIndex: -1, label: "Rename", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("rename") + '</span>' })}
+  <!-- A note about the whole card: no selection exists to write into, so the
+       docked note's own popover is the input here. -->
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-note", role: "menuitem", tabIndex: -1, label: "Add note", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("file-text") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-convert", role: "menuitem", tabIndex: -1, label: "Convert to Ask", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("question") + '</span>' })}
   <div class="sm-sep"></div>
   ${collapseGroupMarkup("cm-")}
@@ -137,6 +140,17 @@ export const CANVAS_SHELL = `
      menu carries, anchored to the button the gesture started from. -->
 <div id="collapsemenu" class="anchored-menu" role="menu" aria-label="Collapse actions">
   ${collapseGroupMarkup("cc-")}
+</div>
+
+<!-- A docked note reads and edits in place: one anchored, non-modal dialog,
+     opened from the wash or its margin dot. No header, no close button — Esc
+     and outside-click dismiss it, exactly like every other product surface. -->
+<div id="notepop" class="anchored-menu note-pop" role="dialog" aria-label="Note">
+  <div class="note-pop-body"></div>
+  <div class="note-pop-actions">
+    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-place", id: "np-place", label: "Place on canvas" })}
+    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-delete", id: "np-delete", label: "Delete" })}
+  </div>
 </div>
 
 <div id="branch-undo"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Undo", hidden: true, dataAttrs: { noticeAction: "" } })}</div>

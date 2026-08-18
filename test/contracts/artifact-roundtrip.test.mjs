@@ -107,6 +107,25 @@ console.log(`ok artifact round trip: all ${fixtureNames.length} corpus fixtures 
   const snapshotStore = await storeAt("extensions-snapshot");
   const snapshotImported = await importSnapshotFile(snapshotStore.store, snapshot.html);
   assert.deepEqual((await snapshotStore.store.loadHole(snapshotImported.hole_id)).nodes[0].extensions, {}, "snapshot import preserves the cleared extension bag");
+
+  // A docked note is not personal state — it is how the page is shaped — so a
+  // share carries it and the frozen reader can still draw the wash and the dot.
+  const docked = JSON.parse(await fs.readFile(new URL("01-empty-root.rabbithole", corpusDir), "utf8"));
+  docked.hole.nodes.push({
+    id: "docked-note", parent_id: docked.hole.root_id, title: "Note", markdown: "Kept on the card it marks.",
+    base_url: null, base_url_source: null,
+    origin: { kind: "note", selected_text: "", anchor: { offset_start: 0, offset_end: 4 }, branch_type: "selection" },
+    position: { x: 0, y: 0 }, size: null, font_scale: 1, collapsed: false,
+    status: "answered", read: true, created_at: "2026-08-18T00:00:00.000Z",
+    extensions: { note: { docked: true }, future_primitive: { attempts: [1] } },
+  });
+  const dockedStore = await storeAt("extensions-docked");
+  const dockedImported = await importRabbitholeFile(dockedStore.store, JSON.stringify(docked));
+  selectDir(dockedStore.dir);
+  const dockedSnapshot = await exporterSnapshot(dockedStore.store, await dockedStore.store.loadHole(dockedImported.hole_id));
+  const dockedPayload = JSON.parse(dockedSnapshot.html.match(/<script type="application\/vnd\.rabbithole\+json" id="rabbithole-portable">([\s\S]*?)<\/script>/)[1]);
+  assert.deepEqual(dockedPayload.hole.nodes.find((node) => node.id === "docked-note").extensions, { note: { docked: true } },
+    "a snapshot keeps a note docked while still clearing personal extension state");
 }
 console.log("ok artifact round trip: extension bags survive portable round trips and are stripped from snapshots");
 

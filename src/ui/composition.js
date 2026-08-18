@@ -17,9 +17,18 @@ import {
   initAskFollowups,
   rollbackBranch,
   sendFollowup,
-  sendNote,
   updateComposerState
 } from "./ask-followups.js";
+import {
+  addDockedNote,
+  closeDockedNotePopover,
+  createDockedNote,
+  disposeDockedNotes,
+  initDockedNotes,
+  positionDockedNotes,
+  renderDockedNotes,
+  revealDockedNote
+} from "./docked-notes.js";
 import { disposePalette, initPalette, registerPaletteHooks } from "./palette.js";
 import {
   closeShare,
@@ -76,6 +85,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       openNode: openNode,
       ensureNodeHtml: ensureNodeHtml,
       persistNode: host.persistNode || noop,
+      revealDockedNote: revealDockedNote,
       mountDocImages: mountImages,
       mountPdfView: capabilities.mountPdfView || null
     });
@@ -85,12 +95,17 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       scheduleViewSave: host.scheduleViewSave || noop,
       setMode: setMode,
       mountDocImages: mountImages,
-      animateScroll: animateScroll
+      animateScroll: animateScroll,
+      renderDockedNotes: renderDockedNotes
     });
     registerCanvasHooks({
       hideAsk: hideAsk,
       sendFollowup: sendFollowup,
-      sendNote: sendNote,
+      sendNote: createDockedNote,
+      renderDockedNotes: renderDockedNotes,
+      positionDockedNotes: positionDockedNotes,
+      closeDockedNotePopover: closeDockedNotePopover,
+      addDockedNote: addDockedNote,
       rollbackBranch: rollbackBranch,
       copyNodeMarkdown: copyNodeMarkdown,
       removeBranch: removeBranch,
@@ -116,6 +131,9 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
 
     initReader(); own(disposeReader);
     initCanvasView(); own(disposeCanvasView);
+    // After the reader and the canvas, so a docked note's own click handling
+    // sees the event once its surfaces have declined it.
+    initDockedNotes(); own(disposeDockedNotes);
     initAskFollowups(); own(disposeAskFollowups);
     initPalette(); own(disposePalette);
     initBranchSurfaces(); own(disposeBranchSurfaces);

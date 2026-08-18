@@ -26,7 +26,7 @@ import {
   viewAdjusted
 } from "./core.js";
 import { DEFAULT_CHILD } from "../core/layout.js";
-import { isNoteNode } from "../core/model.js";
+import { isDockedNote, isNoteNode } from "../core/model.js";
 import {
   renderBreadcrumb,
   renderReaderBody,
@@ -147,7 +147,15 @@ export function scheduleViewSave(){
   }
   var saveTimers = {};
   function nodeUpdatePayload(node){
-    var payload = { type:"node_update", node_id: node.id, title: node.title, position:{x:node.x,y:node.y}, size:{w:node.w,h:node.h}, collapsed: node.collapsed, font_scale: node.font_scale };
+    var payload = { type:"node_update", node_id: node.id, title: node.title };
+    // A docked note has no place on the canvas, so an update must not invent
+    // geometry for it — only its words and its name are durable.
+    if (!isDockedNote(node)){
+      payload.position = { x: node.x, y: node.y };
+      payload.size = { w: node.w, h: node.h };
+      payload.collapsed = node.collapsed;
+      payload.font_scale = node.font_scale;
+    }
     if (isNoteNode(node)) payload.markdown = node.md;
     return payload;
   }
