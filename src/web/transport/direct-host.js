@@ -52,6 +52,7 @@ export class DirectRabbitholeHost {
     });
     this.savingChain = Promise.resolve();
     this.abortByNode = new Map();
+    this.noteConversions = new Map();
     this.lastEventId = 0;
     this.disposed = false;
     this.subscriptions = new Set();
@@ -159,7 +160,16 @@ export class DirectRabbitholeHost {
     // Raw flag on purpose — normalization fails against the mid-run streamed
     // body, and the lock must hold precisely then.
     if (parent?.extensions?.pdf?.converting) throw new Error("This PDF is being converted. Wait for conversion to finish before branching.");
-    const result = this.dispatch({ ...payload, type: "branch_request" }, { now: new Date().toISOString() });
+    const nodeId = String(payload.node_id || "");
+    const replacedNote = this.state.nodes.get(nodeId);
+    if (isNoteNode(replacedNote)) this.noteConversions.set(nodeId, replacedNote);
+    let result;
+    try {
+      result = this.dispatch({ ...payload, type: "branch_request" }, { now: new Date().toISOString() });
+    } catch (error) {
+      this.noteConversions.delete(nodeId);
+      throw error;
+    }
     const node = result.createdNode;
     await this.flushSave();
     this.startAnswer(node.id, { reset: false });
@@ -308,6 +318,7 @@ export class DirectRabbitholeHost {
       const controller = this.abortByNode.get(id);
       if (controller) controller.abort();
       this.abortByNode.delete(id);
+      this.noteConversions.delete(id);
     }
     this.state = reduced.state;
     await this.gcAssetsForDeletedNodes(deletedNodes);
@@ -489,6 +500,7 @@ export class DirectRabbitholeHost {
     // the fallback title and empty/reset markdown. Root generation still rejects.
     const finalNode = this.state.nodes.get(nodeId);
     this.abortByNode.delete(nodeId);
+    this.noteConversions.delete(nodeId);
     this.emit(buildNodeAnsweredEvent(finalNode));
     await this.flushSave();
   }
@@ -579,6 +591,15 @@ export class DirectRabbitholeHost {
     if (!node || node.status !== "pending") return;
     const normalized = normalizeProviderError(err);
     if (normalized.code === "abort") return;
+    const replacedNote = this.noteConversions.get(nodeId);
+    if (replacedNote) {
+      this.noteConversions.delete(nodeId);
+      this.state.nodes.set(nodeId, replacedNote);
+      this.emit({ type: "node_error", node_id: nodeId, message: normalized.message,
+        code: normalized.code, retryable: false, restore_note: true });
+      this.scheduleSave();
+      return;
+    }
     if (isAuthError(normalized)) {
       this.onAuthRequired?.({ node, error: normalized, retry: () => this.handleRetry({ node_id: nodeId }) });
     } else if (["network", "agent_signed_out", "agent_missing", "model_unknown", "model_no_images", "payload_too_large", "turn_failed"].includes(normalized.code)) {
@@ -677,6 +698,7 @@ export class DirectRabbitholeHost {
       try { controller.abort(); } catch {}
     }
     this.abortByNode.clear();
+    this.noteConversions.clear();
     for (const subscription of [...this.subscriptions]) subscription.close();
     this.onEvent = null;
     return this.savingChain;

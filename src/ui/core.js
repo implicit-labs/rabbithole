@@ -7,7 +7,6 @@ import { mountCodeCopy } from "./code-copy.js";
 export var SVGNS = "http://www.w3.org/2000/svg";
 export var MIN_SCALE = 0.15, MAX_SCALE = 2.5;
 export var READER_BASE = 17, CANVAS_BASE = 14, MIN_FS = 0.7, MAX_FS = 2.4;
-var READING_SIZE_KEY = "rh-reading-scale";
 
 export var hydration = null;
 export var rootId = null;
@@ -19,7 +18,6 @@ export var currentNodeId = null;
 // maximized — so "canvas" is the resting state everywhere.
 export var mode = "canvas";
 export var view = { x: 0, y: 0, scale: 1 };
-export var readingScale = 1;
 export var closed = false;
 export var closedReason = null;
 var agentAttached = true;
@@ -62,6 +60,7 @@ function defaultCoreHooks(){
     diveToNode: function(){},
     openNode: function(){},
     ensureNodeHtml: function(){},
+    persistNode: function(){},
     scheduleEdges: function(){},
     mountDocImages: null,
     mountPdfView: null
@@ -89,7 +88,6 @@ export function initCore(inputHydration) {
   currentNodeId = rootId;
   setModeValue("canvas");
   view = { x: 0, y: 0, scale: 1 };
-  readingScale = loadReadingScale();
   closed = frozen;
   closedReason = frozen ? "frozen" : null;
   agentAttached = hydration.agent_attached !== false;
@@ -159,7 +157,6 @@ function resetCoreState(){
   currentNodeId = null;
   mode = "canvas";
   view = { x: 0, y: 0, scale: 1 };
-  readingScale = 1;
   closed = false;
   closedReason = null;
   agentAttached = true;
@@ -256,34 +253,27 @@ export function isVisible(node, cache){
     }
     return visible;
   }
-export function fontPx(base){ return Math.round(base * readingScale); }
-export function changeReadingSize(delta){
-    return setReadingScale(readingScale + delta);
-  }
-export function resetReadingSize(){ return setReadingScale(1); }
-function setReadingScale(value){
-    readingScale = normalizeReadingScale(value);
-    try {
-      if (readingScale === 1) localStorage.removeItem(READING_SIZE_KEY);
-      else localStorage.setItem(READING_SIZE_KEY, String(readingScale));
-    } catch(e){}
-    var surfaces = document.querySelectorAll(".doc-content, .note-editor");
-    for (var i = 0; i < surfaces.length; i++){
-      var base = surfaces[i].dataset.surface === "reader" ? READER_BASE : CANVAS_BASE;
-      surfaces[i].style.fontSize = fontPx(base) + "px";
-    }
-    // Reflowed text moves the inline marks edges anchor to.
-    coreHooks.scheduleEdges();
-    return readingScale;
-  }
-function loadReadingScale(){
-    try { return normalizeReadingScale(Number(localStorage.getItem(READING_SIZE_KEY) || 1)); }
-    catch(e){ return 1; }
-  }
-function normalizeReadingScale(value){
+export function fontPx(base, scale){ return Math.round(base * normalizeFontScale(scale)); }
+function normalizeFontScale(value){
     if (!Number.isFinite(value)) return 1;
     return Math.round(Math.min(MAX_FS, Math.max(MIN_FS, value)) * 10) / 10;
   }
+export function setNodeFontScale(node, value){
+    if (!node) return 1;
+    node.font_scale = normalizeFontScale(value);
+    var surfaces = document.querySelectorAll(".doc-content, .note-editor");
+    for (var i = 0; i < surfaces.length; i++){
+      if (surfaces[i].dataset.nodeId !== node.id) continue;
+      var base = surfaces[i].dataset.surface === "reader" ? READER_BASE : CANVAS_BASE;
+      surfaces[i].style.fontSize = fontPx(base, node.font_scale) + "px";
+    }
+    coreHooks.persistNode(node);
+    // Reflowed text moves the inline marks edges anchor to.
+    coreHooks.scheduleEdges();
+    return node.font_scale;
+  }
+export function changeNodeFontScale(node, delta){ return setNodeFontScale(node, (node && node.font_scale || 1) + delta); }
+export function resetNodeFontScale(node){ return setNodeFontScale(node, 1); }
 export function sessionPhase(){
     if (frozen) return "frozen";
     if (closed) return "closed";
@@ -470,7 +460,7 @@ export function buildDocContent(node, base){
     dc.className = "doc-content md";
     dc.dataset.nodeId = node.id;
     dc.dataset.surface = base === CANVAS_BASE ? "canvas" : "reader";
-    dc.style.fontSize = fontPx(base) + "px";
+    dc.style.fontSize = fontPx(base, node.font_scale) + "px";
     if (node.status === "pending"){
       if (node.html) fillStreaming(dc, node, visualSurfaceKey(node, base));
       else dc.appendChild(buildLoading(node));

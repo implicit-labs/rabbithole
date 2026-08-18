@@ -278,7 +278,8 @@ try {
   assert(Array.isArray(answerBodies[5].messages.at(-1).content), "text selection from a clip card must inherit its image");
   assert.equal(answerBodies[5].messages.at(-1).content[1].image_url.url, boxImageUrl);
 
-  await boxCard.locator(".node-btn.danger").evaluate((el) => el.click());
+  await boxCard.locator(".node-more").evaluate((el) => el.click());
+  await page.locator("#cardmenu").locator("#cm-delete").evaluate((el) => el.click());
   await page.waitForFunction((id) => !document.querySelector(`.node[data-id="${id}"]`), boxClip.id);
   await page.waitForSelector("#branch-undo:not(.visible)", { state: "attached", timeout: 8000 });
   assert.deepEqual((await page.evaluate(async () => (await window.__rabbitholeTest.inspectAssets()).names)), [pdfState.root.extensions.pdf.source.asset], "deleting a branch must not delete the source still owned by the PDF root");

@@ -3,6 +3,7 @@ import { disposeVisuals, registerVisualHooks } from "./visuals.js";
 import { disposeImageUx, mountDocImages } from "./image-ux.js";
 import { disposeReader, initReader, openNode, registerReaderHooks } from "./reader.js";
 import {
+  closeCardMenu,
   disposeCanvasView,
   initCanvasView,
   registerCanvasHooks,
@@ -14,6 +15,7 @@ import {
   disposeAskFollowups,
   hideAsk,
   initAskFollowups,
+  rollbackBranch,
   sendFollowup,
   sendNote,
   updateComposerState
@@ -22,6 +24,7 @@ import { disposePalette, initPalette, registerPaletteHooks } from "./palette.js"
 import {
   closeShare,
   commitPendingBranchRemoval,
+  copyNodeMarkdown,
   disposeBranchSurfaces,
   initBranchSurfaces,
   removeBranch,
@@ -71,6 +74,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       deleteAsset: deleteAsset,
       openNode: openNode,
       ensureNodeHtml: ensureNodeHtml,
+      persistNode: host.persistNode || noop,
       mountDocImages: mountImages,
       mountPdfView: capabilities.mountPdfView || null
     });
@@ -86,6 +90,8 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       hideAsk: hideAsk,
       sendFollowup: sendFollowup,
       sendNote: sendNote,
+      rollbackBranch: rollbackBranch,
+      copyNodeMarkdown: copyNodeMarkdown,
       removeBranch: removeBranch,
       persistNode: host.persistNode || noop,
       persistNodesBulk: host.persistNodesBulk || noop,
@@ -93,7 +99,8 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
     });
     registerPaletteHooks({
       hideAsk: hideAsk,
-      closeShare: closeShare
+      closeShare: closeShare,
+      closeCardMenu: closeCardMenu
     });
     registerBranchHooks({
       exportSnapshot: capabilities.exportSnapshot || null,

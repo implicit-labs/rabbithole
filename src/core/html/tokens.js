@@ -17,7 +17,7 @@ export const DESIGN_TOKENS = `:root {
   --space-page-x: 48px;
 
   /* Controls */
-  --control-h-xs: 24px; --control-h-sm: 28px; --control-h-md: 36px; --control-h-lg: 44px;
+  --control-h-xs: 24px; --control-h-sm: 28px; --control-h-md: 36px; --control-h-lg: 44px; --taskbar-pill-pad-block: 7px;
   --control-icon: 16px; --control-pad-x: 10px; --control-pad-x-compact: 8px; --control-gap: 6px;
 
   /* Shape */

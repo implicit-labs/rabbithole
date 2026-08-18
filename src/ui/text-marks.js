@@ -78,6 +78,24 @@ export function upgradeMarks(root, childId){
   }
 }
 
+export function setPendingMarks(root, childId){
+  if (!root) return;
+  var marks = root.querySelectorAll('[data-child="' + childId + '"]');
+  for (var i = 0; i < marks.length; i++){
+    marks[i].classList.remove("mark-ready", "mark-note");
+    marks[i].classList.add("mark-pending");
+  }
+}
+
+export function setNoteMarks(root, childId){
+  if (!root) return;
+  var marks = root.querySelectorAll('[data-child="' + childId + '"]');
+  for (var i = 0; i < marks.length; i++){
+    marks[i].classList.remove("mark-pending");
+    marks[i].classList.add("mark-ready", "mark-note");
+  }
+}
+
 export function removeMarks(root, childId){
   if (!root) return;
   var marks = root.querySelectorAll('[data-child="' + childId + '"]');

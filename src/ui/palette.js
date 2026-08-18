@@ -1,5 +1,6 @@
 import {
-  changeReadingSize,
+  changeNodeFontScale,
+  currentNodeId,
   flashHint,
   goToNode,
   mode,
@@ -8,7 +9,7 @@ import {
   palResults,
   palText,
   paletteEl,
-  resetReadingSize
+  resetNodeFontScale
 } from "./core.js";
 import { lensLabel, truncate } from "../core/model.js";
 import { escapeHtml } from "../core/utils.js";
@@ -21,7 +22,8 @@ import { isCommandEnter } from "./input-intent.js";
 function defaultPaletteHooks(){
   return {
     hideAsk: function(){},
-    closeShare: function(){}
+    closeShare: function(){},
+    closeCardMenu: function(){}
   };
 }
 
@@ -80,7 +82,7 @@ export function togglePalette(){ if (palOpen) closePalette(); else openPalette()
 function openPalette(){
     palOpen = true;
     palCanvasCommands = mode === "canvas";
-    paletteLifecycle.hooks.hideAsk(); paletteLifecycle.hooks.closeShare();
+    paletteLifecycle.hooks.hideAsk(); paletteLifecycle.hooks.closeShare(); paletteLifecycle.hooks.closeCardMenu();
     paletteEl.classList.add("visible");
     palText.value = "";
     renderPalette("");
@@ -211,9 +213,9 @@ function closePalette(settings){
   }
   function paletteCommandItems(tokens){
     var commands = [
-      { type: "command", name: "Increase reading size", run: function(){ showReadingSize(changeReadingSize(0.1)); } },
-      { type: "command", name: "Decrease reading size", run: function(){ showReadingSize(changeReadingSize(-0.1)); } },
-      { type: "command", name: "Reset reading size", run: function(){ showReadingSize(resetReadingSize()); } }
+      { type: "command", name: "Increase reading size", run: function(){ showReadingSize(changeNodeFontScale(nodes[currentNodeId], 0.1)); } },
+      { type: "command", name: "Decrease reading size", run: function(){ showReadingSize(changeNodeFontScale(nodes[currentNodeId], -0.1)); } },
+      { type: "command", name: "Reset reading size", run: function(){ showReadingSize(resetNodeFontScale(nodes[currentNodeId])); } }
     ];
     if (palCanvasCommands) commands.unshift(
       { type: "command", name: "New note", run: createStandaloneNoteAtViewportCenter },

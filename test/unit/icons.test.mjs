@@ -17,7 +17,8 @@ assert.equal(BUNNY_MARK_SVG, iconSvg("bunny"));
 assert.match(faviconSvg(), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
 assert.throws(() => iconSvg("missing"), /Unknown Rabbithole icon/);
 assert.throws(() => iconSvg("send", { size: 0 }), /positive number/);
-assert.equal(Object.keys(ICON_SELECTIONS).length, 30, "every Ionicons-sourced icon role belongs in the shared selection map");
+assert.equal(Object.keys(ICON_SELECTIONS).length, 32, "every Ionicons-sourced icon role belongs in the shared selection map");
+assert.match(iconSvg("more"), /<circle[^>]+r="48"/, "the card menu uses the filled horizontal ellipsis");
 assert.match(iconSvg("rail"), /stroke-width="48"/, "the product-owned rail panel stays on the Ionicons stroke grid");
 for (const name of Object.keys(ICON_SELECTIONS)) assert.match(iconSvg(name), /^<svg/);
 

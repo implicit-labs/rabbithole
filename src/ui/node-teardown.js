@@ -10,12 +10,17 @@ export function detachNode(node) {
   node.el = null;
   node.bodyEl = null;
   node.titleEl = null;
+  node.actsEl = null;
+  node.actDivider = null;
+  node.moreBtn = null;
+  node.collapseBtn = null;
   node.ncComp = null;
   node.ncInner = null;
   node.ncText = null;
   node.ncActions = null;
   node.ncHandle = null;
   node._noteEditor = null;
+  node._noteEditSurface = null;
   node._noteComposer = null;
   node._noteActions = null;
   node._noteInput = null;
@@ -27,6 +32,7 @@ export function detachNode(node) {
   node._notePastePending = 0;
   node._noteDraftDispose = null;
   node._noteDockedComposer = null;
+  node._noteConversionRollback = null;
 }
 
 /** @param {string} id */

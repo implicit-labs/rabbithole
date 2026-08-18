@@ -32,7 +32,9 @@ try {
   await verifyAnchoredNotes();
   await verifyStandaloneNotesAndEditing();
   await verifyStandaloneImagePaste();
+  await verifyNoteToAskConversion();
   await verifyLogicalMarkGrouping();
+  await verifyCardMenu();
   await verifyCanvasBranching();
   console.log("web app verification passed");
 } finally {
@@ -881,7 +883,9 @@ async function verifyStandaloneNotesAndEditing() {
       "the draft retains its structural collapse button for committed-card reuse");
     assert.equal(await deletableDraft.locator(".node-collapse").isVisible(), false,
       "collapse must be hidden while a card is an ephemeral draft");
-    await deletableDraft.locator(".node-btn.danger").click();
+    assert.equal(await deletableDraft.locator(".node-more").count(), 0,
+      "an ephemeral draft must not expose the card menu before it becomes a node");
+    await deletableDraft.locator(".note-editor").press("Escape");
     await page.waitForSelector(`.node[data-id="${deletableDraftId}"]`, { state: "detached" });
     assert.equal(await page.locator("#branch-undo.visible").count(), 0,
       "deleting an ephemeral draft must discard immediately without an undo toast");
@@ -1025,7 +1029,7 @@ async function verifyStandaloneNotesAndEditing() {
     await standaloneAsk.locator('.node-btn[aria-label="Collapse card"]').click();
     assert.equal(await standaloneAsk.evaluate((card) => card.classList.contains("collapsed")), true,
       "standalone asks must use the ordinary collapse path");
-    await standaloneAsk.locator(".node-btn.danger").click();
+    await deleteCardBranch(page, standaloneAsk);
     await page.waitForSelector(`.node[data-id="${askDraftState.id}"]`, { state: "detached" });
     await page.locator("#branch-undo [data-notice-action]").click();
     const restoredStandaloneAsk = page.locator(`.node[data-id="${askDraftState.id}"]`);
@@ -1093,7 +1097,7 @@ async function verifyStandaloneNotesAndEditing() {
     assert(commands.includes("New note"), "the canvas palette should expose New note");
     assert(commands.includes("Zoom to fit"), "the canvas palette should expose Zoom to fit");
     assert(commands.includes("Increase reading size") && commands.includes("Decrease reading size") && commands.includes("Reset reading size"),
-      "the canvas palette should expose the global reading-size commands");
+      "the canvas palette should expose the current-node reading-size commands");
     const zoomCommand = page.locator(".pal-item", { hasText: "Zoom to fit" });
     assert.equal(await zoomCommand.locator("kbd:visible").count(), 0, "Zoom to fit must not advertise the deleted global F shortcut");
     await page.keyboard.press("Escape");
@@ -1241,6 +1245,12 @@ async function verifyStandaloneImagePaste() {
     const assetsBeforeCancel = (await assets()).names;
     assert.equal(await pasteSyntheticImage(reentryEditor, "reentry-cancel.png", "#b5d"), true);
     await page.waitForFunction((count) => window.__rabbitholeTest.inspectAssets().then((result) => result.names.length === count + 1), assetsBeforeCancel.length);
+    // The upload landing in the store and its link landing in the textarea are
+    // two steps. Waiting on the store alone reads the editor a beat early.
+    await page.waitForFunction((id) => {
+      const editor = document.querySelector(`.node[data-id="${id}"] .note-editor`);
+      return !!editor && Array.from(editor.value.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length === 3;
+    }, imageNoteId);
     const cancelledMarkdown = await reentryEditor.inputValue();
     assert.equal(Array.from(cancelledMarkdown.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length, 3,
       "the cancel case should finish inserting its newly uploaded image before rollback");
@@ -1293,6 +1303,291 @@ async function verifyStandaloneImagePaste() {
       "discarding the composer should revoke its preview URL");
     assert.deepEqual((await assets()).names, beforeDiscard.names, "discarding must leave no uploaded asset behind");
     console.log("ok web app: standalone clipboard images preview, remove, Note, Ask, provider delivery, and discard");
+  } finally {
+    await context.close();
+  }
+}
+
+async function verifyNoteToAskConversion() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  const providerBodies = [];
+  let rejectProvider = false;
+  await routeProvider(page, {
+    providerDelayMs: 260,
+    onProviderCall: (body) => providerBodies.push(body),
+    streams: [
+      ["TITLE: Anchored conversion\n", "The anchored note became this streamed answer."],
+      ["TITLE: Follow-up conversion\n", "The follow-up note became this streamed answer."],
+      ["TITLE: Standalone conversion\n", "The standalone note borrowed the root context."],
+      ["TITLE: Image conversion\n", "The converted note delivered its pasted image."],
+    ],
+  });
+  await page.route(PROVIDER_URL, (route) => {
+    if (!rejectProvider) return route.fallback();
+    rejectProvider = false;
+    return route.fulfill({ status: 500, headers: { ...corsHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ error: { message: "Conversion rejected for rollback coverage" } }) });
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, [
+      "# Conversion root context sentinel",
+      "",
+      "Anchored conversion phrase lives here.",
+      "",
+      "Protected note phrase lives here.",
+    ].join("\n"));
+    const rootCard = page.locator(".node.root");
+    const rootId = await rootCard.getAttribute("data-id");
+
+    async function createAnchoredNote(selection, markdown) {
+      await selectText(page, selection);
+      const ask = page.locator("#ask");
+      await ask.locator("#ask-text").fill(markdown);
+      await ask.locator('.ask-commit[data-commit="note"]').click();
+      const createdCard = page.locator(".node-note", { hasText: markdown }).last();
+      await createdCard.waitFor();
+      const id = await createdCard.getAttribute("data-id");
+      return { card: page.locator(`.node[data-id="${id}"]`), id };
+    }
+    async function createStandaloneNote(markdown, withImage = false) {
+      await page.keyboard.press("Control+K");
+      await page.fill("#pal-text", "New note");
+      await page.press("#pal-text", "Enter");
+      const draft = page.locator(".node.note-draft");
+      const editor = draft.locator(".note-editor");
+      await editor.fill(markdown);
+      if (withImage) {
+        assert.equal(await pasteSyntheticImage(editor, "convert-note.png", "#397"), true);
+        await draft.locator(".paste-attachment img").waitFor();
+      }
+      const id = await draft.getAttribute("data-id");
+      await draft.locator('.ask-commit[data-commit="note"]:not(:disabled)').click();
+      const createdCard = page.locator(`.node-note[data-id="${id}"]`);
+      await createdCard.locator(".doc-content").waitFor();
+      return { card: page.locator(`.node[data-id="${id}"]`), id };
+    }
+    async function openNoteEditor(card) {
+      await card.locator(".doc-content").dispatchEvent("dblclick", {
+        bubbles: true, cancelable: true, clientX: 0, clientY: 0,
+      });
+      const editor = card.locator(".note-editor");
+      await editor.waitFor();
+      return editor;
+    }
+    async function convertFromMenu(card) {
+      await card.evaluate((element) => {
+        element.__noteEditorAppeared = false;
+        element.__noteEditorObserver = new MutationObserver(() => {
+          if (element.querySelector(".note-editor")) element.__noteEditorAppeared = true;
+        });
+        element.__noteEditorObserver.observe(element, { childList: true, subtree: true });
+      });
+      await card.locator(".node-more").focus();
+      await page.keyboard.press("Enter");
+      await page.locator("#cardmenu #cm-convert").click();
+      return card.evaluate((element) => {
+        element.__noteEditorObserver.disconnect();
+        const appeared = element.__noteEditorAppeared;
+        delete element.__noteEditorObserver;
+        delete element.__noteEditorAppeared;
+        return { appeared, count: element.querySelectorAll(".note-editor").length };
+      });
+    }
+
+    const anchored = await createAnchoredNote("Anchored conversion phrase", "Anchored note draft");
+
+    await rootCard.locator(".nc-handle").click();
+    await rootCard.locator(".nc-inner textarea").fill("Follow-up note draft");
+    await rootCard.locator('.nc-inner .ask-commit[data-commit="note"]').click();
+    const createdFollowupCard = page.locator(".node-note", { hasText: "Follow-up note draft" }).last();
+    await createdFollowupCard.waitFor();
+    const followupId = await createdFollowupCard.getAttribute("data-id");
+    const followupCard = page.locator(`.node[data-id="${followupId}"]`);
+
+    const protectedNote = await createAnchoredNote("Protected note phrase", "Note with a child");
+    await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
+    await protectedNote.card.locator(".nc-handle").focus();
+    await page.keyboard.press("Enter");
+    const protectedComposer = protectedNote.card.locator(".nc-inner textarea");
+    await protectedComposer.fill("Child note blocks conversion");
+    await protectedComposer.press("Enter");
+    await page.locator(".node-note", { hasText: "Child note blocks conversion" }).waitFor();
+
+    const standalone = await createStandaloneNote("Standalone note question");
+    const imageNote = await createStandaloneNote("What does this pasted diagram show?", true);
+    const rejected = await createStandaloneNote("Rejected note exactly as first written.");
+    const emptyNote = await createStandaloneNote("Empty body menu fixture");
+    await zoomToFit(page);
+    await page.waitForTimeout(350);
+
+    const cardMenu = page.locator("#cardmenu");
+    await anchored.card.locator(".node-more").click();
+    assert.equal(await cardMenu.locator("#cm-convert").isVisible(), true,
+      "Convert to Ask should appear for an eligible note");
+    await page.keyboard.press("Escape");
+    await rootCard.locator(".node-more").click();
+    assert.equal(await cardMenu.locator("#cm-convert").isVisible(), false,
+      "Convert to Ask should be absent on the non-note root");
+    await page.keyboard.press("Escape");
+    await protectedNote.card.locator(".node-more").click();
+    assert.equal(await cardMenu.locator("#cm-convert").isVisible(), false,
+      "Convert to Ask should be absent when a note has children");
+    await page.keyboard.press("Escape");
+    const frozenHtml = await page.evaluate(() => window.__rabbitholeTest.exportSnapshot());
+    const frozenPage = await context.newPage();
+    await frozenPage.setContent(frozenHtml, { waitUntil: "load" });
+    const frozenCard = frozenPage.locator(`.node[data-id="${anchored.id}"]`);
+    await frozenCard.locator(".node-more").click();
+    assert.equal(await frozenPage.locator("#cardmenu").locator("#cm-convert").isVisible(), false,
+      "Convert to Ask should be absent in a frozen snapshot");
+    await frozenPage.close();
+
+    const emptyPortable = await page.evaluate(() => window.__rabbitholeTest.exportPortable());
+    emptyPortable.hole.nodes = emptyPortable.hole.nodes.filter((node) => node.id === emptyPortable.hole.root_id || node.id === emptyNote.id);
+    emptyPortable.hole.nodes.find((node) => node.id === emptyNote.id).markdown = " \n ";
+    emptyPortable.assets = {};
+    const emptyPage = await context.newPage();
+    await routeProvider(emptyPage);
+    await emptyPage.goto(baseUrl, { waitUntil: "networkidle" });
+    const emptyPagePreviousHole = await emptyPage.evaluate(() => window.__rabbitholeTest.currentHoleId());
+    await emptyPage.setInputFiles("#file-md", {
+      name: "empty-note-menu.rabbithole", mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(emptyPortable)),
+    });
+    await emptyPage.waitForFunction((previous) => window.__rabbitholeTest.currentHoleId() !== previous, emptyPagePreviousHole);
+    const importedEmptyCard = emptyPage.locator(`.node[data-id="${emptyNote.id}"]`);
+    await importedEmptyCard.locator(".node-more").click();
+    assert.equal(await emptyPage.locator("#cardmenu #cm-convert").isVisible(), false,
+      "Convert to Ask should be absent when an otherwise eligible note body is empty");
+    await emptyPage.close();
+
+    let editor = await openNoteEditor(followupCard);
+    assert.deepEqual(await followupCard.locator(".note-editor-actions").evaluate((actions) => {
+      const surface = actions.closest(".note-edit-surface");
+      const commits = Array.from(actions.querySelectorAll(".ask-commit"));
+      const actionsRect = actions.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      const card = actions.closest(".node");
+      const originalWidth = card.style.width;
+      card.style.width = "300px";
+      const narrowActionsRect = actions.getBoundingClientRect();
+      const narrowCommitRects = commits.map((button) => button.getBoundingClientRect());
+      const narrowFits = actions.scrollWidth <= actions.clientWidth + 1 && commits.every((button) => button.scrollWidth <= button.clientWidth + 1)
+        && narrowCommitRects.every((rect) => rect.left >= narrowActionsRect.left - 1 && rect.right <= narrowActionsRect.right + 1);
+      const narrowSplit = Math.abs(narrowCommitRects[0].width - narrowCommitRects[1].width) < 1;
+      card.style.width = originalWidth;
+      return {
+        focused: document.activeElement === surface.querySelector(".note-editor"),
+        composerBar: actions.classList.contains("ask-actions") && getComputedStyle(actions).borderTopWidth === "1px"
+          && Math.abs(actionsRect.width - surfaceRect.width) < 1,
+        hintCount: actions.querySelectorAll(".note-edit-hint").length,
+        commitsVisible: getComputedStyle(actions.querySelector(".commit-actions")).display === "flex"
+          && commits.every((button) => getComputedStyle(button).display !== "none"),
+        narrowFits, narrowSplit,
+        commits: commits.map((button) => ({
+          kind: button.dataset.commit, hint: button.querySelector("kbd")?.textContent,
+          label: button.textContent.replace(button.querySelector("kbd")?.textContent ?? "", "").trim(),
+          title: button.title,
+        })),
+      };
+    }), {
+      focused: true, composerBar: true, hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
+      commits: [
+        { kind: "note", hint: "⌘↵", label: "Save", title: "Save note (Command/Control+Enter)" },
+        { kind: "ask", hint: "⇧⌘↵", label: "Convert to Ask", title: "Convert this note into an ask (Shift+Command/Control+Enter)" },
+      ],
+    }, "editing an existing note should use the full-width composer bar with the existing Save and Convert commits");
+    await editor.fill("");
+    assert.equal(await followupCard.locator('.note-editor-actions [data-commit="ask"]').isDisabled(), true,
+      "an empty note question should disable Ask");
+    await editor.fill("Saved follow-up note edit");
+    await editor.press("Control+Enter");
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return node?.origin?.kind === "note" && node.markdown === "Saved follow-up note edit";
+    }, followupId);
+    assert.equal(providerBodies.length, 0, "Command+Enter should save the edit as a note without asking");
+
+    const anchoredBefore = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), anchored.id);
+    assert.deepEqual(await convertFromMenu(anchored.card), { appeared: false, count: 0 },
+      "the menu should convert immediately without creating a note editor");
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return node?.status === "pending" && node.origin?.question === "Anchored note draft";
+    }, anchored.id);
+    assert.equal(await rootCard.locator(`mark[data-child="${anchored.id}"].mark-pending:not(.mark-note)`).count(), 1,
+      "converting an anchored note should replace note ink with a pending mark");
+    assert.equal(await anchored.card.locator(".doc-content", { hasText: "Anchored note draft" }).count(), 0,
+      "the pending answer body should no longer contain the note");
+    await anchored.card.locator(".doc-content", { hasText: "The anchored note became this streamed answer." }).waitFor();
+    const anchoredAfter = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), anchored.id);
+    assert.deepEqual({ parent_id: anchoredAfter.parent_id, branch_type: anchoredAfter.origin.branch_type,
+      selected_text: anchoredAfter.origin.selected_text, anchor: anchoredAfter.origin.anchor },
+    { parent_id: rootId, branch_type: "selection", selected_text: anchoredBefore.origin.selected_text, anchor: anchoredBefore.origin.anchor },
+    "an anchored note should retain its parent, selection, and exact anchor as an ask");
+    assert.equal(await rootCard.locator(`mark[data-child="${anchored.id}"].mark-ready:not(.mark-note)`).count(), 1,
+      "the converted note mark should become ordinary ready ink after answering");
+    await anchored.card.locator(".node-more").click();
+    assert.equal(await cardMenu.locator("#cm-convert").isVisible(), false,
+      "Convert to Ask should disappear once the card is an ask");
+    await page.keyboard.press("Escape");
+
+    editor = await openNoteEditor(followupCard);
+    await editor.fill("Follow-up conversion via Ask button");
+    await followupCard.locator('.note-editor-actions [data-commit="ask"]').click();
+    await followupCard.locator(".doc-content", { hasText: "The follow-up note became this streamed answer." }).waitFor();
+    const storedFollowup = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), followupId);
+    assert.deepEqual({ parent_id: storedFollowup.parent_id, branch_type: storedFollowup.origin.branch_type,
+      selected_text: storedFollowup.origin.selected_text, anchor: storedFollowup.origin.anchor },
+    { parent_id: rootId, branch_type: "followup", selected_text: "", anchor: null },
+    "an anchorless child note should become a follow-up ask on the same parent");
+
+    editor = await openNoteEditor(standalone.card);
+    await editor.press("Control+Shift+Enter");
+    await standalone.card.locator(".doc-content", { hasText: "The standalone note borrowed the root context." }).waitFor();
+    const storedStandalone = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), standalone.id);
+    assert.equal(storedStandalone.parent_id, null, "a standalone note should remain parentless after conversion");
+    assert.equal(storedStandalone.origin.branch_type, "followup");
+    const standalonePrompt = providerBodies[2].messages.at(-1).content;
+    assert.match(typeof standalonePrompt === "string" ? standalonePrompt : standalonePrompt[0].text,
+      /Conversion root context sentinel/, "a parentless converted ask should still receive the root document as context");
+
+    editor = await openNoteEditor(imageNote.card);
+    const imageMarkdown = await editor.inputValue();
+    const imageAsset = imageMarkdown.match(/asset:(paste-[a-f0-9-]+\.png)/)?.[1];
+    assert(imageAsset, "the image-note fixture should contain a durable pasted asset ref");
+    await editor.press("Control+Shift+Enter");
+    await imageNote.card.locator(".origin-attachment-strip img").waitFor();
+    await imageNote.card.locator(".doc-content", { hasText: "The converted note delivered its pasted image." }).waitFor();
+    const imageUserContent = providerBodies[3].messages.find((message) => message.role === "user").content;
+    assert.deepEqual(imageUserContent.map((part) => part.type), ["text", "image_url"],
+      "converted note images should use the existing provider attachment contract");
+    const storedImageAsk = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), imageNote.id);
+    assert.deepEqual(storedImageAsk.origin.attachment_assets, [imageAsset]);
+    assert((await page.evaluate(() => window.__rabbitholeTest.inspectAssets())).names.includes(imageAsset),
+      "a converted note attachment should remain live after its markdown body is cleared");
+
+    editor = await openNoteEditor(rejected.card);
+    await editor.fill("Rejected note exactly as edited.");
+    const rejectedBefore = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), rejected.id);
+    rejectProvider = true;
+    await editor.press("Control+Shift+Enter");
+    await rejected.card.locator(".doc-content", { hasText: "Rejected note exactly as edited." }).waitFor();
+    await page.waitForTimeout(900);
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return node?.origin?.kind === "note" && node.markdown === "Rejected note exactly as edited.";
+    }, rejected.id);
+    const rejectedAfter = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), rejected.id);
+    assert.deepEqual({ ...rejectedAfter, markdown: rejectedBefore.markdown }, rejectedBefore,
+      "a rejected conversion should restore every note field while preserving the reviewed edit text");
+    assert.equal(await rejected.card.evaluate((card) => card.classList.contains("node-note")), true,
+      "provider rejection should restore the exact card as a note");
+
+    console.log("ok web app: note-to-ask availability, commit intents, all shapes, marks, attachments, and rollback");
   } finally {
     await context.close();
   }
@@ -1559,6 +1854,200 @@ async function verifyNonFirstFragmentCanvasNavigation(page, childId) {
   await page.waitForTimeout(400);
 }
 
+async function verifyCardMenu() {
+  const context = await browser.newContext();
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl });
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  await routeProvider(page, {
+    streams: [
+      ["TITLE: Alpha branch\n", "Alpha branch markdown body."],
+      ["TITLE: Beta branch\n", "Beta branch markdown body."],
+      ["TITLE: Alpha descendant\n", "The descendant stays tidy under its parent."],
+    ],
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, "# Card menu fixture\n\nAlpha anchor starts one branch.\n\nBeta anchor starts its sibling.");
+    const rootCard = page.locator(".node.root");
+    const rootId = await rootCard.getAttribute("data-id");
+
+    await selectText(page, "Alpha anchor");
+    await page.locator("#ask").locator("#ask-text").fill("Why alpha?");
+    await page.locator("#ask").locator('[data-commit="ask"]').click();
+    const alphaCard = page.locator('.node:not(.root)', { hasText: "Alpha branch markdown body." });
+    await alphaCard.waitFor();
+    const alphaId = await alphaCard.getAttribute("data-id");
+
+    await selectText(page, "Beta anchor");
+    await page.locator("#ask").locator("#ask-text").fill("Why beta?");
+    await page.locator("#ask").locator('[data-commit="ask"]').click();
+    const betaCard = page.locator('.node:not(.root)', { hasText: "Beta branch markdown body." });
+    await betaCard.waitFor();
+    const betaId = await betaCard.getAttribute("data-id");
+
+    await zoomToFit(page);
+    await page.waitForTimeout(350);
+    await alphaCard.locator(".nc-handle").focus();
+    await page.keyboard.press("Enter");
+    await alphaCard.locator(".nc-inner textarea").fill("Add one descendant.");
+    await alphaCard.locator(".nc-inner textarea").press("Control+Enter");
+    const descendantCard = page.locator('.node:not(.root)', { hasText: "The descendant stays tidy under its parent." });
+    await descendantCard.waitFor();
+    const descendantId = await descendantCard.getAttribute("data-id");
+    await zoomToFit(page);
+    await page.waitForTimeout(350);
+
+    const cardMenu = page.locator("#cardmenu");
+    const alphaTrigger = alphaCard.locator(".node-more");
+    assert.deepEqual(await alphaCard.locator(".node-head .node-btn").evaluateAll((buttons) => buttons.map((button) => ({
+      name: button.getAttribute("aria-label"), glyph: button.querySelector("svg")?.getBoundingClientRect().width,
+    }))), [
+      { name: "Card menu", glyph: 16 },
+      { name: "Collapse card", glyph: 16 },
+      { name: "Expand document", glyph: 16 },
+    ], "card headers should expose three size-matched menu, collapse, and expand controls");
+    await alphaTrigger.focus();
+    await page.keyboard.press("Enter");
+    await cardMenu.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.activeElement?.id === "cm-textdown");
+    await page.waitForTimeout(160);
+    const anchorState = await page.evaluate((id) => {
+      const trigger = document.querySelector(`.node[data-id="${id}"] .node-more`);
+      const menu = document.getElementById("cardmenu");
+      const a = trigger.getBoundingClientRect(), m = menu.getBoundingClientRect();
+      return { controls: trigger.getAttribute("aria-controls"), expanded: trigger.getAttribute("aria-expanded"),
+        placement: menu.dataset.placement, endOffset: Math.abs(a.right - m.right),
+        gap: menu.dataset.placement.startsWith("top") ? a.top - m.bottom : m.top - a.bottom,
+        tokenGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--surface-gap")) };
+    }, alphaId);
+    assert.equal(anchorState.controls, "cardmenu");
+    assert.equal(anchorState.expanded, "true");
+    assert.match(anchorState.placement, /^(?:top|bottom)-end$/);
+    assert(anchorState.endOffset < 1 && Math.abs(anchorState.gap - anchorState.tokenGap) < 1,
+      `card menu should stay end-aligned to its card trigger (${JSON.stringify(anchorState)})`);
+    await page.keyboard.press("Escape");
+    await cardMenu.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("node-more")), true,
+      "Card menu Escape should restore focus to its own trigger");
+
+    await rootCard.locator(".node-more").click();
+    await cardMenu.waitFor({ state: "visible" });
+    assert.equal(await cardMenu.locator("#cm-delete").isVisible(), false, "the root card menu should omit Delete branch");
+    await page.keyboard.press("Escape");
+
+    await alphaTrigger.click();
+    await cardMenu.locator("#cm-textup").click();
+    assert.deepEqual(await page.evaluate(({ alphaId, betaId }) => [alphaId, betaId].map((id) =>
+      parseFloat(getComputedStyle(document.querySelector(`.node[data-id="${id}"] .doc-content`)).fontSize)), { alphaId, betaId }), [15, 14],
+    "A+ should enlarge only the card whose menu is open");
+    assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), null,
+      "per-node text size should create no global localStorage override");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(async ({ alphaId, betaId }) => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return hole.nodes.find((node) => node.id === alphaId)?.font_scale === 1.1
+        && hole.nodes.find((node) => node.id === betaId)?.font_scale === 1;
+    }, { alphaId, betaId });
+    await page.waitForTimeout(1000);
+    assert.equal(await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id)?.font_scale, alphaId), 1.1,
+      "the node scale should remain stable after debounced saves settle");
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(`.node[data-id="${alphaId}"] .doc-content`);
+    const reloadedScaleState = await page.evaluate(async ({ alphaId, betaId }) => ({
+      rendered: [alphaId, betaId].map((id) => parseFloat(getComputedStyle(document.querySelector(`.node[data-id="${id}"] .doc-content`)).fontSize)),
+      stored: (await window.__rabbitholeTest.readStoredHole()).nodes.filter((node) => node.id === alphaId || node.id === betaId).map((node) => ({ id: node.id, scale: node.font_scale })),
+      portable: (await window.__rabbitholeTest.exportPortable()).hole.nodes.filter((node) => node.id === alphaId || node.id === betaId).map((node) => ({ id: node.id, scale: node.font_scale })),
+    }), { alphaId, betaId });
+    assert.deepEqual(reloadedScaleState.rendered, [15, 14],
+      `the selected card's font_scale should survive reload without affecting its sibling (${JSON.stringify(reloadedScaleState)})`);
+
+    await page.locator(`.node[data-id="${alphaId}"]`).locator('[aria-label="Expand document"]').click();
+    await page.waitForSelector("body:not(.mode-canvas)");
+    assert.equal(await page.locator("#reader-main").locator(".doc-content").evaluate((doc) => parseFloat(getComputedStyle(doc).fontSize)), 19,
+      "the reader should render the maximized card's font_scale");
+    await page.locator("#taskbar").locator("#r-textdown").click();
+    assert.equal(await page.locator("#reader-main").locator(".doc-content").evaluate((doc) => parseFloat(getComputedStyle(doc).fontSize)), 17,
+      "the reader taskbar should edit the same node font_scale");
+    await page.waitForFunction(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id)?.font_scale === 1, alphaId);
+    await page.locator("#taskbar").locator("#reader-restore").click();
+    await page.waitForSelector("body.mode-canvas");
+
+    const storedAlpha = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), alphaId);
+    const expectedMarkdown = "# " + storedAlpha.title + "\n\n> Asked about: “" + storedAlpha.origin.selected_text + "” — " + storedAlpha.origin.question + "\n\n" + storedAlpha.markdown.trim() + "\n";
+    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
+    await cardMenu.locator("#cm-copy").click();
+    await page.waitForFunction(async (expected) => (await navigator.clipboard.readText()) === expected, expectedMarkdown);
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expectedMarkdown,
+      "Copy as Markdown should copy only the menu's node through the shared document builder");
+
+    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
+    await cardMenu.locator("#cm-rename").click();
+    const alphaTitle = page.locator(`.node[data-id="${alphaId}"]`).locator(".node-title");
+    assert.deepEqual(await alphaTitle.evaluate((title) => ({ editable: title.getAttribute("contenteditable"), focused: document.activeElement === title })),
+      { editable: "plaintext-only", focused: true }, "Rename should enter the existing title editor with its caret focused");
+    await page.keyboard.press("Escape");
+
+    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
+    await cardMenu.locator("#cm-collapse").click();
+    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
+      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId }), [true, true],
+    "Collapse branch should collapse the parent and its descendant");
+    await page.waitForFunction(async ({ alphaId, descendantId }) => {
+      const nodes = (await window.__rabbitholeTest.readStoredHole()).nodes;
+      return nodes.find((node) => node.id === alphaId)?.collapsed === true
+        && nodes.find((node) => node.id === descendantId)?.collapsed === true;
+    }, { alphaId, descendantId });
+    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
+    assert.equal(await cardMenu.locator("#cm-collapse .sm-label").innerText(), "Expand branch");
+    await cardMenu.locator("#cm-collapse").click();
+    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
+      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId }), [false, false],
+    "Expand branch should restore the parent and its descendant");
+    await page.waitForFunction(async ({ alphaId, descendantId }) => {
+      const nodes = (await window.__rabbitholeTest.readStoredHole()).nodes;
+      return nodes.find((node) => node.id === alphaId)?.collapsed === false
+        && nodes.find((node) => node.id === descendantId)?.collapsed === false;
+    }, { alphaId, descendantId });
+
+    const alphaCollapse = page.locator(`.node[data-id="${alphaId}"]`).locator('[aria-label="Collapse card"]');
+    await alphaCollapse.click({ modifiers: ["Alt"] });
+    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
+      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId }), [true, true],
+    "Alt-clicking the collapse chevron should deep-collapse the branch");
+    await page.locator(`.node[data-id="${alphaId}"]`).locator('[aria-label="Expand card"]').click({ modifiers: ["Alt"] });
+
+    await page.locator(`.node[data-id="${betaId}"]`).locator(".node-more").click();
+    await cardMenu.locator("#cm-delete").click();
+    await page.waitForSelector(`.node[data-id="${betaId}"]`, { state: "detached" });
+    const undoToast = page.locator("#branch-undo");
+    await undoToast.waitFor({ state: "visible" });
+    await undoToast.locator("[data-notice-action]").click();
+    await page.waitForSelector(`.node[data-id="${betaId}"]`);
+    assert.equal(await page.locator(`.node[data-id="${betaId}"]`).count(), 1,
+      "Delete branch should remove through the existing undoable branch lifecycle");
+
+    const frozenHtml = await page.evaluate(() => window.__rabbitholeTest.exportSnapshot());
+    const frozenPage = await context.newPage();
+    await frozenPage.setContent(frozenHtml, { waitUntil: "load" });
+    const frozenCard = frozenPage.locator(`.node[data-id="${alphaId}"]`);
+    const frozenMenu = frozenPage.locator("#cardmenu");
+    await frozenCard.locator(".node-more").focus();
+    await frozenPage.keyboard.press("Enter");
+    await frozenMenu.waitFor({ state: "visible" });
+    assert.equal(await frozenMenu.locator(".cm-size-label").innerText(), "Text size");
+    assert.deepEqual(await frozenMenu.locator('[role="menuitem"]:visible').evaluateAll((items) => items.map((item) => item.id)),
+      ["cm-textdown", "cm-textreset", "cm-textup", "cm-copy", "cm-collapse"],
+      "a frozen card menu keeps the ways of looking and drops the ways of changing");
+    await frozenPage.close();
+
+    assert(rootId && descendantId, "the card-menu fixture should retain its root and descendant identities");
+    console.log("ok web app: shared card menu, node text scale, deep collapse, frozen visibility, and undo");
+  } finally {
+    await context.close();
+  }
+}
+
 async function verifyCanvasBranching() {
   const context = await browser.newContext();
   await seedConfiguredOpenRouter(context);
@@ -1800,10 +2289,10 @@ async function verifyCanvasBranching() {
     name: button.getAttribute("aria-label") || button.textContent.trim(),
   })));
   assert.deepEqual(cardControls, [
-    { type: "button", name: "Remove this branch" },
+    { type: "button", name: "Card menu" },
     { type: "button", name: "Collapse card" },
     { type: "button", name: "Expand document" },
-  ], "card headers should keep only branch, collapse, and document controls");
+  ], "card headers should keep only menu, collapse, and document controls");
   await childCard.locator('.node-btn[aria-label="Collapse card"]').click();
   assert.equal(await childCard.evaluate((card) => card.classList.contains("collapsed")), true, "the branch fixture should collapse");
   assert.equal(await childCard.locator(".node-font-btn").count(), 0, "a collapsed card header must not expose font controls");
@@ -1818,22 +2307,23 @@ async function verifyCanvasBranching() {
   await page.keyboard.press("Control+K");
   await page.fill("#pal-text", "Increase reading size");
   await page.press("#pal-text", "Enter");
-  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 15],
-    "one reading-size command should update every card document together");
-  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), "1.1", "the global reading size should persist locally");
-  assert((await page.evaluate(() => window.__rabbitholeTest.exportPortable())).hole.nodes.every((node) => node.font_scale === 1),
-    "global reading size must not rewrite per-card document data");
+  assert.deepEqual(await page.locator(".node").evaluateAll((cards) => cards.map((card) => ({
+    root: card.classList.contains("root"), fontSize: parseFloat(getComputedStyle(card.querySelector(".doc-content")).fontSize),
+  }))), [{ root: true, fontSize: 15 }, { root: false, fontSize: 14 }],
+  "a reading-size command should update only the current card document");
+  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), null, "per-node reading size should not persist in localStorage");
+  assert.deepEqual((await page.evaluate(() => window.__rabbitholeTest.exportPortable())).hole.nodes.map((node) => node.font_scale), [1.1, 1],
+    "the reading-size command should rewrite only the current node's font_scale");
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector(".node:not(.root)");
-  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 15],
-    "the saved global reading size should apply when the Rabbithole reloads");
-  await page.keyboard.press("Control+K");
-  await page.fill("#pal-text", "Reset reading size");
-  await page.press("#pal-text", "Enter");
+  assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [15, 14],
+    "the current node's saved font_scale should apply when the Rabbithole reloads");
+  await page.locator(".node.root .node-more").click();
+  await page.locator("#cardmenu").locator("#cm-textreset").click();
+  await page.keyboard.press("Escape");
   assert.deepEqual(await page.locator(".node .doc-content").evaluateAll((docs) => docs.map((doc) => parseFloat(getComputedStyle(doc).fontSize))), [14, 14],
-    "resetting reading size should restore every card document together");
-  assert.equal(await page.evaluate(() => localStorage.getItem("rh-reading-scale")), null, "resetting reading size should clear the saved override");
-  await childCard.locator(".node-btn.danger").click();
+    "the card menu percentage should reset only that card to 100%");
+  await deleteCardBranch(page, childCard);
   await childCard.waitFor({ state: "detached" });
   await page.waitForSelector("#branch-undo.visible");
   assert.match(await page.locator("#branch-undo").innerText(), /Branch removed\s+Undo/, "removing a branch should immediately offer one undo action");
@@ -2181,8 +2671,10 @@ async function verifyCanvasBranching() {
     left: card.style.left, top: card.style.top, width: card.style.width,
     collapsed: card.classList.contains("collapsed"), text: card.textContent,
   }));
-  const childDelete = undoChild.locator('.node-btn.danger');
-  await childDelete.focus();
+  await undoChild.locator(".node-more").focus();
+  await page.keyboard.press("Enter");
+  const undoCardMenu = page.locator("#cardmenu");
+  await undoCardMenu.locator("#cm-delete").focus();
   await page.keyboard.press("Enter");
   await page.waitForSelector(`.node[data-id="${undoChildId}"]`, { state: "detached" });
   await page.waitForSelector("#branch-undo.visible");
@@ -2277,7 +2769,7 @@ async function verifyCanvasBranching() {
   const finalBranchId = await finalBranch.getAttribute("data-id");
   const subtreeBeforeKeyboardUndo = await readCanvasSubtree(page, finalBranchId);
   assert.equal(subtreeBeforeKeyboardUndo.length, 2, "the deletion fixture should contain a branch and its descendant");
-  await finalBranch.locator(".node-btn.danger").click();
+  await deleteCardBranch(page, finalBranch);
   await page.waitForFunction((ids) => ids.every((id) => !document.querySelector(`.node[data-id="${id}"]`)), subtreeBeforeKeyboardUndo.map((node) => node.id));
   await page.waitForSelector("#branch-undo.visible");
   await page.keyboard.press("Control+z");
@@ -2290,16 +2782,16 @@ async function verifyCanvasBranching() {
   }
 
   const descendantId = subtreeBeforeKeyboardUndo.find((node) => node.parent_id === finalBranchId).id;
-  await page.locator(`.node[data-id="${descendantId}"] .node-btn.danger`).click();
+  await deleteCardBranch(page, page.locator(`.node[data-id="${descendantId}"]`));
   await page.waitForSelector("#branch-undo.visible");
-  await page.locator(`.node[data-id="${finalBranchId}"] .node-btn.danger`).click();
+  await deleteCardBranch(page, page.locator(`.node[data-id="${finalBranchId}"]`));
   await page.waitForSelector(`.node[data-id="${finalBranchId}"]`, { state: "detached" });
   await page.locator("#branch-undo [data-notice-action]").click();
   await page.waitForSelector(`.node[data-id="${finalBranchId}"]`);
   assert.equal(await page.locator(`.node[data-id="${descendantId}"]`).count(), 0,
     "removing a second branch should commit the first removal and offer Undo only for the newest one");
 
-  await page.locator(`.node[data-id="${finalBranchId}"] .node-btn.danger`).click();
+  await deleteCardBranch(page, page.locator(`.node[data-id="${finalBranchId}"]`));
   await page.waitForSelector("#branch-undo.visible");
   await page.waitForSelector("#branch-undo:not(.visible)", { state: "attached", timeout: 8000 });
   await page.waitForFunction(async () => (await window.__rabbitholeTest.readStoredHole()).nodes.every((node) => node.parent_id === null));
@@ -2324,6 +2816,13 @@ async function zoomToFit(page) {
   await page.fill("#pal-text", "Zoom to fit");
   await page.press("#pal-text", "Enter");
   await page.waitForSelector("#palette", { state: "hidden" });
+}
+
+async function deleteCardBranch(page, card) {
+  await card.locator(".node-more").click();
+  const cardMenu = page.locator("#cardmenu");
+  await cardMenu.waitFor({ state: "visible" });
+  await cardMenu.locator("#cm-delete").click();
 }
 
 async function readCanvasSubtree(page, rootId) {

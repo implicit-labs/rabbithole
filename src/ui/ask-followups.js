@@ -526,10 +526,11 @@ export function animateScroll(el, target, source){
   // Undo an optimistic branch whose request the server rejected/never received.
   // No-op if the node is already gone, or if an answer raced in ahead of the
   // failed-POST callback (don't delete a node the agent actually answered).
-function rollbackBranch(node){
+export function rollbackBranch(node, restore){
     var live = nodes[node.id];
     if (!live || live.status === "answered") return;
-    teardownNode(node.id);
+    if (restore) restore(live);
+    else teardownNode(node.id);
     if (canvasBuilt) drawEdges();
     if (mode === "reader" && currentNodeId === node.parent_id) renderMarginNotes();
     flashHint("Couldn't reach the agent — that ask was undone.");

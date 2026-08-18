@@ -11,7 +11,6 @@ import {
   readerMain,
   rootId,
   setCurrentNodeId,
-  setSurfaceOrigin,
   shareMenu
 } from "./core.js";
 import { lensLabel, lineageNodesFromMap, truncate } from "../core/model.js";
@@ -28,7 +27,7 @@ import {
   renderMarginNotes,
   renderReaderBody
 } from "./reader.js";
-import { openPopover } from "./primitives/popover.js";
+import { createAnchoredMenu } from "./primitives/anchored-menu.js";
 import { wireNotice } from "./primitives/notice.js";
 import { createModuleLifecycle } from "./lifecycle.js";
 import { detachNode, teardownNode } from "./node-teardown.js";
@@ -44,6 +43,7 @@ function defaultBranchHooks(){
 var branchLifecycle = createModuleLifecycle({ defaults: defaultBranchHooks });
 var pendingRemoval = null;
 var undoNotice = null;
+var shareMenuController = null;
 
 export function registerBranchHooks(hooks) {
   branchLifecycle.register(hooks);
@@ -57,8 +57,9 @@ export function initBranchSurfaces(){
   disposeBranchSurfaceResources(false);
   var branchScope = branchLifecycle.beginInit();
   try {
+  shareMenuController = createAnchoredMenu({ surface: shareMenu, placement: "bottom-end" });
+  branchScope.addCleanup(function(){ shareMenuController?.dispose(); shareMenuController = null; });
   branchScope.listen(document.getElementById("t-share"), "click", function(e){ e.stopPropagation(); toggleShare(e.currentTarget, e.detail === 0); });
-  branchScope.listen(shareMenu, "keydown", onShareMenuKeydown);
   branchScope.listen(document.getElementById("sm-doc"), "click", onCopyDoc);
   branchScope.listen(document.getElementById("sm-trail"), "click", onCopyTrail);
   branchScope.listen(document.getElementById("sm-export"), "click", onExportSnapshot);
@@ -81,8 +82,7 @@ function disposeBranchSurfaceResources(resetHooks){
   if (undoNotice) undoNotice.hide();
   closeShare({ restoreFocus: false });
   branchLifecycle.dispose(resetHooks);
-  shareOpen = false;
-  shareAnchor = null;
+  shareMenuController = null;
   undoNotice = null;
 }
 
@@ -90,57 +90,14 @@ function disposeBranchSurfaceResources(resetHooks){
   // ===========================================================================
   // SHARE — export and copy as Markdown
   // ===========================================================================
-  var shareOpen = false, shareAnchor = null, sharePopover = null;
-  function visibleShareItems(){
-    return Array.prototype.slice.call(shareMenu.querySelectorAll('[role="menuitem"]')).filter(function(item){
-      return item.style.display !== "none";
-    });
-  }
-  function focusShareItem(item){
-    visibleShareItems().forEach(function(candidate){ candidate.tabIndex = candidate === item ? 0 : -1; });
-    if (item) item.focus();
-  }
-  function onShareMenuKeydown(e){
-    var items = visibleShareItems();
-    if (!items.length) return;
-    var index = items.indexOf(document.activeElement), target = null;
-    if (e.key === "ArrowDown") target = items[(index + 1 + items.length) % items.length];
-    else if (e.key === "ArrowUp") target = items[(index - 1 + items.length) % items.length];
-    else if (e.key === "Home") target = items[0];
-    else if (e.key === "End") target = items[items.length - 1];
-    else if (e.key === "Enter" || e.key === " ") {
-      if (index < 0) return;
-      e.preventDefault();
-      items[index].click();
-      return;
-    } else if (e.key === "Tab") {
-      closeShare();
-      return;
-    } else return;
-    e.preventDefault();
-    focusShareItem(target);
-  }
 function toggleShare(anchor, openedByKeyboard){
-    if (shareOpen){ closeShare(); return; }
     // A frozen snapshot can't export because it is the export.
     document.getElementById("sm-export").style.display = frozen ? "none" : "";
     document.getElementById("sm-portable").style.display = (!frozen && typeof branchLifecycle.hooks.exportPortable === "function") ? "" : "none";
-    var items = visibleShareItems();
-    items.forEach(function(item, index){ item.tabIndex = index === 0 ? 0 : -1; });
-    shareAnchor = anchor;
-    shareOpen = true;
-    shareMenu.classList.add("visible");
-    setSurfaceOrigin(shareMenu, anchor.getBoundingClientRect());
-    sharePopover = openPopover({ trigger: anchor, surface: shareMenu, placement: "bottom-end",
-      initialFocus: openedByKeyboard ? items[0] : null,
-      onClose: closeShare
-    });
+    shareMenuController.toggle(anchor, { focusFirst: openedByKeyboard });
   }
 export function closeShare(settings){
-    shareOpen = false;
-    shareMenu.classList.remove("visible");
-    if (sharePopover){ sharePopover.close(settings); sharePopover = null; }
-    shareAnchor = null;
+    if (shareMenuController) shareMenuController.close(settings);
   }
 
   function copyText(text, okMsg){
@@ -180,7 +137,9 @@ export function closeShare(settings){
   }
   function onCopyDoc(){
     closeShare();
-    var n = nodes[currentNodeId];
+    copyNodeMarkdown(nodes[currentNodeId]);
+  }
+export function copyNodeMarkdown(n){
     if (!n) return;
     copyText(docMarkdown(n, 0), "Copied “" + truncate(n.title || "Untitled", 40) + "” as Markdown");
   }

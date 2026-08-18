@@ -52,6 +52,7 @@ const ICON_DEFINITIONS = Object.freeze({
   send: ionicon(ICON_SELECTIONS.send, 14),
   search: ionicon(ICON_SELECTIONS.search, 14),
   close: ionicon(ICON_SELECTIONS.close, 16),
+  more: ionicon(ICON_SELECTIONS.more, 16),
   expand: ionicon(ICON_SELECTIONS.expand, 16),
   contract: ionicon(ICON_SELECTIONS.contract, 16),
   collapse: ionicon(ICON_SELECTIONS.collapse, 16),
@@ -68,6 +69,7 @@ const ICON_DEFINITIONS = Object.freeze({
   "eye-off": ionicon(ICON_SELECTIONS["eye-off"], 14),
   chevron: ionicon(ICON_SELECTIONS.chevron, 12),
   copy: ionicon(ICON_SELECTIONS.copy, 16),
+  rename: ionicon(ICON_SELECTIONS.rename, 16),
   check: ionicon(ICON_SELECTIONS.check, 16),
   info: ionicon(ICON_SELECTIONS.info, 13),
 });

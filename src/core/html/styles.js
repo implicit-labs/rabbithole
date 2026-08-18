@@ -184,9 +184,9 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
   .loading-bunny, .stream-caret { animation: none; }
   .math-pending::after, .viz-pending::after { animation: none; }
   .rh-lightbox, .rh-lightbox-viewport { animation: none; }
-  .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.danger,
-  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, #sharemenu, #branch-undo { transition: none !important; }
-  #ask, #sharemenu, #branch-undo, .node.node-enter { transform: none; }
+  .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .node-act-divider, .tool-icon, .node-btn.node-more,
+  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, .anchored-menu, #branch-undo { transition: none !important; }
+  #ask, .anchored-menu, #branch-undo, .node.node-enter { transform: none; }
   .node.node-enter { opacity: 1; }
 }
 
@@ -202,7 +202,7 @@ body.mode-canvas #reader { display: none; }
    lights the whole control wall to wall, never an inset around the label. */
 body.mode-canvas #tb-restore-pill { display: none; }
 #tb-restore-pill { padding: 0; transition: border-color var(--duration-fast) var(--ease-standard); }
-#tb-restore-pill .tool-btn { height: auto; padding: 7px 12px; border-radius: 9px; }
+#tb-restore-pill .tool-btn { height: calc(var(--control-h-xs) + 2 * var(--taskbar-pill-pad-block)); padding-block: 0; padding-inline: 12px; border-radius: 9px; }
 #tb-restore-pill:hover { border-color: var(--border-focus); }
 /* The lineage trail lives at the top of the document column and scrolls with it. */
 #breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: 12.5px; margin-bottom: 22px; }
@@ -356,17 +356,17 @@ body.mode-flight #viewport { display: block; }
 .node-act-divider { width: 1px; height: 14px; margin: 0 3px; background: var(--border); flex-shrink: 0; opacity: 0; transition: opacity 150ms ease; }
 .tool-icon, .node-btn { appearance: none; width: var(--control-h-xs); height: var(--control-h-xs); padding: 0; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--radius-control); flex-shrink: 0; background-color: transparent; color: var(--fg-faint); cursor: pointer; pointer-events: auto; font-family: var(--font-ui); font-size: var(--text-ui); font-weight: var(--weight-medium); line-height: 1; transition: var(--transition-color); }
 .tool-icon svg, .node-btn svg { display: block; width: 16px; height: 16px; flex-shrink: 0; }
-.node-btn.danger { opacity: 0; transition: opacity 150ms ease, background-color 120ms ease, color 120ms ease; }
-.node${""}:hover .node-btn.danger, .node${""}:hover .node-act-divider, .node-acts:focus-within .node-btn.danger, .node-acts:focus-within .node-act-divider { opacity: 1; }
+.node-btn.node-more { opacity: 0; transition: opacity 150ms ease, background-color 120ms ease, color 120ms ease; }
+.node${""}:hover .node-btn.node-more, .node${""}:hover .node-act-divider, .node-acts:focus-within .node-btn.node-more, .node-acts:focus-within .node-act-divider { opacity: 1; }
 .tool-icon:hover, .node-btn:hover { color: var(--fg-bold); background-color: color-mix(in srgb, currentColor 8%, transparent); }
 .tool-icon:active, .node-btn:active { background-color: color-mix(in srgb, currentColor 13%, transparent); }
 .tool-icon:focus, .node-btn:focus { outline: none; }
 .tool-icon:focus-visible, .node-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.node-btn.danger:hover { color: var(--warn); background-color: color-mix(in srgb, var(--warn) 12%, transparent); }
-@media (hover: none) { .node-btn.danger, .node-act-divider { opacity: 1; } }
+@media (hover: none) { .node-btn.node-more, .node-act-divider { opacity: 1; } }
 .node-body { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
 .note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
+.note-edit-surface { display: flex; min-height: 100%; flex-direction: column; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
 .node-resize:hover { opacity: 1; }
 .node.collapsed .node-body, .node.collapsed .node-resize, .node.collapsed .node-composer { display: none; }
@@ -435,7 +435,7 @@ body.mode-flight #viewport { display: block; }
 #tb-document { position: fixed; top: 14px; left: var(--rh-pdf-reader-center, 50%); display: flex; width: max-content; max-width: calc(100vw - 28px); min-width: 0; justify-content: center; transform: translateX(-50%); pointer-events: none; }
 #tb-document:empty, body.mode-canvas #tb-document { display: none; }
 #tb-session { display: flex; align-items: flex-start; gap: 10px; }
-.tb-pill { display: flex; align-items: center; gap: var(--space-3); pointer-events: auto; background: var(--bar-bg); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; box-shadow: var(--shadow); }
+.tb-pill { display: flex; align-items: center; gap: var(--space-3); pointer-events: auto; background: var(--bar-bg); border: 1px solid var(--border); border-radius: 10px; padding: var(--taskbar-pill-pad-block) 10px; box-shadow: var(--shadow); }
 /* One control height for everything in the bar — icon or text, every button
    sits on the same 24px line, so the pills all read as one height. */
 .tb-pill .tool-btn { height: var(--control-h-xs); padding-block: 0; font-size: var(--text-ui); }
@@ -533,10 +533,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    its ink low-left; a text box with line-height centering never looks right). */
 .lens kbd, .ask-commit kbd { font-family: var(--font-ui); font-size: 9px; font-weight: 500; color: var(--fg-faint);
   display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
-  min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline);
+  min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline); flex-shrink: 0;
   background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .lens:hover kbd, .ask-commit:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
-.ask-commit { flex: 1 1 50%; }
+.ask-commit { flex: 1 1 50%; min-width: 0; }
+.ask-commit-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The row swap: lenses at rest, the commit pair once the surface (#ask or a
    .followup-composer) carries has-draft. Buttons hide individually alongside
    their container so each button's own computed display tells the truth. */
@@ -544,6 +545,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .has-draft .lens { display: none; }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
+.note-editor-actions.note-only .commit-actions::before { display: none; }
 
 /* A newly placed standalone note is the composer itself. It starts at the
    compact note height and grows down to the ordinary card cap; the shared
@@ -610,19 +612,32 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .pal-s mark { background: none; color: var(--fg-bold); font-weight: 600; }
 .pal-empty { padding: 18px 12px 14px; text-align: center; font-size: 12px; color: var(--fg-faint); }
 
-/* ---------- share menu ---------- */
-#sharemenu { position: fixed; z-index: 110; min-width: 236px; visibility: hidden; opacity: 0; pointer-events: none; background: var(--popover-bg);
+/* ---------- anchored menus ---------- */
+.anchored-menu { position: fixed; z-index: 110; min-width: 236px; visibility: hidden; opacity: 0; pointer-events: none; background: var(--popover-bg);
   -webkit-backdrop-filter: var(--popover-blur); backdrop-filter: var(--popover-blur);
   border: var(--surface-popover-border); border-radius: var(--surface-popover-radius); padding: var(--space-3); overflow: hidden;
   box-shadow: var(--popover-shadow); transform: translateY(-4px); transform-origin: top right;
   transition: opacity var(--popover-speed) var(--popover-ease), transform var(--popover-speed) var(--popover-ease), visibility 0s linear var(--popover-speed); }
-#sharemenu.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
+.anchored-menu.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
+#cardmenu { min-width: 252px; }
 .sm-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
   font-family: var(--font-ui); font-size: var(--text-body); color: var(--fg); border-radius: var(--radius-control-lg); padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
 .sm-item:hover { background: var(--hl); color: var(--fg-bold); }
-.sm-item .sm-ic { width: 16px; text-align: center; color: var(--fg-dim); flex-shrink: 0; }
+.sm-item .sm-ic { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; text-align: center; color: var(--fg-dim); flex-shrink: 0; }
+.sm-item .sm-ic svg { display: block; width: 16px; height: 16px; }
 .sm-item:hover .sm-ic { color: var(--fg-bold); }
+/* Destructive rows read as ordinary text until you are actually on them: a
+   menu that is warn-coloured at rest is a menu that always looks alarmed. */
+.sm-item.danger:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.sm-item.danger:hover .sm-ic { color: var(--warn); }
 .sm-sep { height: 1px; background: var(--border); margin: 5px 8px; }
+.cm-size-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--share-item-padding-block) var(--share-item-padding-inline); font: var(--text-body)/1 var(--font-ui); color: var(--fg); }
+.cm-size-label { flex: 1; }
+.cm-size-stepper { display: flex; align-items: center; gap: 2px; }
+.cm-text-btn { appearance: none; min-width: var(--control-h-xs); height: var(--control-h-xs); padding: 0 5px; border: 0; border-radius: var(--radius-control); background: none; color: var(--fg-dim); font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; }
+.cm-text-btn:hover { background: var(--hl); color: var(--fg-bold); }
+.cm-text-btn:focus-visible, .sm-item:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.cm-text-value { min-width: 44px; color: var(--fg); }
 
 /* ---------- branch undo toast ---------- */
 /* The hint pill's interactive sibling: same bottom-center station, same glass
@@ -644,7 +659,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 #branch-undo button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
 /* ---------- frozen (exported snapshot) ---------- */
-body.frozen #tb-done-pill, body.frozen .nc-handle, body.frozen .node-btn.danger { display: none !important; }
+body.frozen #tb-done-pill, body.frozen .nc-handle, body.frozen #cm-rename, body.frozen #cm-convert, body.frozen #cm-delete, body.frozen .cm-delete-sep { display: none !important; }
 body.frozen .ll-closed { display: none !important; }
 body.frozen.session-over .ll-frozen { display: inline; }
 .ll-frozen { display: none; color: var(--fg-faint); font-weight: 500; }

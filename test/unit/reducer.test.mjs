@@ -211,6 +211,25 @@ assertGoldens(nodeResults, "node");
   assert.equal(standalone.state.nodes.get("standalone-note").read, true, "human-authored notes are born read");
   assert.deepEqual(standalone.state.nodes.get("standalone-note").origin, { kind: "note" }, "standalone note origins drop unknown and anchored-only keys");
 
+  const recommitted = reduceHoleEvent(standalone.state, {
+    type: "branch_request",
+    node_id: "standalone-note",
+    parent_id: null,
+    question: "A hole-wide question.",
+    branch_type: "followup",
+  });
+  assert.equal(recommitted.state.nodes.size, standalone.state.nodes.size,
+    "branch_request retargets an existing note id instead of adding a second node");
+  assert.deepEqual(recommitted.state.nodes.get("standalone-note").origin, {
+    selected_text: "",
+    question: "A hole-wide question.",
+    lens: null,
+    anchor: null,
+    branch_type: "followup",
+  }, "branch_request replaces the note origin with the ordinary ask origin");
+  assert.equal(recommitted.state.nodes.get("standalone-note").status, "pending");
+  assert.equal(recommitted.state.nodes.get("standalone-note").markdown, "");
+
   assert.throws(
     () => reduceHoleEvent(standalone.state, { type: "node_create", id: "standalone-note", markdown: "Duplicate", origin: { kind: "note" } }),
     /Node standalone-note already exists/,

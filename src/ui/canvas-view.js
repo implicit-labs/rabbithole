@@ -7,6 +7,7 @@ import {
   buildDocContent,
   canvasBuilt,
   canvasFramed,
+  changeNodeFontScale,
   childrenOf,
   closed,
   currentNodeId,
@@ -26,6 +27,7 @@ import {
   registerCoreHooks,
   registerNode,
   rootId,
+  resetNodeFontScale,
   setCanvasBuilt,
   setCanvasFramed,
   setModeValue,
@@ -61,9 +63,9 @@ import {
 import { extractNodeAssetRefs } from "../core/assets.js";
 import { openNode } from "./reader.js";
 import { flyReaderToRect } from "./mode-transition.js";
-import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
+import { applyChildHighlights, setNoteMarks, setPendingMarks, transitionMarkGroups } from "./text-marks.js";
 import { easeInOutMotion, easeOutMotion } from "./easing.js";
-import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
+import { composerActionsMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
 import { buildOriginCrop } from "./origin-provenance.js";
 import { BUNNY_MARK_SVG, iconSvg } from "../core/html/icons.js";
 import { createCleanupScope, createModuleLifecycle } from "./lifecycle.js";
@@ -75,6 +77,7 @@ import { teardownNode } from "./node-teardown.js";
 import { normalizeClipboardImage } from "./clipboard-image.js";
 import { appendOriginAttachmentThumbnails, originAttachmentNames } from "./origin-attachments.js";
 import { createEdgeScroller } from "./edge-scroll.js";
+import { createAnchoredMenu } from "./primitives/anchored-menu.js";
 
 function isSelectionBranch(node) {
   return branchTypeOfNode(node) === BRANCH_SELECTION;
@@ -105,6 +108,8 @@ function defaultCanvasHooks(){
     hideAsk: function(){},
     sendFollowup: function(){ return null; },
     sendNote: function(){ return null; },
+    rollbackBranch: function(){},
+    copyNodeMarkdown: function(){},
     removeBranch: function(){},
     persistNode: function(){},
     persistNodesBulk: function(){},
@@ -131,6 +136,8 @@ var filmCameraHandle = null;
 var cardResizeObserver = null;
 var activePointerGestures = new Set();
 var suppressClickUntil = 0;
+var cardMenuController = null;
+var cardMenuNode = null;
 
 export function registerCanvasHooks(hooks) {
   canvasLifecycle.register(hooks);
@@ -140,6 +147,11 @@ export function initCanvasView(){
   cleanupCanvasView(false);
   var canvasScope = canvasLifecycle.beginInit();
   if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(scheduleEdges);
+  var cardMenu = document.getElementById("cardmenu");
+  cardMenuController = createAnchoredMenu({ surface: cardMenu, placement: "bottom-end",
+    onClose: function(){ cardMenuNode = null; } });
+  canvasScope.addCleanup(function(){ cardMenuController?.dispose(); cardMenuController = null; cardMenuNode = null; });
+  canvasScope.listen(cardMenu, "click", onCardMenuClick);
   registerCoreHooks({
     ensureCanvasBuilt: ensureCanvasBuilt,
     diveToNode: diveToNode,
@@ -162,6 +174,10 @@ export function disposeCanvasView(){
   cleanupCanvasView(true);
 }
 
+export function closeCardMenu(settings){
+  if (cardMenuController) cardMenuController.close(settings);
+}
+
 function cleanupCanvasView(resetHooks){
   canvasLifecycle.dispose(resetHooks);
   if (cardResizeObserver) cardResizeObserver.disconnect();
@@ -169,6 +185,8 @@ function cleanupCanvasView(resetHooks){
   activePointerGestures.forEach(function(cancel){ cancel(); });
   activePointerGestures.clear();
   suppressClickUntil = 0;
+  cardMenuController = null;
+  cardMenuNode = null;
   cancelViewAnimation();
   if (edgeRaf){ cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
   if (filmCameraHandle && window.__rhFilmCamera === filmCameraHandle) {
@@ -196,6 +214,11 @@ function cleanupCanvasView(resetHooks){
   // CANVAS
   // ===========================================================================
 function applyTransform(){
+    // The card menu is a fixed-position surface anchored to a card's screen
+    // rect, and a transform moves that rect without resizing anything the
+    // anchor observes. Panning or zooming with the menu open would strand it
+    // mid-canvas, so the view moving dismisses it.
+    if (cardMenuController && cardMenuController.isOpen()) cardMenuController.close({ restoreFocus: false });
     world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
     zoomLabel.textContent = Math.round(view.scale * 100) + "%";
     canvasLifecycle.hooks.scheduleViewSave();
@@ -249,6 +272,7 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
   }
   var NODE_EXPAND_ICON = iconSvg("expand");
   var NODE_COLLAPSE_ICON = iconSvg("collapse");
+  var NODE_MORE_ICON = iconSvg("more");
   var NODE_RESTORE_ICON = iconSvg("restore");
 
   function syncCollapseButton(node, btn){
@@ -257,6 +281,54 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     var action = node.collapsed ? "Expand card" : "Collapse card";
     btn.innerHTML = node.collapsed ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
     btn.setAttribute("aria-label", action); btn.title = action;
+  }
+
+  function nodeMenuButton(node){
+    var button = cardButton(iconButtonMarkup({ bare: true, className: "node-btn node-more", svgIconHtml: NODE_MORE_ICON,
+      ariaLabel: "Card menu", title: "Card menu", ariaHaspopup: "menu", ariaControls: "cardmenu", ariaExpanded: "false" }));
+    button.addEventListener("click", function(e){ e.stopPropagation(); openCardMenu(node, button, e.detail === 0); });
+    node.moreBtn = button;
+    return button;
+  }
+  function ensureNodeMenuButton(node){
+    if (!node || node._ephemeral || node.moreBtn || !node.actsEl) return;
+    node.actsEl.insertBefore(nodeMenuButton(node), node.actDivider);
+  }
+  function canConvertNote(node){
+    return !!node && !node._ephemeral && !frozen && !closed && node.id !== rootId && isNoteNode(node) && childrenOf(node.id).length === 0;
+  }
+  function openCardMenu(node, trigger, openedByKeyboard){
+    if (!cardMenuController || node._ephemeral) return;
+    cardMenuNode = node;
+    document.getElementById("cm-textreset").textContent = Math.round((node.font_scale || 1) * 100) + "%";
+    // Collapsing is a way of looking, not a change to the hole, so it survives
+    // into a frozen snapshot exactly as the header's own collapse button does.
+    var collapse = document.getElementById("cm-collapse");
+    collapse.querySelector(".sm-label").textContent = node.collapsed ? "Expand branch" : "Collapse branch";
+    collapse.querySelector(".sm-ic").innerHTML = node.collapsed ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
+    document.getElementById("cm-rename").style.display = frozen ? "none" : "";
+    document.getElementById("cm-convert").style.display = canConvertNote(node) && !!(node.md || "").trim() ? "" : "none";
+    var showDelete = !frozen && node.id !== rootId;
+    document.getElementById("cm-delete").style.display = showDelete ? "" : "none";
+    document.querySelector("#cardmenu .cm-delete-sep").style.display = showDelete ? "" : "none";
+    cardMenuController.toggle(trigger, { focusFirst: openedByKeyboard });
+  }
+  function onCardMenuClick(e){
+    var button = e.target.closest && e.target.closest("button");
+    var node = cardMenuNode;
+    if (!button || !node) return;
+    if (button.id === "cm-textdown" || button.id === "cm-textup" || button.id === "cm-textreset"){
+      var scale = button.id === "cm-textreset" ? resetNodeFontScale(node)
+        : changeNodeFontScale(node, button.id === "cm-textup" ? 0.1 : -0.1);
+      document.getElementById("cm-textreset").textContent = Math.round(scale * 100) + "%";
+      return;
+    }
+    cardMenuController.close();
+    if (button.id === "cm-copy") canvasLifecycle.hooks.copyNodeMarkdown(node);
+    else if (button.id === "cm-rename") startTitleEditing(node, node.titleEl);
+    else if (button.id === "cm-convert") convertNoteToAsk(node, node.md);
+    else if (button.id === "cm-collapse") setBranchCollapsed(node, !node.collapsed);
+    else if (button.id === "cm-delete") canvasLifecycle.hooks.removeBranch(node);
   }
 
 export function createNodeEl(node, enter){
@@ -280,11 +352,8 @@ export function createNodeEl(node, enter){
     var openBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_EXPAND_ICON, ariaLabel: "Expand document", title: "Expand document" }));
     var divider = document.createElement("span"); divider.className = "node-act-divider"; divider.setAttribute("aria-hidden", "true");
     var acts = document.createElement("span"); acts.className = "node-acts";
-    if (node.id !== rootId){
-      var delBtn = cardButton(buttonMarkup({ bare: true, className: "node-btn danger", label: "✕", ariaLabel: "Remove this branch", title: "Remove this branch" }));
-      delBtn.addEventListener("click", function(e){ e.stopPropagation(); canvasLifecycle.hooks.removeBranch(node); });
-      acts.appendChild(delBtn);
-    }
+    node.actsEl = acts; node.actDivider = divider;
+    if (!node._ephemeral) acts.appendChild(nodeMenuButton(node));
     acts.appendChild(divider); acts.appendChild(collapseBtn); acts.appendChild(openBtn);
     head.appendChild(titleEl); head.appendChild(acts);
 
@@ -294,7 +363,7 @@ export function createNodeEl(node, enter){
     el.appendChild(head); el.appendChild(body); el.appendChild(comp); el.appendChild(resize);
     world.appendChild(el);
 
-    node.el = el; node.bodyEl = body; node.titleEl = titleEl;
+    node.el = el; node.bodyEl = body; node.titleEl = titleEl; node.collapseBtn = collapseBtn;
     if (cardResizeObserver) cardResizeObserver.observe(el);
     fillBody(node);
     updateCardComposer(node);
@@ -318,7 +387,7 @@ export function createNodeEl(node, enter){
       if (!onCardControl(e)) openNode(node.id);
     });
     openBtn.addEventListener("click", function(e){ e.stopPropagation(); openNode(node.id); });
-    collapseBtn.addEventListener("click", function(e){ e.stopPropagation(); toggleCollapse(node, collapseBtn); });
+    collapseBtn.addEventListener("click", function(e){ e.stopPropagation(); toggleCollapse(node, e.altKey); });
     // Scrolling a card moves the inline marks its children's edges start from.
     body.addEventListener("scroll", scheduleEdges, { passive: true });
     if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
@@ -431,6 +500,10 @@ export function autoGrowEl(ta, max){
   // asking (questions queue server-side); only a pending doc or a dead session does.
 export function updateCardComposer(node){
     if (node._noteComposer){ updateStandaloneNoteComposer(node); return; }
+    if (node._noteEditor && !canConvertNote(node)){
+      var convert = node._noteEditSurface && node._noteEditSurface.querySelector('[data-commit="ask"]');
+      if (convert){ convert.remove(); node._noteEditSurface.querySelector(".note-editor-actions")?.classList.add("note-only"); }
+    }
     if (!node.ncText) return;
     // A draft in progress keeps the drawer out even when the pointer wanders off.
     var hasDraft = !!node.ncText.value.trim();
@@ -719,6 +792,7 @@ export function fillBody(node){
         node.status = "pending";
         node._startTs = Date.now();
         delete node._ephemeral;
+        ensureNodeMenuButton(node);
         node.el.classList.remove("node-note");
         node.titleEl.textContent = node.title;
         node.titleEl.title = node.title;
@@ -754,6 +828,7 @@ export function fillBody(node){
       node.md = noteMarkdown;
       node.h = committedHeight;
       delete node._ephemeral;
+      ensureNodeMenuButton(node);
       refreshNodeHtml(node);
       fillBody(node);
       layoutNode(node);
@@ -858,7 +933,7 @@ export function fillBody(node){
   }
   function refreshMountedNoteSurfaces(node, editor){
     var mounted = document.querySelectorAll('.doc-content[data-node-id="' + node.id + '"]');
-    replaceNoteSurface(node, editor.dataset.surface, editor);
+    replaceNoteSurface(node, editor.dataset.surface, node._noteEditSurface || editor);
     mounted.forEach(function(dc){
       if (dc._rhDispose) dc._rhDispose();
       replaceNoteSurface(node, dc.dataset.surface, dc);
@@ -866,12 +941,14 @@ export function fillBody(node){
     scheduleEdges();
   }
   function cancelNoteEditing(node, editor){
+    var surface = node._noteEditSurface || editor;
     node._noteEditor = null;
+    node._noteEditSurface = null;
     if (node._ephemeral){ teardownNode(node.id); return; }
-    replaceNoteSurface(node, editor.dataset.surface, editor);
+    replaceNoteSurface(node, editor.dataset.surface, surface);
     scheduleEdges();
   }
-  function startTitleEditing(node, titleEl){
+export function startTitleEditing(node, titleEl){
     if (frozen || closed || titleEl.isContentEditable) return;
     var previous = node.title || "";
     titleEl.textContent = previous;
@@ -909,8 +986,10 @@ export function fillBody(node){
     node.md = markdown;
     refreshNodeHtml(node);
     refreshMountedNoteSurfaces(node, editor);
+    node._noteEditSurface = null;
     if (!node._ephemeral){ canvasLifecycle.hooks.persistNode(node); return; }
     delete node._ephemeral;
+    ensureNodeMenuButton(node);
     Promise.resolve(postBrowserEvent({ type: "node_create", id: node.id, parent_id: null,
       title: node.title, markdown: node.md, origin: node.origin,
       position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } }))
@@ -919,6 +998,89 @@ export function fillBody(node){
         if (nodes[node.id] === node) teardownNode(node.id);
         flashHint("Couldn't save that note — it was undone.");
       });
+  }
+  function setConversionMarkState(node, pending){
+    var parent = node.parent_id == null ? null : nodes[node.parent_id];
+    var update = pending ? setPendingMarks : setNoteMarks;
+    update(readerMain, node.id);
+    if (parent && parent.bodyEl) update(parent.bodyEl, node.id);
+  }
+  function restoreConvertedNote(node, previous){
+    node.title = previous.title;
+    node.md = previous.md;
+    node.base_url = previous.base_url;
+    node.base_url_source = previous.base_url_source;
+    node.read = previous.read;
+    node.origin = previous.origin;
+    node.status = previous.status;
+    node._startTs = previous.startTs;
+    if (previous.hadError) node.error = previous.error;
+    else delete node.error;
+    if (node.el) node.el.classList.add("node-note");
+    if (node.titleEl){ node.titleEl.textContent = node.title; node.titleEl.title = node.title; }
+    refreshNodeHtml(node);
+    fillBody(node);
+    layoutNode(node);
+    updateCardComposer(node);
+    setConversionMarkState(node, false);
+    canvasLifecycle.hooks.persistNode(node);
+    scheduleEdges();
+  }
+export function rollbackNoteConversion(node){
+    var restore = node && node._noteConversionRollback;
+    if (!restore) return;
+    delete node._noteConversionRollback;
+    canvasLifecycle.hooks.rollbackBranch(node, restore);
+  }
+  function convertNoteToAsk(node, text){
+    var question = (text || "").trim();
+    if (!question || !canConvertNote(node)) return false;
+    var parentId = node.parent_id == null ? null : node.parent_id;
+    var parent = nodes[parentId == null ? rootId : parentId];
+    if (!parent) return false;
+    var anchor = parentId == null ? null : (node.origin && node.origin.anchor || null);
+    var attachmentNames = Array.from(extractNodeAssetRefs({ markdown: question })).slice(0, 4);
+    var previous = {
+      title: node.title, md: question, base_url: node.base_url, base_url_source: node.base_url_source,
+      read: node.read, origin: node.origin, status: node.status, startTs: node._startTs,
+      hadError: Object.prototype.hasOwnProperty.call(node, "error"), error: node.error
+    };
+    node._noteEditor = null;
+    node._noteEditSurface = null;
+    node.title = truncate(question, 48);
+    node.md = "";
+    node.html = "";
+    node.base_url = parent.base_url || null;
+    node.base_url_source = parent.base_url ? "inherited" : null;
+    node.read = false;
+    node.origin = {
+      selected_text: anchor ? String(previous.origin.selected_text || "").trim() : "",
+      question: question,
+      lens: null,
+      anchor: anchor,
+      branch_type: anchor ? BRANCH_SELECTION : BRANCH_FOLLOWUP,
+      ...(attachmentNames.length ? { attachment_assets: attachmentNames } : {})
+    };
+    node.status = "pending";
+    node._startTs = Date.now();
+    delete node.error;
+    if (node.el) node.el.classList.remove("node-note");
+    if (node.titleEl){ node.titleEl.textContent = node.title; node.titleEl.title = node.title; }
+    fillBody(node);
+    layoutNode(node);
+    updateCardComposer(node);
+    setConversionMarkState(node, true);
+    scheduleEdges();
+    node._noteConversionRollback = function(){ restoreConvertedNote(node, previous); };
+    var payload = { type: "branch_request", request_id: uuid(), node_id: node.id, parent_id: parentId,
+      selected_text: node.origin.selected_text, question: question, lens: null, anchor: anchor,
+      branch_type: node.origin.branch_type,
+      position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h },
+      ...(attachmentNames.length ? { attachment_assets: attachmentNames } : {}) };
+    Promise.resolve(postBrowserEvent(payload)).then(function(response){
+      if (!response || !response.ok) rollbackNoteConversion(node);
+    }).catch(function(){ rollbackNoteConversion(node); });
+    return true;
   }
   // The rendered text from the top of the note to the double-clicked point.
   // Null when the point doesn't resolve to text inside this note.
@@ -973,6 +1135,8 @@ export function fillBody(node){
   function startNoteEditing(node, dc, caretOffset){
     if (!isNoteNode(node) || frozen || closed || node._noteEditor) return;
     if (node._ephemeral){ startStandaloneNoteComposer(node, dc); return; }
+    var surface = document.createElement("div");
+    surface.className = "note-edit-surface has-draft";
     var editor = document.createElement("textarea");
     editor.className = "note-editor md";
     editor.rows = 1;
@@ -982,8 +1146,19 @@ export function fillBody(node){
     editor.spellcheck = true;
     editor.value = node.md || "";
     editor.style.fontSize = dc.style.fontSize;
-    dc.replaceWith(editor);
+    // Editing an existing note is not the composer's "is this a note or a
+    // question" choice — the note already exists. So the pair reads Save /
+    // Convert to Ask, and ⌘↵ keeps the meaning it has always had here.
+    var actions = cardButton(composerActionsMarkup({ className: "note-editor-actions", includeLenses: false,
+      noteEnterShortcut: false, noteLabel: "Save", askLabel: "Convert to Ask",
+      noteKbdHint: "⌘↵", askKbdHint: "⇧⌘↵",
+      noteTitle: "Save note (Command/Control+Enter)", askTitle: "Convert this note into an ask (Shift+Command/Control+Enter)" }));
+    var convertible = canConvertNote(node);
+    if (!convertible){ actions.querySelector('[data-commit="ask"]').remove(); actions.classList.add("note-only"); }
+    surface.append(editor, actions);
+    dc.replaceWith(surface);
     node._noteEditor = editor;
+    node._noteEditSurface = surface;
     var settled = false;
     var settling = false;
     var uploadedNames = new Set();
@@ -1003,18 +1178,25 @@ export function fillBody(node){
       editor.setSelectionRange(nextCaret, nextCaret);
       grow();
     }
-    async function finish(save){
+    function updateActions(){
+      var disabled = settling || !editor.value.trim();
+      var commits = actions.querySelectorAll(".ask-commit");
+      for (var i = 0; i < commits.length; i++) commits[i].disabled = disabled;
+    }
+    async function finish(kind){
       if (settled || settling) return;
       settling = true;
+      updateActions();
       await pasteQueue;
-      var referenced = save ? extractNodeAssetRefs({ markdown: editor.value }) : new Set();
+      var referenced = kind === "cancel" ? new Set() : extractNodeAssetRefs({ markdown: editor.value });
       var cleanup = Array.from(uploadedNames).filter(function(name){ return !referenced.has(name); });
       await Promise.allSettled(cleanup.map(function(name){ return Promise.resolve(deleteAsset(name)); }));
       settled = true;
-      if (save) commitNoteEditing(node, editor);
+      if (kind === "ask" && convertNoteToAsk(node, editor.value)) return;
+      if (kind === "note" || kind === "ask") commitNoteEditing(node, editor);
       else cancelNoteEditing(node, editor);
     }
-    editor.addEventListener("input", grow);
+    editor.addEventListener("input", function(){ grow(); updateActions(); });
     editor.addEventListener("paste", function(e){
       if (settled || settling) return;
       var imageFiles = clipboardImageFiles(e);
@@ -1043,6 +1225,7 @@ export function fillBody(node){
             uploadedNames.add(normalized.name);
             registerRendererAssetName(normalized.name);
             insertPastedImage(normalized.name);
+            updateActions();
           } catch (_error) {
             flashHint("Couldn't save that image — try again.");
           } finally {
@@ -1053,13 +1236,26 @@ export function fillBody(node){
     });
     editor.addEventListener("keydown", function(e){
       if (e.key === "Escape"){
-        e.preventDefault(); e.stopPropagation(); finish(false);
-      } else if ((e.metaKey || e.ctrlKey) && isCommandEnter(e)){
-        e.preventDefault(); e.stopPropagation(); finish(true);
+        e.preventDefault(); e.stopPropagation(); finish("cancel");
       }
     });
-    editor.addEventListener("blur", function(){ finish(true); });
+    actions.addEventListener("pointerdown", function(e){
+      if (e.target.closest && e.target.closest("button")) e.preventDefault();
+    });
+    wireComposerActions({ text: editor, actions: actions,
+      hasDraft: function(){ return !!editor.value.trim(); },
+      commitFromEnter: function(e){
+        if (!isCommandEnter(e) || e.altKey || !(e.metaKey || e.ctrlKey)) return null;
+        if (e.shiftKey) return canConvertNote(node) && editor.value.trim() ? "ask" : null;
+        return "note";
+      },
+      onCommit: function(kind, e){ e.stopPropagation(); finish(kind); },
+      onLens: function(){} });
+    surface.addEventListener("focusout", function(){
+      setTimeout(function(){ if (!settled && !surface.contains(document.activeElement)) finish("note"); }, 0);
+    });
     grow();
+    updateActions();
     editor.focus({ preventScroll: true });
     var caret = (caretOffset == null || caretOffset < 0 || caretOffset > editor.value.length)
       ? editor.value.length : caretOffset;
@@ -1185,13 +1381,28 @@ function layoutNode(node){
       apply: function(n, x, y){ n.w = Math.max(240, x - n.x); n.h = Math.max(160, y - n.y); }
     });
   }
-function toggleCollapse(node, btn){
+function applyCollapsedState(node, collapsed){
+    if (node.collapsed === collapsed) return false;
+    node.collapsed = collapsed;
+    if (node.el) node.el.classList.toggle("collapsed", collapsed);
+    if (node.collapseBtn) syncCollapseButton(node, node.collapseBtn);
+    if (!collapsed && node.el) layoutNode(node);
+    return true;
+  }
+function toggleCollapse(node, deep){
     if (node._ephemeral) return;
-    node.collapsed = !node.collapsed;
-    node.el.classList.toggle("collapsed", node.collapsed);
-    syncCollapseButton(node, btn);
-    if (!node.collapsed) layoutNode(node);
+    if (deep){ setBranchCollapsed(node, !node.collapsed); return; }
+    if (!applyCollapsedState(node, !node.collapsed)) return;
     renderVisibility(); drawEdges(); canvasLifecycle.hooks.persistNode(node);
+  }
+export function setBranchCollapsed(node, collapsed){
+    if (!node || node._ephemeral) return;
+    var branch = [];
+    function collect(current){ branch.push(current); childrenOf(current.id).forEach(collect); }
+    collect(node);
+    var changed = branch.filter(function(current){ return applyCollapsedState(current, collapsed); });
+    for (var i = 0; i < changed.length; i++) canvasLifecycle.hooks.persistNode(changed[i]);
+    renderVisibility(); drawEdges();
   }
 export function renderVisibility(){
     var cache = Object.create(null);

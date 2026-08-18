@@ -86,12 +86,33 @@ export const CANVAS_SHELL = `
   <div id="pal-results" role="listbox" aria-label="Search results"></div>
 </div></div>
 
-<div id="sharemenu" role="menu" aria-label="Share and export">
+<div id="sharemenu" class="anchored-menu" role="menu" aria-label="Share and export">
   ${buttonMarkup({ bare: true, className: "sm-item", id: "sm-trail", role: "menuitem", tabIndex: -1, label: "Copy trail as Markdown", svgIconHtml: '<span class="sm-ic">⤷</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "sm-doc", role: "menuitem", tabIndex: -1, label: "Copy document as Markdown", svgIconHtml: '<span class="sm-ic">⧉</span>' })}
   <div class="sm-sep"></div>
   ${buttonMarkup({ bare: true, className: "sm-item", id: "sm-export", role: "menuitem", tabIndex: -1, label: "Download snapshot (.html)", svgIconHtml: '<span class="sm-ic">⇩</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "sm-portable", role: "menuitem", tabIndex: -1, label: "Export Rabbithole (.rabbithole)", svgIconHtml: '<span class="sm-ic">⇣</span>' })}
+</div>
+
+<div id="cardmenu" class="anchored-menu" role="menu" aria-label="Card actions">
+  <div class="cm-size-row">
+    <span class="cm-size-label">Text size</span>
+    <span class="cm-size-stepper">
+      ${buttonMarkup({ bare: true, className: "cm-text-btn", id: "cm-textdown", role: "menuitem", tabIndex: -1, ariaLabel: "Decrease text size", label: "A−" })}
+      ${buttonMarkup({ bare: true, className: "cm-text-btn cm-text-value", id: "cm-textreset", role: "menuitem", tabIndex: -1, ariaLabel: "Reset text size to 100%", label: "100%" })}
+      ${buttonMarkup({ bare: true, className: "cm-text-btn", id: "cm-textup", role: "menuitem", tabIndex: -1, ariaLabel: "Increase text size", label: "A+" })}
+    </span>
+  </div>
+  <div class="sm-sep"></div>
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-copy", role: "menuitem", tabIndex: -1, label: "Copy as Markdown", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("copy") + '</span>' })}
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-rename", role: "menuitem", tabIndex: -1, label: "Rename", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("rename") + '</span>' })}
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-convert", role: "menuitem", tabIndex: -1, label: "Convert to Ask", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("question") + '</span>' })}
+  <!-- The branch item wears the same minus/plus the card header wears, because
+       it is that button applied to the whole subtree. Its glyph and label are
+       both swapped when the card is already collapsed. -->
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-collapse", role: "menuitem", tabIndex: -1, label: "Collapse branch", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("collapse") + '</span>' })}
+  <div class="sm-sep cm-delete-sep"></div>
+  ${buttonMarkup({ bare: true, className: "sm-item danger", id: "cm-delete", role: "menuitem", tabIndex: -1, label: "Delete branch", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("delete") + '</span>' })}
 </div>
 
 <div id="branch-undo"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Undo", hidden: true, dataAttrs: { noticeAction: "" } })}</div>

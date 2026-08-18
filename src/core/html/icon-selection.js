@@ -18,6 +18,7 @@ export const ICON_SELECTIONS = Object.freeze({
   "send": "ios-share-alt",
   "search": "search-outline",
   "close": "close-outline",
+  "more": "ellipsis-horizontal",
   "expand": "expand-outline",
   "contract": "contract-outline",
   "collapse": "remove-outline",
@@ -34,6 +35,7 @@ export const ICON_SELECTIONS = Object.freeze({
   "eye-off": "eye-off-outline",
   "chevron": "chevron-down-outline",
   "copy": "copy-outline",
+  "rename": "create-outline",
   "check": "checkmark-outline",
   "info": "information-circle-outline",
 });

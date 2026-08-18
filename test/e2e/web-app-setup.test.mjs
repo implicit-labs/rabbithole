@@ -1382,10 +1382,10 @@ async function verifyAskKeyUxAndRail() {
   const mutationSnapshot = JSON.parse(extractSnapshotPayload(await page.evaluate(() => window.__rabbitholeTest.exportSnapshot())));
   assert.equal(mutationSnapshot.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.collapsed, true,
     `immediate snapshot export must flush the canonical document mutation (root=${rootIdWhileLoading}, nodes=${JSON.stringify(mutationSnapshot.hole.nodes)})`);
-  assert.equal(await page.locator(".node.collapsed .node-font-btn").count(), 0, "collapsed cards must not retain per-card font controls");
+  assert.equal(await page.locator(".node.collapsed .node-font-btn").count(), 0, "collapsed cards should keep text size in the shared menu, not inline controls");
   const mutationPortable = await page.evaluate(() => window.__rabbitholeTest.exportPortable());
   assert.equal(mutationPortable.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.font_scale, 1,
-    "legacy per-card font scale should remain inert document data");
+    "an unchanged card should preserve its default per-node font scale");
   const persistedViewBeforeLiveChange = await page.evaluate(async () => (await window.__rabbitholeTest.readStoredHole()).view_state);
   await page.dblclick(`.node[data-id="${rootIdWhileLoading}"] .node-head`);
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));

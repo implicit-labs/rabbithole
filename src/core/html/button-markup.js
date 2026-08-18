@@ -57,10 +57,14 @@ export function buttonMarkup(options = {}) {
 // draft exists. Every composer surface (selection popover, reader composer,
 // card drawer, standalone note/ask surface) renders this same commit markup;
 // surfaces without a parent document omit lenses through the builder option.
-/** @param {{ id?: string, className?: string, includeLenses?: boolean, noteEnterShortcut?: boolean }} [options] */
+/** @param {{ id?: string, className?: string, includeLenses?: boolean, noteEnterShortcut?: boolean,
+ *   noteKbdHint?: string, askKbdHint?: string, noteTitle?: string, askTitle?: string,
+ *   noteLabel?: string, askLabel?: string }} [options] */
 export function composerActionsMarkup(options = {}) {
   const className = ["ask-actions", options.className].filter(Boolean).join(" ");
   const noteEnterShortcut = options.noteEnterShortcut !== false;
+  const noteKbdHint = options.noteKbdHint ?? (noteEnterShortcut ? "↵" : undefined);
+  const askKbdHint = options.askKbdHint ?? "⌘↵";
   const lenses = options.includeLenses === false ? "" :
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" }) +
@@ -70,10 +74,11 @@ export function composerActionsMarkup(options = {}) {
     lenses +
     '<div class="commit-actions">' +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "note" },
-      title: noteEnterShortcut ? "Save note (Enter)" : "Save note", label: "Note ",
-      kbdHint: noteEnterShortcut ? "↵" : undefined }) +
+      title: options.noteTitle ?? (noteEnterShortcut ? "Save note (Enter)" : "Save note"),
+      label: (options.noteLabel ?? "Note") + " ", labelClass: "ask-commit-label", kbdHint: noteKbdHint }) +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "ask" },
-      title: "Ask (Command/Control+Enter)", label: "Ask ", kbdHint: "⌘↵" }) +
+      title: options.askTitle ?? "Ask (Command/Control+Enter)",
+      label: (options.askLabel ?? "Ask") + " ", labelClass: "ask-commit-label", kbdHint: askKbdHint }) +
     "</div></div>";
 }
 

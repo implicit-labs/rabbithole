@@ -2,7 +2,7 @@ import {
   READER_BASE,
   breadcrumbEl,
   buildDocContent,
-  changeReadingSize,
+  changeNodeFontScale,
   childrenOf,
   currentNodeId,
   goToNode,
@@ -189,8 +189,8 @@ export function initReader(){
     // Hovering a margin note lights its highlight so the pair reads as one.
     readerScope.listen(notes, "mouseover", function(e){ syncNoteHover(e, true); });
     readerScope.listen(notes, "mouseout", function(e){ syncNoteHover(e, false); });
-    readerScope.listen(document.getElementById("r-textdown"), "click", function(){ changeReadingSize(-0.1); });
-    readerScope.listen(document.getElementById("r-textup"), "click", function(){ changeReadingSize(0.1); });
+    readerScope.listen(document.getElementById("r-textdown"), "click", function(){ changeNodeFontScale(nodes[currentNodeId], -0.1); });
+    readerScope.listen(document.getElementById("r-textup"), "click", function(){ changeNodeFontScale(nodes[currentNodeId], 0.1); });
     // Back to canvas lives in the taskbar's session cluster. It collapses the
     // reader back into its card and hands focus to the card's expand button,
     // so keyboard travel round-trips cleanly.

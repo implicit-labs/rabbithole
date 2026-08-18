@@ -81,7 +81,7 @@ function onGlobalKeydown(e){
 function overlayOpen(){
   var palette = document.getElementById("palette");
   if (palette && !palette.hidden) return true;
-  var surfaces = ["ask", "sharemenu"];
+  var surfaces = ["ask", "sharemenu", "cardmenu"];
   for (var i = 0; i < surfaces.length; i++){
     var el = document.getElementById(surfaces[i]);
     if (el && el.classList.contains("visible")) return true;

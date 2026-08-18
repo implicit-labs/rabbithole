@@ -31,3 +31,6 @@ prototypes/
 .agents/
 .playwright-mcp/
 pdf-reader-*.png
+
+# card menu spec (local working state)
+SPEC-CARD-MENU.md

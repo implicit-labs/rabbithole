@@ -38,6 +38,7 @@ import {
   drawEdges,
   fillBody,
   renderVisibility,
+  rollbackNoteConversion,
   scheduleEdges,
   updateCardComposer
 } from "./canvas-view.js";
@@ -350,6 +351,7 @@ function handleServer(msg){
         }
       }
       cancelQueuedStreamRender(node.id);
+      delete node._noteConversionRollback;
       node.error = null;
       node.status = "answered"; node.title = msg.title || node.title;
       node.md = msg.markdown || node.md || "";
@@ -412,6 +414,7 @@ function handleServer(msg){
     } else if (msg.type === "node_error"){
       var en = nodes[msg.node_id];
       if (en && en.status === "pending"){
+        if (msg.restore_note){ rollbackNoteConversion(en); return; }
         en.error = {
           message: msg.message || "The provider request failed.",
           code: msg.code || null,
