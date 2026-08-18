@@ -292,13 +292,18 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
   }
   function ensureNodeMenuButton(node){
     if (!node || node._ephemeral || node.moreBtn || !node.actsEl) return;
-    node.actsEl.insertBefore(nodeMenuButton(node), node.actDivider);
+    node.actsEl.appendChild(nodeMenuButton(node));
   }
   function canConvertNote(node){
     return !!node && !node._ephemeral && !frozen && !closed && node.id !== rootId && isNoteNode(node) && childrenOf(node.id).length === 0;
   }
   function openCardMenu(node, trigger, openedByKeyboard){
     if (!cardMenuController || node._ephemeral) return;
+    // The menu is anchored to the card's screen rect, and applyTransform
+    // dismisses it whenever the view moves — so a reveal glide still in flight
+    // would close the menu on its very next frame. Reaching for a card's ⋯ is
+    // a gesture like zoom, drag, or pan: the glide yields to it.
+    cancelViewAnimation();
     cardMenuNode = node;
     document.getElementById("cm-textreset").textContent = Math.round((node.font_scale || 1) * 100) + "%";
     // Collapsing is a way of looking, not a change to the hole, so it survives
@@ -353,8 +358,11 @@ export function createNodeEl(node, enter){
     var divider = document.createElement("span"); divider.className = "node-act-divider"; divider.setAttribute("aria-hidden", "true");
     var acts = document.createElement("span"); acts.className = "node-acts";
     node.actsEl = acts; node.actDivider = divider;
+    // Window controls first, then the divider, then the ⋮ menu at the outer
+    // edge — the rightmost thing in the header, where every card menu lives.
+    // Real DOM order, so tab order and reading order are the same order.
+    acts.appendChild(collapseBtn); acts.appendChild(openBtn); acts.appendChild(divider);
     if (!node._ephemeral) acts.appendChild(nodeMenuButton(node));
-    acts.appendChild(divider); acts.appendChild(collapseBtn); acts.appendChild(openBtn);
     head.appendChild(titleEl); head.appendChild(acts);
 
     var body = document.createElement("div"); body.className = "node-body";
@@ -628,22 +636,24 @@ export function fillBody(node){
   }
   // The textarea and card share one ceiling. Derive the text allowance from
   // the card's saved cap and the live composer chrome so neither can stop
-  // growing while the other still has unused room.
-  function standaloneNoteEditorCap(node){
+  // growing while the other still has unused room. Both flush-footer note
+  // surfaces — the fresh composer and the editor over an existing note — are
+  // the same box, so they measure themselves the same way.
+  function noteEditorCap(node, input, actions, attachmentStrip){
     var cardStyle = getComputedStyle(node.el);
-    var inputStyle = getComputedStyle(node._noteInput);
-    var composerStyle = getComputedStyle(node._noteComposer);
+    var inputStyle = getComputedStyle(input);
+    var surfaceStyle = getComputedStyle(input.parentNode);
     return Math.max(1,
-      node.h - node.el.querySelector(".node-head").offsetHeight - node._noteActions.offsetHeight -
-      (node._noteAttachmentStrip ? node._noteAttachmentStrip.offsetHeight : 0) -
+      node.h - node.el.querySelector(".node-head").offsetHeight - actions.offsetHeight -
+      (attachmentStrip ? attachmentStrip.offsetHeight : 0) -
       cssPixels(cardStyle, "borderTopWidth") - cssPixels(cardStyle, "borderBottomWidth") -
       cssPixels(inputStyle, "paddingTop") - cssPixels(inputStyle, "paddingBottom") -
-      cssPixels(composerStyle, "borderTopWidth") - cssPixels(composerStyle, "borderBottomWidth") -
-      cssPixels(composerStyle, "paddingTop") - cssPixels(composerStyle, "paddingBottom"));
+      cssPixels(surfaceStyle, "borderTopWidth") - cssPixels(surfaceStyle, "borderBottomWidth") -
+      cssPixels(surfaceStyle, "paddingTop") - cssPixels(surfaceStyle, "paddingBottom"));
   }
   function growStandaloneNoteComposer(node){
     if (!node._noteEditor || !node._noteComposer) return;
-    autoGrowEl(node._noteEditor, standaloneNoteEditorCap(node));
+    autoGrowEl(node._noteEditor, noteEditorCap(node, node._noteInput, node._noteActions, node._noteAttachmentStrip));
   }
   function updateStandaloneNoteComposer(node){
     if (!node._noteEditor || !node._noteComposer) return;
@@ -940,8 +950,14 @@ export function fillBody(node){
     });
     scheduleEdges();
   }
+  // Leaving the editor — saved, cancelled, or converted — hands the card's
+  // bottom edge back to its ordinary body padding and resize corner.
+  function endNoteEditingChrome(node){
+    if (node && node.el) node.el.classList.remove("note-editing");
+  }
   function cancelNoteEditing(node, editor){
     var surface = node._noteEditSurface || editor;
+    endNoteEditingChrome(node);
     node._noteEditor = null;
     node._noteEditSurface = null;
     if (node._ephemeral){ teardownNode(node.id); return; }
@@ -982,6 +998,7 @@ export function startTitleEditing(node, titleEl){
   function commitNoteEditing(node, editor){
     var markdown = editor.value;
     if (!markdown.trim()){ cancelNoteEditing(node, editor); return; }
+    endNoteEditingChrome(node);
     node._noteEditor = null;
     node.md = markdown;
     refreshNodeHtml(node);
@@ -1045,6 +1062,7 @@ export function rollbackNoteConversion(node){
       read: node.read, origin: node.origin, status: node.status, startTs: node._startTs,
       hadError: Object.prototype.hasOwnProperty.call(node, "error"), error: node.error
     };
+    endNoteEditingChrome(node);
     node._noteEditor = null;
     node._noteEditSurface = null;
     node.title = truncate(question, 48);
@@ -1137,6 +1155,7 @@ export function rollbackNoteConversion(node){
     if (node._ephemeral){ startStandaloneNoteComposer(node, dc); return; }
     var surface = document.createElement("div");
     surface.className = "note-edit-surface has-draft";
+    var input = document.createElement("div"); input.className = "ask-input";
     var editor = document.createElement("textarea");
     editor.className = "note-editor md";
     editor.rows = 1;
@@ -1155,8 +1174,12 @@ export function rollbackNoteConversion(node){
       noteTitle: "Save note (Command/Control+Enter)", askTitle: "Convert this note into an ask (Shift+Command/Control+Enter)" }));
     var convertible = canConvertNote(node);
     if (!convertible){ actions.querySelector('[data-commit="ask"]').remove(); actions.classList.add("note-only"); }
-    surface.append(editor, actions);
+    input.appendChild(editor);
+    surface.append(input, actions);
     dc.replaceWith(surface);
+    // The card wears the edit state so its body can go full-bleed and its
+    // resize corner can stand down while the footer owns the bottom edge.
+    node.el.classList.add("note-editing");
     node._noteEditor = editor;
     node._noteEditSurface = surface;
     var settled = false;
@@ -1164,7 +1187,7 @@ export function rollbackNoteConversion(node){
     var uploadedNames = new Set();
     var pendingPasteCount = 0;
     var pasteQueue = Promise.resolve();
-    function grow(){ autoGrowEl(editor, Math.max(90, node.h - 60)); }
+    function grow(){ autoGrowEl(editor, noteEditorCap(node, input, actions, null)); }
     function insertPastedImage(name){
       var start = editor.selectionStart;
       var end = editor.selectionEnd;

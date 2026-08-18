@@ -69,6 +69,13 @@ const ICON_DEFINITIONS = Object.freeze({
   "eye-off": ionicon(ICON_SELECTIONS["eye-off"], 14),
   chevron: ionicon(ICON_SELECTIONS.chevron, 12),
   copy: ionicon(ICON_SELECTIONS.copy, 16),
+  /* The Share menu's three non-copy rows. "trail" keeps the ⤷ it replaces —
+     the descent from the root down to this document — while "download" (a tray
+     the arrow drops into) and "package" (one closed bundle) stay unmistakable
+     from each other, which two boxes-with-a-down-arrow never would be. */
+  trail: ionicon(ICON_SELECTIONS.trail, 16),
+  download: ionicon(ICON_SELECTIONS.download, 16),
+  package: ionicon(ICON_SELECTIONS.package, 16),
   rename: ionicon(ICON_SELECTIONS.rename, 16),
   check: ionicon(ICON_SELECTIONS.check, 16),
   info: ionicon(ICON_SELECTIONS.info, 13),

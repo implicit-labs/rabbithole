@@ -1471,6 +1471,19 @@ async function verifyNoteToAskConversion() {
       const actionsRect = actions.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
       const card = actions.closest(".node");
+      const body = actions.closest(".node-body");
+      // The canvas paints through one scaled transform, so screen rects and
+      // computed border widths only agree once the borders are scaled too.
+      const cardRect = card.getBoundingClientRect();
+      const cardStyle = getComputedStyle(card);
+      const bodyStyle = getComputedStyle(body);
+      const surfaceStyle = getComputedStyle(surface);
+      const scale = cardRect.width / card.offsetWidth;
+      const cardInner = {
+        left: cardRect.left + parseFloat(cardStyle.borderLeftWidth) * scale,
+        right: cardRect.right - parseFloat(cardStyle.borderRightWidth) * scale,
+        bottom: cardRect.bottom - parseFloat(cardStyle.borderBottomWidth) * scale,
+      };
       const originalWidth = card.style.width;
       card.style.width = "300px";
       const narrowActionsRect = actions.getBoundingClientRect();
@@ -1483,6 +1496,16 @@ async function verifyNoteToAskConversion() {
         focused: document.activeElement === surface.querySelector(".note-editor"),
         composerBar: actions.classList.contains("ask-actions") && getComputedStyle(actions).borderTopWidth === "1px"
           && Math.abs(actionsRect.width - surfaceRect.width) < 1,
+        // The same flush footer the standalone note composer wears: pinned to
+        // the card's bottom edge, full-bleed to its sides, no body padding
+        // left to inset it, and rounded into the card's own bottom corners.
+        bodyPadding: [bodyStyle.paddingTop, bodyStyle.paddingRight, bodyStyle.paddingBottom, bodyStyle.paddingLeft].join(" "),
+        flushBottom: Math.abs(actionsRect.bottom - cardInner.bottom) < 1,
+        flushSides: Math.abs(actionsRect.left - cardInner.left) < 1 && Math.abs(actionsRect.right - cardInner.right) < 1,
+        footerCorners: surfaceStyle.overflow === "hidden"
+          && surfaceStyle.borderBottomLeftRadius === cardStyle.borderBottomLeftRadius
+          && surfaceStyle.borderBottomRightRadius === cardStyle.borderBottomRightRadius,
+        resizeHidden: getComputedStyle(card.querySelector(".node-resize")).display === "none",
         hintCount: actions.querySelectorAll(".note-edit-hint").length,
         commitsVisible: getComputedStyle(actions.querySelector(".commit-actions")).display === "flex"
           && commits.every((button) => getComputedStyle(button).display !== "none"),
@@ -1494,12 +1517,14 @@ async function verifyNoteToAskConversion() {
         })),
       };
     }), {
-      focused: true, composerBar: true, hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
+      focused: true, composerBar: true, bodyPadding: "0px 0px 0px 0px",
+      flushBottom: true, flushSides: true, footerCorners: true, resizeHidden: true,
+      hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
       commits: [
         { kind: "note", hint: "⌘↵", label: "Save", title: "Save note (Command/Control+Enter)" },
         { kind: "ask", hint: "⇧⌘↵", label: "Convert to Ask", title: "Convert this note into an ask (Shift+Command/Control+Enter)" },
       ],
-    }, "editing an existing note should use the full-width composer bar with the existing Save and Convert commits");
+    }, "editing an existing note should use the standalone composer's flush footer with the existing Save and Convert commits");
     await editor.fill("");
     assert.equal(await followupCard.locator('.note-editor-actions [data-commit="ask"]').isDisabled(), true,
       "an empty note question should disable Ask");
@@ -1903,10 +1928,10 @@ async function verifyCardMenu() {
     assert.deepEqual(await alphaCard.locator(".node-head .node-btn").evaluateAll((buttons) => buttons.map((button) => ({
       name: button.getAttribute("aria-label"), glyph: button.querySelector("svg")?.getBoundingClientRect().width,
     }))), [
-      { name: "Card menu", glyph: 16 },
       { name: "Collapse card", glyph: 16 },
       { name: "Expand document", glyph: 16 },
-    ], "card headers should expose three size-matched menu, collapse, and expand controls");
+      { name: "Card menu", glyph: 16 },
+    ], "card headers should expose three size-matched controls with the ⋮ menu last, in real DOM order");
     await alphaTrigger.focus();
     await page.keyboard.press("Enter");
     await cardMenu.waitFor({ state: "visible" });
@@ -2289,10 +2314,10 @@ async function verifyCanvasBranching() {
     name: button.getAttribute("aria-label") || button.textContent.trim(),
   })));
   assert.deepEqual(cardControls, [
-    { type: "button", name: "Card menu" },
     { type: "button", name: "Collapse card" },
     { type: "button", name: "Expand document" },
-  ], "card headers should keep only menu, collapse, and document controls");
+    { type: "button", name: "Card menu" },
+  ], "card headers should keep only collapse, document, and menu controls, with the menu at the outer edge");
   await childCard.locator('.node-btn[aria-label="Collapse card"]').click();
   assert.equal(await childCard.evaluate((card) => card.classList.contains("collapsed")), true, "the branch fixture should collapse");
   assert.equal(await childCard.locator(".node-font-btn").count(), 0, "a collapsed card header must not expose font controls");

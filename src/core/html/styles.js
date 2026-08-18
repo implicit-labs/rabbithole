@@ -366,7 +366,6 @@ body.mode-flight #viewport { display: block; }
 .node-body { padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
 .note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
-.note-edit-surface { display: flex; min-height: 100%; flex-direction: column; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
 .node-resize:hover { opacity: 1; }
 .node.collapsed .node-body, .node.collapsed .node-resize, .node.collapsed .node-composer { display: none; }
@@ -568,6 +567,24 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .node.note-draft .ask-actions .commit-actions { display: flex; }
 .node.note-draft .ask-actions .ask-commit { display: inline-flex; }
 .node.note-draft .node-composer, .node.note-draft .node-resize, .node.note-draft .node-collapse { display: none; }
+
+/* Editing an existing note is the same box as writing a new one: the card body
+   goes full-bleed, the action row is the card's bottom edge — hairline running
+   corner to corner, rounded into them — and the text scrolls underneath. Only
+   the labels differ (Save / Convert to Ask), because the note already exists.
+   The resize corner stands down: a drag triangle sitting on a flush footer is
+   a handle with nothing to hold. */
+.node.note-editing .node-body { display: flex; padding: 0; overflow: hidden; }
+.node.note-editing .node-resize { display: none; }
+.note-edit-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow: hidden;
+  border-radius: 0 0 var(--radius-card) var(--radius-card); }
+.note-edit-surface > .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px 8px; }
+/* The editor is the rendered note, pixel for pixel — the padding belongs to the
+   wrapper, exactly as it belonged to the body, so the words never shift on the
+   double-click. That means undoing the ask composer's own textarea insets. */
+.note-edit-surface .note-editor { max-height: none; padding: 0; min-height: 1.72em;
+  font-family: var(--font-doc); line-height: 1.72; color: var(--fg); }
+.note-edit-surface > .ask-actions { flex: 0 0 auto; }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */
