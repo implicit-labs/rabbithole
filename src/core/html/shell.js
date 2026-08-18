@@ -8,17 +8,18 @@ import { iconSvg } from "./icons.js";
  */
 /*
  * The three folds a card offers, rendered identically into the ⋯ menu and into
- * the collapse button's own right-click menu. Every row wears the same
- * minus/plus the card header wears, because each is that button applied to a
- * different scope: the card, the card plus its subtree ("branch", as in Delete
- * branch), and the subtree alone. Labels and glyphs are swapped per row at open
- * time by the canvas; the two subtree rows are hidden on a childless card.
+ * the collapse button's own right-click menu. Each row names a different scope:
+ * the card, the card plus its subtree ("branch", as in Delete branch), and the
+ * subtree alone — so each wears the mini-tree glyph that fills exactly the nodes
+ * its scope folds, not the card header's minus. Labels are swapped per row at
+ * open time by the canvas; the two subtree rows are hidden on a childless card.
  * @param {string} prefix
  */
 function collapseGroupMarkup(/** @type {string} */ prefix) {
-  const row = (/** @type {string} */ id, /** @type {string} */ label) => buttonMarkup({ bare: true, className: "sm-item", id: prefix + id, role: "menuitem", tabIndex: -1,
-    label: label, labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("collapse") + '</span>' });
-  return row("collapse", "Collapse") + row("collapse-branch", "Collapse branch") + row("collapse-children", "Collapse children");
+  const row = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ icon) => buttonMarkup({ bare: true, className: "sm-item", id: prefix + id, role: "menuitem", tabIndex: -1,
+    label: label, labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg(icon) + '</span>' });
+  return row("collapse", "Collapse", "fold-self") + row("collapse-branch", "Collapse branch", "fold-branch")
+    + row("collapse-children", "Collapse children", "fold-children");
 }
 
 export const CANVAS_SHELL = `

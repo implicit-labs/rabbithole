@@ -34,6 +34,28 @@ const RAIL_PANEL = {
     '<path fill="none" stroke-linecap="round" stroke-width="48" d="M192 64v384"/>',
 };
 
+/* The three folds a card offers, drawn as one mini-tree — a parent over two
+   children — where a filled node is a folded node. The scope is the fill, so
+   the three rows are told apart at a glance and never by their labels alone.
+   Product-owned, drawn on the Ionicons 512-grid/48-stroke system so they read
+   as part of the set. */
+const FOLD_EDGES = '<path fill="none" stroke-linecap="round" stroke-width="48" d="M208.5 205.8L163.5 306.2M303.5 205.8l45 100.4"/>';
+
+/** @param {number} cx @param {number} cy @param {boolean} folded */
+function foldNode(cx, cy, folded) {
+  return folded
+    ? `<circle cx="${cx}" cy="${cy}" r="84"/>`
+    : `<circle cx="${cx}" cy="${cy}" r="60" fill="none" stroke-width="48"/>`;
+}
+
+/** @param {boolean} parentFolded @param {boolean} childrenFolded */
+function foldTree(parentFolded, childrenFolded) {
+  return {
+    attrs: 'viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"',
+    body: FOLD_EDGES + foldNode(256, 100, parentFolded) + foldNode(116, 412, childrenFolded) + foldNode(396, 412, childrenFolded),
+  };
+}
+
 const ICON_DEFINITIONS = Object.freeze({
   bunny: { size: null, attrs: 'viewBox="0 0 64 64" fill="currentColor"', body: BUNNY_SHAPES },
   rail: { size: 16, ...RAIL_PANEL },
@@ -57,6 +79,9 @@ const ICON_DEFINITIONS = Object.freeze({
   contract: ionicon(ICON_SELECTIONS.contract, 16),
   collapse: ionicon(ICON_SELECTIONS.collapse, 16),
   restore: ionicon(ICON_SELECTIONS.restore, 16),
+  "fold-self": { size: 16, ...foldTree(true, false) },
+  "fold-branch": { size: 16, ...foldTree(true, true) },
+  "fold-children": { size: 16, ...foldTree(false, true) },
   "area-select": ionicon(ICON_SELECTIONS["area-select"], 16),
   "file-text": ionicon(ICON_SELECTIONS["file-text"], 16),
   question: ionicon(ICON_SELECTIONS.question, 18),

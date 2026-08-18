@@ -23,6 +23,21 @@ assert.equal((iconSvg("more").match(/cx="256"/g) || []).length, 3, "the card men
 assert.notEqual(iconSvg("trail"), iconSvg("copy"), "trail and document copy need distinct silhouettes");
 assert.notEqual(iconSvg("download"), iconSvg("package"), "snapshot download and portable export need distinct silhouettes");
 assert.match(iconSvg("rail"), /stroke-width="48"/, "the product-owned rail panel stays on the Ionicons stroke grid");
+
+// The fold rows share one mini-tree and differ only in which nodes are filled,
+// so the family must resolve like any other role and stay pairwise distinct.
+const folds = ["fold-self", "fold-branch", "fold-children"].map((name) => iconSvg(name));
+for (const fold of folds) {
+  assert.match(fold, /^<svg width="16" height="16" viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"/,
+    "the fold glyphs inherit currentColor for fill and stroke so the menu's ink states apply");
+  assert.match(fold, /d="M208\.5 205\.8L163\.5 306\.2M303\.5 205\.8l45 100\.4"/, "every fold glyph draws the same two edges");
+  assert.equal((fold.match(/<circle/g) || []).length, 3, "every fold glyph draws a parent over two children");
+}
+assert.equal(new Set(folds).size, 3, "the three folds need distinct silhouettes");
+assert.equal((folds[0].match(/r="84"/g) || []).length, 1, "Collapse fills the card alone");
+assert.equal((folds[1].match(/r="84"/g) || []).length, 3, "Collapse branch fills the whole subtree");
+assert.equal((folds[2].match(/r="84"/g) || []).length, 2, "Collapse children fills the children and leaves the card open");
+assert.notEqual(iconSvg("fold-self"), iconSvg("collapse"), "the fold rows and the card's collapse button are different affordances");
 for (const name of Object.keys(ICON_SELECTIONS)) assert.match(iconSvg(name), /^<svg/);
 
 const roots = ["src", "website/about"];

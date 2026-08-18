@@ -363,10 +363,11 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     syncCollapseRow(document.getElementById(prefix + "collapse-branch"), !!node.collapsed, " branch", hasChildren);
     syncCollapseRow(document.getElementById(prefix + "collapse-children"), childrenAllCollapsed(node), " children", hasChildren);
   }
+  // Only the verb flips. The row's glyph names its scope, which the card's state
+  // never changes, so the shell's per-row mini-tree has to survive every open.
   function syncCollapseRow(item, expands, noun, shown){
     item.style.display = shown ? "" : "none";
     item.querySelector(".sm-label").textContent = (expands ? "Expand" : "Collapse") + noun;
-    item.querySelector(".sm-ic").innerHTML = expands ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
   }
   // Each row does what its label just said, so the action reads the same state
   // the label was rendered from.
