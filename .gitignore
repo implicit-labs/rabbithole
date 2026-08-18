@@ -34,3 +34,7 @@ pdf-reader-*.png
 
 # card menu spec (local working state)
 SPEC-CARD-MENU.md
+
+# settings sheet spec + design playground (local working state)
+SPEC-SETTINGS.md
+playground/

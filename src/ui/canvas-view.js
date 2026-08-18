@@ -138,6 +138,8 @@ var activePointerGestures = new Set();
 var suppressClickUntil = 0;
 var cardMenuController = null;
 var cardMenuNode = null;
+var collapseMenuController = null;
+var collapseMenuNode = null;
 
 export function registerCanvasHooks(hooks) {
   canvasLifecycle.register(hooks);
@@ -152,6 +154,11 @@ export function initCanvasView(){
     onClose: function(){ cardMenuNode = null; } });
   canvasScope.addCleanup(function(){ cardMenuController?.dispose(); cardMenuController = null; cardMenuNode = null; });
   canvasScope.listen(cardMenu, "click", onCardMenuClick);
+  var collapseMenu = document.getElementById("collapsemenu");
+  collapseMenuController = createAnchoredMenu({ surface: collapseMenu, placement: "bottom-end",
+    onClose: function(){ collapseMenuNode = null; } });
+  canvasScope.addCleanup(function(){ collapseMenuController?.dispose(); collapseMenuController = null; collapseMenuNode = null; });
+  canvasScope.listen(collapseMenu, "click", onCollapseMenuClick);
   registerCoreHooks({
     ensureCanvasBuilt: ensureCanvasBuilt,
     diveToNode: diveToNode,
@@ -176,6 +183,7 @@ export function disposeCanvasView(){
 
 export function closeCardMenu(settings){
   if (cardMenuController) cardMenuController.close(settings);
+  if (collapseMenuController) collapseMenuController.close(settings);
 }
 
 function cleanupCanvasView(resetHooks){
@@ -187,6 +195,8 @@ function cleanupCanvasView(resetHooks){
   suppressClickUntil = 0;
   cardMenuController = null;
   cardMenuNode = null;
+  collapseMenuController = null;
+  collapseMenuNode = null;
   cancelViewAnimation();
   if (edgeRaf){ cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
   if (filmCameraHandle && window.__rhFilmCamera === filmCameraHandle) {
@@ -219,6 +229,7 @@ function applyTransform(){
     // anchor observes. Panning or zooming with the menu open would strand it
     // mid-canvas, so the view moving dismisses it.
     if (cardMenuController && cardMenuController.isOpen()) cardMenuController.close({ restoreFocus: false });
+    if (collapseMenuController && collapseMenuController.isOpen()) collapseMenuController.close({ restoreFocus: false });
     world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
     zoomLabel.textContent = Math.round(view.scale * 100) + "%";
     canvasLifecycle.hooks.scheduleViewSave();
@@ -306,11 +317,10 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     cancelViewAnimation();
     cardMenuNode = node;
     document.getElementById("cm-textreset").textContent = Math.round((node.font_scale || 1) * 100) + "%";
-    // Collapsing is a way of looking, not a change to the hole, so it survives
-    // into a frozen snapshot exactly as the header's own collapse button does.
-    var collapse = document.getElementById("cm-collapse");
-    collapse.querySelector(".sm-label").textContent = node.collapsed ? "Expand branch" : "Collapse branch";
-    collapse.querySelector(".sm-ic").innerHTML = node.collapsed ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
+    // Collapsing is a way of looking, not a change to the hole, so the fold
+    // group survives into a frozen snapshot exactly as the header's own
+    // collapse button does.
+    syncCollapseGroup(node, "cm-");
     document.getElementById("cm-rename").style.display = frozen ? "none" : "";
     document.getElementById("cm-convert").style.display = canConvertNote(node) && !!(node.md || "").trim() ? "" : "none";
     var showDelete = !frozen && node.id !== rootId;
@@ -332,8 +342,59 @@ function screenToWorld(sx, sy){ return { x: (sx - view.x) / view.scale, y: (sy -
     if (button.id === "cm-copy") canvasLifecycle.hooks.copyNodeMarkdown(node);
     else if (button.id === "cm-rename") startTitleEditing(node, node.titleEl);
     else if (button.id === "cm-convert") convertNoteToAsk(node, node.md);
-    else if (button.id === "cm-collapse") setBranchCollapsed(node, !node.collapsed);
+    else if (button.id.indexOf("cm-collapse") === 0) runCollapseAction(node, button.id.slice(3));
     else if (button.id === "cm-delete") canvasLifecycle.hooks.removeBranch(node);
+  }
+
+  // The subtree's own fold state, read off the direct children only: once every
+  // one of them is folded the children row flips to "expand", and nothing deeper
+  // gets a vote (a half-open grandchild must not keep the label saying
+  // "collapse" when the row under the card is already shut).
+  function childrenAllCollapsed(node){
+    var kids = childrenOf(node.id);
+    return kids.length > 0 && kids.every(function(kid){ return !!kid.collapsed; });
+  }
+  // Three scopes, three rows, each flipping on exactly the thing its own noun
+  // names: the card, the card plus its subtree, the subtree alone. A card with
+  // nothing under it keeps only the row about itself.
+  function syncCollapseGroup(node, prefix){
+    var hasChildren = childrenOf(node.id).length > 0;
+    syncCollapseRow(document.getElementById(prefix + "collapse"), !!node.collapsed, "", true);
+    syncCollapseRow(document.getElementById(prefix + "collapse-branch"), !!node.collapsed, " branch", hasChildren);
+    syncCollapseRow(document.getElementById(prefix + "collapse-children"), childrenAllCollapsed(node), " children", hasChildren);
+  }
+  function syncCollapseRow(item, expands, noun, shown){
+    item.style.display = shown ? "" : "none";
+    item.querySelector(".sm-label").textContent = (expands ? "Expand" : "Collapse") + noun;
+    item.querySelector(".sm-ic").innerHTML = expands ? NODE_RESTORE_ICON : NODE_COLLAPSE_ICON;
+  }
+  // Each row does what its label just said, so the action reads the same state
+  // the label was rendered from.
+  function runCollapseAction(node, action){
+    if (action === "collapse") toggleCollapse(node, false);
+    else if (action === "collapse-branch") setBranchCollapsed(node, !node.collapsed);
+    else if (action === "collapse-children") setChildrenCollapsed(node, !childrenAllCollapsed(node));
+  }
+  // Left-click on the header's collapse button folds this card; right-click
+  // offers all three scopes. The gesture always answers — a childless card just
+  // gets the one row that means anything to it.
+  function openCollapseMenu(node, trigger){
+    if (!collapseMenuController || node._ephemeral) return false;
+    // Same anchoring race as the card menu: applyTransform dismisses anything
+    // pinned to a card's screen rect, so an in-flight glide would close this
+    // menu on its very next frame. Reaching for the button yields the glide.
+    cancelViewAnimation();
+    collapseMenuNode = node;
+    syncCollapseGroup(node, "cc-");
+    collapseMenuController.toggle(trigger, { focusFirst: false });
+    return true;
+  }
+  function onCollapseMenuClick(e){
+    var button = e.target.closest && e.target.closest("button");
+    var node = collapseMenuNode;
+    if (!button || !node) return;
+    collapseMenuController.close();
+    runCollapseAction(node, button.id.slice(3));
   }
 
 export function createNodeEl(node, enter){
@@ -352,7 +413,10 @@ export function createNodeEl(node, enter){
     }
     var titleEl = document.createElement("span"); titleEl.className = "node-title"; titleEl.textContent = node.title || "…";
     titleEl.title = node.title || "";
-    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn node-collapse", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card" }));
+    // The collapse button owns a second, right-click-only surface for the
+    // subtree, so it carries the popup wiring the anchored menu keeps in sync.
+    var collapseBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn node-collapse", svgIconHtml: NODE_COLLAPSE_ICON, ariaLabel: "Collapse card", title: "Collapse card",
+      ariaHaspopup: "menu", ariaControls: "collapsemenu", ariaExpanded: "false" }));
     syncCollapseButton(node, collapseBtn);
     var openBtn = cardButton(iconButtonMarkup({ bare: true, className: "node-btn", svgIconHtml: NODE_EXPAND_ICON, ariaLabel: "Expand document", title: "Expand document" }));
     var divider = document.createElement("span"); divider.className = "node-act-divider"; divider.setAttribute("aria-hidden", "true");
@@ -396,6 +460,10 @@ export function createNodeEl(node, enter){
     });
     openBtn.addEventListener("click", function(e){ e.stopPropagation(); openNode(node.id); });
     collapseBtn.addEventListener("click", function(e){ e.stopPropagation(); toggleCollapse(node, e.altKey); });
+    collapseBtn.addEventListener("contextmenu", function(e){
+      if (!openCollapseMenu(node, collapseBtn)) return;
+      e.preventDefault(); e.stopPropagation();
+    });
     // Scrolling a card moves the inline marks its children's edges start from.
     body.addEventListener("scroll", scheduleEdges, { passive: true });
     if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
@@ -1423,7 +1491,20 @@ export function setBranchCollapsed(node, collapsed){
     var branch = [];
     function collect(current){ branch.push(current); childrenOf(current.id).forEach(collect); }
     collect(node);
-    var changed = branch.filter(function(current){ return applyCollapsedState(current, collapsed); });
+    applyCollapsedRun(branch, collapsed);
+  }
+  // "Collapse children" means exactly that: every descendant folds and the card
+  // you asked from stays as it is. That is the whole difference from "Collapse
+  // branch", which is this same walk with the card itself included.
+function setChildrenCollapsed(node, collapsed){
+    if (!node || node._ephemeral) return;
+    var descendants = [];
+    function collect(current){ childrenOf(current.id).forEach(function(kid){ descendants.push(kid); collect(kid); }); }
+    collect(node);
+    applyCollapsedRun(descendants, collapsed);
+  }
+function applyCollapsedRun(targets, collapsed){
+    var changed = targets.filter(function(current){ return applyCollapsedState(current, collapsed); });
     for (var i = 0; i < changed.length; i++) canvasLifecycle.hooks.persistNode(changed[i]);
     renderVisibility(); drawEdges();
   }

@@ -6,6 +6,21 @@ import { iconSvg } from "./icons.js";
  * self-contained browser payload; behavior is verified by the inline-script
  * node --check gate.
  */
+/*
+ * The three folds a card offers, rendered identically into the ⋯ menu and into
+ * the collapse button's own right-click menu. Every row wears the same
+ * minus/plus the card header wears, because each is that button applied to a
+ * different scope: the card, the card plus its subtree ("branch", as in Delete
+ * branch), and the subtree alone. Labels and glyphs are swapped per row at open
+ * time by the canvas; the two subtree rows are hidden on a childless card.
+ * @param {string} prefix
+ */
+function collapseGroupMarkup(/** @type {string} */ prefix) {
+  const row = (/** @type {string} */ id, /** @type {string} */ label) => buttonMarkup({ bare: true, className: "sm-item", id: prefix + id, role: "menuitem", tabIndex: -1,
+    label: label, labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("collapse") + '</span>' });
+  return row("collapse", "Collapse") + row("collapse-branch", "Collapse branch") + row("collapse-children", "Collapse children");
+}
+
 export const CANVAS_SHELL = `
 <div id="taskbar">
   <div class="tb-pill" id="tb-tools">
@@ -107,12 +122,16 @@ export const CANVAS_SHELL = `
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-copy", role: "menuitem", tabIndex: -1, label: "Copy as Markdown", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("copy") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-rename", role: "menuitem", tabIndex: -1, label: "Rename", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("rename") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-convert", role: "menuitem", tabIndex: -1, label: "Convert to Ask", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("question") + '</span>' })}
-  <!-- The branch item wears the same minus/plus the card header wears, because
-       it is that button applied to the whole subtree. Its glyph and label are
-       both swapped when the card is already collapsed. -->
-  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-collapse", role: "menuitem", tabIndex: -1, label: "Collapse branch", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("collapse") + '</span>' })}
+  <div class="sm-sep"></div>
+  ${collapseGroupMarkup("cm-")}
   <div class="sm-sep cm-delete-sep"></div>
   ${buttonMarkup({ bare: true, className: "sm-item danger", id: "cm-delete", role: "menuitem", tabIndex: -1, label: "Delete branch", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("delete") + '</span>' })}
+</div>
+
+<!-- Right-clicking a card's collapse button opens the same three folds the ⋯
+     menu carries, anchored to the button the gesture started from. -->
+<div id="collapsemenu" class="anchored-menu" role="menu" aria-label="Collapse actions">
+  ${collapseGroupMarkup("cc-")}
 </div>
 
 <div id="branch-undo"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Undo", hidden: true, dataAttrs: { noticeAction: "" } })}</div>

@@ -2013,27 +2013,121 @@ async function verifyCardMenu() {
       { editable: "plaintext-only", focused: true }, "Rename should enter the existing title editor with its caret focused");
     await page.keyboard.press("Escape");
 
-    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
-    await cardMenu.locator("#cm-collapse").click();
-    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
-      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId }), [true, true],
-    "Collapse branch should collapse the parent and its descendant");
-    await page.waitForFunction(async ({ alphaId, descendantId }) => {
+    const collapseMenu = page.locator("#collapsemenu");
+    const renderedFlags = () => page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
+      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId });
+    const waitStored = (alpha, descendant) => page.waitForFunction(async (expected) => {
       const nodes = (await window.__rabbitholeTest.readStoredHole()).nodes;
-      return nodes.find((node) => node.id === alphaId)?.collapsed === true
-        && nodes.find((node) => node.id === descendantId)?.collapsed === true;
-    }, { alphaId, descendantId });
-    await page.locator(`.node[data-id="${alphaId}"]`).locator(".node-more").click();
-    assert.equal(await cardMenu.locator("#cm-collapse .sm-label").innerText(), "Expand branch");
-    await cardMenu.locator("#cm-collapse").click();
-    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => [alphaId, descendantId].map((id) =>
-      document.querySelector(`.node[data-id="${id}"]`).classList.contains("collapsed")), { alphaId, descendantId }), [false, false],
-    "Expand branch should restore the parent and its descendant");
-    await page.waitForFunction(async ({ alphaId, descendantId }) => {
-      const nodes = (await window.__rabbitholeTest.readStoredHole()).nodes;
-      return nodes.find((node) => node.id === alphaId)?.collapsed === false
-        && nodes.find((node) => node.id === descendantId)?.collapsed === false;
-    }, { alphaId, descendantId });
+      return !!nodes.find((node) => node.id === expected.alphaId)?.collapsed === expected.alpha
+        && !!nodes.find((node) => node.id === expected.descendantId)?.collapsed === expected.descendant;
+    }, { alphaId, descendantId, alpha, descendant });
+    const openCollapseMenuOn = async (id) => {
+      await page.locator(`.node[data-id="${id}"]`).locator(".node-collapse").click({ button: "right" });
+      await collapseMenu.waitFor({ state: "visible" });
+      return collapseMenu.locator('[role="menuitem"]:visible .sm-label').allInnerTexts();
+    };
+    const openCardMenuOn = async (id) => {
+      await page.locator(`.node[data-id="${id}"]`).locator(".node-more").click();
+      await cardMenu.waitFor({ state: "visible" });
+      return cardMenu.locator('[id^="cm-collapse"]:visible .sm-label').allInnerTexts();
+    };
+    const pickCollapse = async (menu, id) => {
+      await menu.locator(`#${id}`).click();
+      await menu.waitFor({ state: "hidden" });
+    };
+
+    // Right-clicking the header's collapse button offers all three scopes: this
+    // card, the branch (card + subtree), and the children (subtree only).
+    assert.deepEqual(await openCollapseMenuOn(alphaId), ["Collapse", "Collapse branch", "Collapse children"],
+      "the collapse context menu should offer the three folds in scope order");
+    assert.deepEqual(await collapseMenu.locator('[role="menuitem"]').evaluateAll((items) => items.map((item) => item.id)),
+      ["cc-collapse", "cc-collapse-branch", "cc-collapse-children"]);
+
+    // Row 1 — this card only.
+    await pickCollapse(collapseMenu, "cc-collapse");
+    assert.deepEqual(await renderedFlags(), [true, false], "Collapse should fold the card and nothing under it");
+    await waitStored(true, false);
+    assert.deepEqual(await openCollapseMenuOn(alphaId), ["Expand", "Expand branch", "Collapse children"],
+      "the card rows flip on the card's own state while the children row keeps its own");
+    await pickCollapse(collapseMenu, "cc-collapse");
+    assert.deepEqual(await renderedFlags(), [false, false], "Expand should restore the card only");
+    await waitStored(false, false);
+
+    // Row 2 — the branch: this card and everything under it.
+    await openCollapseMenuOn(alphaId);
+    await pickCollapse(collapseMenu, "cc-collapse-branch");
+    assert.deepEqual(await renderedFlags(), [true, true], "Collapse branch should fold the card and its descendant");
+    await waitStored(true, true);
+    assert.deepEqual(await openCollapseMenuOn(alphaId), ["Expand", "Expand branch", "Expand children"]);
+    await pickCollapse(collapseMenu, "cc-collapse-branch");
+    assert.deepEqual(await renderedFlags(), [false, false], "Expand branch should restore the card and its descendant");
+    await waitStored(false, false);
+
+    // Row 3 — the children: everything under the card, the card left open.
+    await openCollapseMenuOn(alphaId);
+    await pickCollapse(collapseMenu, "cc-collapse-children");
+    assert.deepEqual(await renderedFlags(), [false, true], "Collapse children should fold the descendant and leave the card open");
+    await waitStored(false, true);
+    assert.deepEqual(await openCollapseMenuOn(alphaId), ["Collapse", "Collapse branch", "Expand children"],
+      "the children row flips once every direct child is collapsed");
+    await pickCollapse(collapseMenu, "cc-collapse-children");
+    assert.deepEqual(await renderedFlags(), [false, false], "Expand children should restore the descendant only");
+    await waitStored(false, false);
+
+    // A childless card still answers the gesture — with only the row that means
+    // anything to it.
+    assert.deepEqual(await openCollapseMenuOn(descendantId), ["Collapse"],
+      "a childless card should open a one-row collapse menu, not none at all");
+    await page.keyboard.press("Escape");
+    await collapseMenu.waitFor({ state: "hidden" });
+
+    // The same three live in the ⋯ menu as their own divider-fenced group.
+    assert.deepEqual(await openCardMenuOn(alphaId), ["Collapse", "Collapse branch", "Collapse children"],
+      "the card menu should carry the same three folds");
+    assert.deepEqual(await page.evaluate(() => ({
+      before: document.getElementById("cm-collapse").previousElementSibling.className,
+      after: document.getElementById("cm-collapse-children").nextElementSibling.className,
+    })), { before: "sm-sep", after: "sm-sep cm-delete-sep" },
+    "the fold group should sit in its own section between menu dividers");
+    await pickCollapse(cardMenu, "cm-collapse-children");
+    assert.deepEqual(await renderedFlags(), [false, true], "the card menu's children fold should be descendants-only too");
+    await waitStored(false, true);
+    assert.deepEqual(await openCardMenuOn(alphaId), ["Collapse", "Collapse branch", "Expand children"]);
+    await pickCollapse(cardMenu, "cm-collapse-children");
+    await waitStored(false, false);
+    await openCardMenuOn(alphaId);
+    await pickCollapse(cardMenu, "cm-collapse");
+    assert.deepEqual(await renderedFlags(), [true, false], "the card menu's first row should fold the card alone");
+    await waitStored(true, false);
+    assert.deepEqual(await openCardMenuOn(alphaId), ["Expand", "Expand branch", "Collapse children"]);
+    await pickCollapse(cardMenu, "cm-collapse");
+    await waitStored(false, false);
+    assert.deepEqual(await openCardMenuOn(descendantId), ["Collapse"],
+      "a childless card menu should keep only the row about the card itself");
+    await page.keyboard.press("Escape");
+    await cardMenu.waitFor({ state: "hidden" });
+
+    // applyTransform dismisses anything anchored to a card's screen rect, so a
+    // reveal glide still in flight must yield to the menu instead of closing it
+    // on the next frame.
+    await zoomToFit(page);
+    // Dispatched, not clicked: Playwright would wait out the glide it must race.
+    await page.evaluate((id) => document.querySelector(`.node[data-id="${id}"] .node-collapse`)
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), alphaId);
+    await collapseMenu.waitFor({ state: "visible" });
+    await page.waitForTimeout(400);
+    assert.equal(await collapseMenu.isVisible(), true,
+      "an in-flight view glide should yield to the collapse menu, not close it");
+    await page.keyboard.press("Escape");
+    await collapseMenu.waitFor({ state: "hidden" });
+
+    // The ⋮ is a permanent part of the header, not a hover reveal.
+    assert.deepEqual(await page.evaluate((id) => {
+      const card = document.querySelector(`.node[data-id="${id}"]`);
+      return [card.querySelector(".node-more"), card.querySelector(".node-act-divider")]
+        .map((el) => getComputedStyle(el).opacity);
+    }, alphaId), ["1", "1"],
+    "the card menu button and its divider should be fully opaque without hover");
 
     const alphaCollapse = page.locator(`.node[data-id="${alphaId}"]`).locator('[aria-label="Collapse card"]');
     await alphaCollapse.click({ modifiers: ["Alt"] });
@@ -2062,12 +2156,12 @@ async function verifyCardMenu() {
     await frozenMenu.waitFor({ state: "visible" });
     assert.equal(await frozenMenu.locator(".cm-size-label").innerText(), "Text size");
     assert.deepEqual(await frozenMenu.locator('[role="menuitem"]:visible').evaluateAll((items) => items.map((item) => item.id)),
-      ["cm-textdown", "cm-textreset", "cm-textup", "cm-copy", "cm-collapse"],
-      "a frozen card menu keeps the ways of looking and drops the ways of changing");
+      ["cm-textdown", "cm-textreset", "cm-textup", "cm-copy", "cm-collapse", "cm-collapse-branch", "cm-collapse-children"],
+      "a frozen card menu keeps the ways of looking — the whole fold group included — and drops the ways of changing");
     await frozenPage.close();
 
     assert(rootId && descendantId, "the card-menu fixture should retain its root and descendant identities");
-    console.log("ok web app: shared card menu, node text scale, deep collapse, frozen visibility, and undo");
+    console.log("ok web app: shared card menu, node text scale, the three folds on both surfaces, deep collapse, frozen visibility, and undo");
   } finally {
     await context.close();
   }
