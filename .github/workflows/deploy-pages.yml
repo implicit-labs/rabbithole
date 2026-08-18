@@ -1,9 +1,13 @@
 name: Deploy Cloudflare Pages
 
+# Deploys only a SHA the CI workflow has fully verified (check:types, build
+# checks, complete `npm test`, packaging matrix). The suite is not re-run
+# here; CI's success for the exact head SHA is the gate.
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -13,19 +17,58 @@ concurrency:
 permissions:
   contents: read
   deployments: write
+  # Lets the manual-dispatch path query CI run conclusions for the SHA.
+  actions: read
 
 jobs:
-  verify-and-deploy:
-    name: Verify and deploy production
+  deploy:
+    name: Deploy verified production build
+    # Only a green CI run for a push to main qualifies; the event guard keeps
+    # pull_request CI runs (e.g. a fork branch named main) from deploying.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     environment:
       name: production
       url: https://rabbithole.ing/
+    env:
+      # workflow_run executes in default-branch context; pin every step to the
+      # SHA CI actually verified, never the branch tip at trigger time.
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
-      - name: Check out the exact commit
+      # workflow_run arrives with CI's verdict; a manual dispatch does not, so
+      # it must prove a completed green CI run exists for this exact SHA.
+      - name: Require a green CI verdict for this commit (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          green=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&status=success" \
+            --jq '.workflow_runs | length')
+          if [ "$green" -eq 0 ]; then
+            echo "::error::No successful CI run found for $DEPLOY_SHA; refusing to deploy an unverified commit."
+            exit 1
+          fi
+
+      - name: Check out the verified commit
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      # CI runs can finish out of order; a stale SHA must never overwrite a
+      # newer deploy. The superseding commit's own CI run deploys instead.
+      - name: Confirm the commit is still the tip of main
+        run: |
+          git fetch --quiet origin main
+          if [ "$(git rev-parse FETCH_HEAD)" != "$DEPLOY_SHA" ]; then
+            echo "::error::$DEPLOY_SHA is no longer the tip of main; skipping in favor of the newer commit's run."
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -36,18 +79,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install browser test runtimes
-        run: npx playwright install --with-deps chromium firefox webkit
-
-      - name: Verify types, boundaries, and committed bundles
-        run: |
-          npm run check:types
-          npm run check:purity
-          npm run check:dist
-
-      - name: Run the full test suite
-        run: npm test
-
       - name: Build the production site
         run: npm run build:publish
 
@@ -57,7 +88,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy publish --project-name=rabbithole --branch=main --commit-hash=${{ github.sha }}
+          command: pages deploy publish --project-name=rabbithole --branch=main --commit-hash=${{ env.DEPLOY_SHA }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           packageManager: npm
           wranglerVersion: "4"

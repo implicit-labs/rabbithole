@@ -4,9 +4,17 @@ on:
   push:
   pull_request:
 
+# A newer push to the same ref supersedes in-flight verification; the newer
+# run's verdict is the one deploy-pages.yml consumes.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Observed p95 ~15m (dominated by cold Playwright downloads); 2x headroom.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,15 +22,36 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
+      # CI is the only net for check:types; local `npm test` does not run it.
       - run: npm run check:types
-      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      # Browser binaries are keyed on the Playwright version; on a hit only the
+      # OS libraries (--with-deps' apt half) still need installing.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium firefox webkit
       - run: npm run build
       - run: npm run check:dist
       - run: npm run check:purity
+      # Full hermetic suite; deploy-pages.yml reuses this verdict per SHA
+      # instead of re-running it. test:performance runs inside this serial
+      # chain, so no other test load shares the runner while it gauges.
       - run: npm test
 
   packaging:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         node-version: ["18.x", "20.x"]
