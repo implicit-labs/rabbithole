@@ -48,20 +48,20 @@
       "description": "Frozen HTML size for the math-heavy reference corpus",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact UTF-8 snapshot size.",
-      "baseline": 1082028,
-      "ceiling": 1136129.4,
-      "measured_at_commit": "45e1f34"
+      "rationale": "Exact UTF-8 snapshot size. Ratcheted 2026-08-16: the 45e1f34 baseline had drifted 5.3% stale. Conversion code rides the frozen bundle behind the runtime frozen guard rather than a second build-time one.",
+      "baseline": 1139533,
+      "ceiling": 1196509.7,
+      "measured_at_commit": "dfc2bab+card-menu"
     },
     {
       "id": "snapshot_assets_bytes",
       "description": "Frozen HTML size for the PNG/SVG reference corpus",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact UTF-8 snapshot size including assets.",
-      "baseline": 1082058,
-      "ceiling": 1136160.9,
-      "measured_at_commit": "45e1f34"
+      "rationale": "Exact UTF-8 snapshot size including assets. Ratcheted 2026-08-16: the 45e1f34 baseline had drifted 5.3% stale. Conversion code rides the frozen bundle behind the runtime frozen guard rather than a second build-time one.",
+      "baseline": 1139557,
+      "ceiling": 1196534.9,
+      "measured_at_commit": "dfc2bab+card-menu"
     },
     {
       "id": "snapshot_math_build_ms",
