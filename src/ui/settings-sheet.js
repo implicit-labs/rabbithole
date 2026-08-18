@@ -278,9 +278,10 @@ function appearanceMarkup(){
     '<button type="button" class="settings-step" data-reading-step="1" aria-label="Increase reading size">A+</button>' +
     '<button type="button" class="settings-reset" data-reading-reset hidden>Reset</button>' +
     "</div>";
+  // Subs describe the effect, never the mechanism — what changes, not how.
   return '<div class="settings-sheet-section">' +
-    rowMarkup("settings-theme", "Theme", "", theme) +
-    rowMarkup("settings-reading-size", "Reading size", "Scales text in every card.", size) +
+    rowMarkup("settings-theme", "Theme", "What the canvas follows.", theme) +
+    rowMarkup("settings-reading-size", "Reading size", "Scales every card; each can fine-tune.", size) +
     "</div>";
 }
 

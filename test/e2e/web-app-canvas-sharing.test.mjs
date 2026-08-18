@@ -2319,7 +2319,9 @@ async function verifyCanvasBranching() {
       offCenterX: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
       offCenterY: Math.abs((rect.top + rect.bottom) / 2 - innerHeight / 2),
       height: rect.height,
+      layoutHeight: sheet.offsetHeight,
       maxHeight: parseFloat(styles.maxHeight),
+      minHeight: parseFloat(styles.minHeight),
       radius: styles.borderTopLeftRadius,
       shadow: styles.boxShadow,
       role: sheet.getAttribute("role"),
@@ -2337,6 +2339,8 @@ async function verifyCanvasBranching() {
   assert.equal(sheetStandard.sidebar, 176, "the settings sidebar is 176px");
   assert(sheetStandard.offCenterX < 1 && sheetStandard.offCenterY < 1, `settings should be centered, off by ${sheetStandard.offCenterX},${sheetStandard.offCenterY}px`);
   assert(sheetStandard.height <= sheetStandard.maxHeight + 1, "the sheet height is content-driven under its ceiling, never fixed");
+  assert.equal(sheetStandard.minHeight, 440, "on a normal viewport the sheet keeps its 440px floor — a room, not a strip");
+  assert(sheetStandard.layoutHeight >= sheetStandard.minHeight - 1, "a sparse pane must still fill the floor rather than collapsing around its rows");
   assert.equal(sheetStandard.radius, "12px", "the sheet uses the popover radius token");
   assert.notEqual(sheetStandard.shadow, "none", "the sheet carries the modal shadow");
   assert.equal(sheetStandard.role, "dialog");
@@ -2353,7 +2357,9 @@ async function verifyCanvasBranching() {
   // Appearance: three-state theme and a global reading size that composes with
   // each card's own font scale.
   assert.deepEqual(await page.locator("[data-theme-choice]").allTextContents(), ["Light", "Dark", "System"]);
-  assert.equal(await page.locator("#settings-reading-size-row .settings-sheet-sub").innerText(), "Scales text in every card.");
+  // Every row carries a one-line sub describing the effect, not the mechanism.
+  assert.equal(await page.locator("#settings-theme-row .settings-sheet-sub").innerText(), "What the canvas follows.");
+  assert.equal(await page.locator("#settings-reading-size-row .settings-sheet-sub").innerText(), "Scales every card; each can fine-tune.");
   assert.equal(await page.locator("[data-reading-reset]").isVisible(), false, "Reset appears only when the size is not 100%");
   await page.click('[data-reading-step="1"]');
   assert.equal(await page.locator("[data-reading-value]").innerText(), "110%");

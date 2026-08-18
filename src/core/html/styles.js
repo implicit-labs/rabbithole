@@ -677,10 +677,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .settings-sheet-scrim.closing { pointer-events: none; animation: settings-sheet-scrim-out var(--duration-fast) var(--ease-standard) both; }
 @keyframes settings-sheet-scrim-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes settings-sheet-scrim-out { from { opacity: 1; } to { opacity: 0; } }
-/* Height is content-driven: an Appearance-only sheet shrinks to fit rather
-   than opening a void under two rows. */
+/* Height is content-driven between a floor and a cap: the cap keeps a dense
+   pane scrollable, the floor keeps a two-row pane from collapsing into a
+   squat strip — a room, not a shelf. Negative space below the rows is the
+   design; never fill it. Both clamps yield to a short viewport together. */
 .settings-sheet { display: grid; grid-template-columns: 176px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: min(640px, 100%);
-  max-height: min(560px, 100dvh - 96px); min-height: 0; overflow: hidden; outline: none;
+  max-height: min(560px, 100dvh - 96px); min-height: min(440px, 100dvh - 96px); overflow: hidden; outline: none;
   border: 1px solid color-mix(in srgb, var(--border-focus) 58%, var(--border)); border-radius: var(--radius-popover);
   background: color-mix(in srgb, var(--node-bg) 96%, var(--bg)); box-shadow: var(--shadow-modal);
   font-family: var(--font-ui); color: var(--fg);
@@ -688,9 +690,9 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .settings-sheet-scrim.closing .settings-sheet { animation: settings-sheet-out var(--duration-fast) var(--ease-standard) both; }
 @keyframes settings-sheet-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: scale(1); } }
 @keyframes settings-sheet-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.99); } }
-.settings-sheet-side { display: flex; flex-direction: column; min-height: 0; padding: var(--space-7) var(--space-5) var(--space-6);
+.settings-sheet-side { display: flex; flex-direction: column; min-height: 0; padding: var(--space-10) var(--space-5) var(--space-8);
   border-right: 1px solid var(--border); background: color-mix(in srgb, var(--bar-bg) 55%, transparent); }
-.settings-sheet-title { margin: 0 0 var(--space-5); padding-inline: var(--space-3); color: var(--fg-bold);
+.settings-sheet-title { margin: 0 0 var(--space-8); padding-inline: var(--space-3); color: var(--fg-bold);
   font: var(--weight-bold) 15px/1.2 var(--font-ui); letter-spacing: -0.01em; }
 .settings-nav { display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; overflow: auto; }
 .settings-nav-item { appearance: none; display: flex; align-items: center; height: 32px; padding: 0 var(--space-3); border: 0;
@@ -704,38 +706,40 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .settings-sheet-identity span:first-child { color: var(--fg-dim); font-weight: var(--weight-medium); }
 .settings-sheet-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
 .settings-pane-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6);
-  padding: var(--space-7) var(--space-6) var(--space-6) var(--space-9); border-bottom: 1px solid var(--border); }
+  padding: var(--space-10) var(--space-7) var(--space-7) var(--space-11); border-bottom: 1px solid var(--border); }
 .settings-pane-title { margin: 0; color: var(--fg-bold); font: var(--weight-semibold) var(--text-title)/1.2 var(--font-ui); letter-spacing: -0.015em; }
 .settings-sheet-close { appearance: none; display: inline-flex; align-items: center; justify-content: center;
-  width: var(--control-h-xs); height: var(--control-h-xs); border: 0; border-radius: var(--radius-control);
+  width: var(--control-h-sm); height: var(--control-h-sm); border: 0; border-radius: var(--radius-control);
   background: none; color: var(--fg-dim); cursor: pointer; transition: var(--transition-color); }
 .settings-sheet-close:hover { color: var(--fg-bold); background: var(--hl); }
 .settings-sheet-close svg { display: block; width: 16px; height: 16px; }
-.settings-pane-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-4) var(--space-9) var(--space-9); }
+.settings-pane-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-9) var(--space-11) var(--space-11); }
 /* Space groups rows; lines only ever separate sections. */
-.settings-sheet-section { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5) 0; }
+.settings-sheet-section { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) 0; }
 .settings-sheet-section + .settings-sheet-section { border-top: 1px solid var(--border); margin-top: var(--space-5); }
-.settings-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); min-height: 40px; }
-.settings-sheet-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* 56px rows: tall enough that label + sub read as one settled block with air
+   on both sides, uniform whether or not a sub is present. */
+.settings-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); min-height: 56px; }
+.settings-sheet-copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .settings-sheet-label { color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-medium); }
 .settings-sheet-sub { color: var(--fg-faint); font-size: var(--text-ui); line-height: var(--leading-ui); }
 .settings-sheet-control { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .settings-segmented { display: inline-flex; gap: 2px; padding: 2px; border: var(--border-default);
   border-radius: var(--radius-control-lg); background: color-mix(in srgb, var(--bg) 55%, transparent); }
-.settings-segment { appearance: none; min-width: 56px; height: var(--control-h-xs); padding: 0 var(--space-4); border: 0;
+.settings-segment { appearance: none; min-width: 56px; height: var(--control-h-sm); padding: 0 var(--space-4); border: 0;
   border-radius: var(--radius-control); background: none; color: var(--fg-dim);
   font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
 .settings-segment:hover { color: var(--fg-bold); }
 .settings-segment[aria-checked="true"] { color: var(--fg-bold); background: var(--node-head); box-shadow: 0 1px 2px rgba(0, 0, 0, .16); }
 .settings-stepper { display: inline-flex; align-items: center; gap: var(--space-1); }
-.settings-step { appearance: none; min-width: var(--control-h-xs); height: var(--control-h-xs); padding: 0 var(--space-3);
+.settings-step { appearance: none; min-width: var(--control-h-sm); height: var(--control-h-sm); padding: 0 var(--space-3);
   border: 0; border-radius: var(--radius-control); background: none; color: var(--fg-dim);
   font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
 .settings-step:hover:not(:disabled) { color: var(--fg-bold); background: var(--hl); }
 .settings-step:disabled { opacity: .4; cursor: default; }
 .settings-step-value { min-width: 46px; text-align: center; color: var(--fg); font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
 /* Reset earns its place only while there is something to reset. */
-.settings-reset { appearance: none; height: var(--control-h-xs); margin-left: var(--space-3); padding: 0 var(--space-2);
+.settings-reset { appearance: none; height: var(--control-h-sm); margin-left: var(--space-3); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: none; color: var(--accent);
   font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; }
 .settings-reset[hidden] { display: none; }

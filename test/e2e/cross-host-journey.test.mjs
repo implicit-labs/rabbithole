@@ -112,6 +112,17 @@ async function assertAppearanceOnlySettings(page, label) {
   await page.waitForSelector("#settings-sheet");
   assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance"],
     `${label}: a host that registers nothing should get Appearance and only Appearance`);
+  /* The floor matters most here: with a single two-row section the sheet must
+     still open as a room (440px on a normal viewport), never a squat strip. */
+  const floor = await page.locator("#settings-sheet").evaluate((sheet) => ({
+    height: sheet.offsetHeight, // layout height: immune to the entrance scale
+    minHeight: parseFloat(getComputedStyle(sheet).minHeight),
+  }));
+  assert.equal(floor.minHeight, 440, `${label}: the sheet should keep its 440px floor on a normal viewport`);
+  assert(floor.height >= floor.minHeight - 1, `${label}: an Appearance-only sheet must fill the floor, got ${floor.height}px`);
+  assert.deepEqual(await page.locator(".settings-sheet-sub").allTextContents(),
+    ["What the canvas follows.", "Scales every card; each can fine-tune."],
+    `${label}: both rows carry a one-line sub that describes the effect`);
   assert.deepEqual(await page.locator(".settings-sheet-identity span").allTextContents(), ["Rabbithole", "Local"],
     `${label}: the sidebar footer should name the product and the host`);
   assert.equal(await page.locator("#settings-panel, .provider-list, #api-key").count(), 0,
