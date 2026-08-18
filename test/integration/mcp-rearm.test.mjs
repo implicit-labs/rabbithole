@@ -9,6 +9,7 @@ process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole
 const { openRabbithole, answerBranch } = await import("../../src/node/rabbithole.js");
 const { closeAllSessions, getSession } = await import("../../src/node/sessions.js");
 const { defaultFsStore } = await import("../../src/node/fs-store.js");
+const { toolDefinitions } = await import("../../src/node/tools/manifest.js");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,6 +136,128 @@ async function runZeroIdleTurnsAndSingleListenerFixture() {
   assert.equal(detachEvents(session).at(-1)?.data.reason, "cancelled");
 
   console.log("ok listener: zero idle turns, one delivery lease, idempotent completion, and cancellation cleanup");
+}
+
+async function runOrphanedWaiterRecoveryFixture() {
+  const opened = await openRabbithole({ title: "MCP orphan recovery", content: "Root", signal: abortAfter() });
+  const session = getSession(opened.session_id);
+  assert(session);
+
+  const orphaned = session.waitForEvent();
+  assert.equal((await openRabbithole({ holeId: session.holeId })).status, "already_listening");
+  const ask = await session.handleBrowserEvent({
+    type: "branch_request",
+    parent_id: session.rootId,
+    request_id: "req-orphaned",
+    node_id: "node-orphaned",
+    selected_text: "Root",
+    question: "Can this ask recover?",
+  });
+  const lostDelivery = await orphaned;
+  assert.equal(lostDelivery.request_id, ask.request_id, "the orphaned waiter receives the first delivery");
+  assert.equal(session.waiter, null, "delivery clears the orphaned waiter before resolving it");
+  assert.equal(session.inFlightBranchRequests.get(ask.request_id), lostDelivery);
+  await session.flushSave();
+  assert.equal((await defaultFsStore.loadHole(session.holeId)).nodes.find((node) => node.id === ask.node_id)?.status, "pending");
+
+  const recovered = await openRabbithole({ holeId: session.holeId });
+  assert.equal(recovered.status, "branch_request");
+  assert.equal(recovered.request_id, ask.request_id, "the next attach redelivers the exact in-flight ask");
+  assert.equal(recovered.node_id, ask.node_id);
+  const afterAnswer = await answerBranch({
+    sessionId: recovered.session_id,
+    requestId: recovered.request_id,
+    title: "Recovered answer",
+    content: "Recovered.",
+    signal: abortAfter(),
+  });
+  assert.equal(afterAnswer.status, "cancelled");
+  assert.equal(session.nodes.get(ask.node_id).markdown, "Recovered.");
+  assert.equal(session.pendingByRequest.size, 0);
+  assert.equal(session.inFlightBranchRequests.size, 0);
+  assert.equal(session.waiter, null);
+
+  console.log("ok listener recovery: an orphan-delivered ask persists, redelivers, answers, and re-arms once");
+}
+
+async function runProgressKeepaliveFixture() {
+  const openTool = toolDefinitions.find((tool) => tool.name === "open_rabbithole");
+  const answerTool = toolDefinitions.find((tool) => tool.name === "answer_branch");
+  assert(openTool && answerTool);
+  process.env.RABBITHOLE_PROGRESS_INTERVAL_MS = "10";
+  try {
+    const openingController = new AbortController();
+    const openNotifications = [];
+    const opened = await openTool.run(
+      { title: "MCP progress", content: "Root" },
+      {
+        signal: openingController.signal,
+        _meta: { progressToken: "open-token" },
+        async sendNotification(notification) {
+          openNotifications.push(notification);
+          openingController.abort();
+        },
+      }
+    );
+    assert.equal(opened.status, "cancelled");
+    assert.deepEqual(openNotifications, [{
+      method: "notifications/progress",
+      params: { progressToken: "open-token", progress: 1, message: "Waiting for canvas activity." },
+    }]);
+
+    const session = getSession(opened.session_id);
+    const waiting = session.waitForEvent();
+    await session.handleBrowserEvent({
+      type: "branch_request",
+      parent_id: session.rootId,
+      request_id: "req-progress",
+      node_id: "node-progress",
+      selected_text: "Root",
+      question: "Keep waiting?",
+    });
+    const branch = await waiting;
+    const answerController = new AbortController();
+    const answerNotifications = [];
+    const answered = await answerTool.run(
+      {
+        session_id: branch.session_id,
+        request_id: branch.request_id,
+        title: "Progress answer",
+        content: "Yes.",
+      },
+      {
+        signal: answerController.signal,
+        _meta: { progressToken: 47 },
+        async sendNotification(notification) {
+          answerNotifications.push(notification);
+          answerController.abort();
+        },
+      }
+    );
+    assert.equal(answered.status, "cancelled");
+    assert.deepEqual(answerNotifications, [{
+      method: "notifications/progress",
+      params: { progressToken: 47, progress: 1, message: "Waiting for canvas activity." },
+    }]);
+
+    let tokenlessNotifications = 0;
+    const tokenlessController = new AbortController();
+    const tokenlessWait = openTool.run(
+      { hole_id: session.holeId },
+      {
+        signal: tokenlessController.signal,
+        _meta: {},
+        async sendNotification() { tokenlessNotifications += 1; },
+      }
+    );
+    setTimeout(() => tokenlessController.abort(), 30);
+    assert.equal((await tokenlessWait).status, "cancelled");
+    assert.equal(tokenlessNotifications, 0, "a client without a progress token gets no fabricated notification");
+  } finally {
+    delete process.env.RABBITHOLE_PROGRESS_INTERVAL_MS;
+  }
+
+  console.log("ok progress: token-gated keepalives cover open and final-answer waits");
 }
 
 async function runSavedAskRequeueFixture() {
@@ -344,6 +467,8 @@ async function runDoneNotesDeliveryFixture() {
 
 try {
   await runZeroIdleTurnsAndSingleListenerFixture();
+  await runOrphanedWaiterRecoveryFixture();
+  await runProgressKeepaliveFixture();
   await runSavedAskRequeueFixture();
   await runNotesContextFixture();
   await runDoneNotesDeliveryFixture();

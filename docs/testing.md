@@ -106,8 +106,9 @@ host adapters without owning the broad product journey.
 - `mermaid-rendering.test.mjs` covers lazy hosted-app loading, self-contained MCP
   rendering, strict sanitization, invalid-source fallback, theme-aware rerendering,
   conditional runtime embedding, and zero-network offline snapshots.
-- `mcp-rearm.test.mjs` protects the keep-listening response, grace period, live
-  reattachment, waiter cleanup, and exactly-once requeue of a saved pending ask.
+- `mcp-rearm.test.mjs` protects the durable single-listener lease, redundant
+  attach guard, cancellation cleanup, progress keepalives, in-flight recovery
+  after an orphaned waiter, and exactly-once requeue of a saved pending ask.
 - `web-ingestion.test.mjs` protects local browser PDF ingestion, arXiv proxy
   fallback and recovery messages, future-schema import refusal, MIME-independent
   file classification, and the Markdown pre-read size limit.

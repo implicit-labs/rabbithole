@@ -5,6 +5,8 @@ import { MAX_ASSETS_PER_CALL } from "../../core/assets.js";
 import { validateAssetEntriesSync } from "../fs-store.js";
 import fs from "node:fs";
 
+const PROGRESS_INTERVAL_MS = 4 * 60 * 1000;
+
 function str(description, extra = {}) {
   return { kind: "string", description, ...extra };
 }
@@ -43,6 +45,26 @@ function looksLikePdf(filePath) {
 function validateAnswer(params) {
   normalizeBaseUrl(params.base_url);
   validateAssetEntriesSync(params.assets);
+}
+
+function progressIntervalMs() {
+  const configured = Number(process.env.RABBITHOLE_PROGRESS_INTERVAL_MS);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : PROGRESS_INTERVAL_MS;
+}
+
+async function withProgressKeepalive(run, extra) {
+  const progressToken = extra?._meta?.progressToken;
+  if ((typeof progressToken !== "string" && typeof progressToken !== "number") || typeof extra?.sendNotification !== "function") return run();
+  let progress = 0;
+  const timer = setInterval(() => {
+    extra.sendNotification({
+      method: "notifications/progress",
+      params: { progressToken, progress: ++progress, message: "Waiting for canvas activity." },
+    }).catch(() => {});
+  }, progressIntervalMs());
+  timer.unref?.();
+  try { return await run(); }
+  finally { clearInterval(timer); }
 }
 
 export const toolDefinitions = [
@@ -97,7 +119,7 @@ export const toolDefinitions = [
     }),
     validateInput: validateOpen,
     run: ({ title, content, file_path, base_url, hole_id, assets, focus }, extra) =>
-      openRabbithole({
+      withProgressKeepalive(() => openRabbithole({
         title,
         content,
         filePath: file_path,
@@ -106,7 +128,7 @@ export const toolDefinitions = [
         assets,
         focus,
         signal: extra?.signal,
-      }),
+      }), extra),
   },
   {
     name: "answer_branch",
@@ -142,7 +164,7 @@ export const toolDefinitions = [
     }),
     validateInput: validateAnswer,
     run: ({ session_id, request_id, title, content, base_url, assets, partial }, extra) =>
-      answerBranch({
+      withProgressKeepalive(() => answerBranch({
         sessionId: session_id,
         requestId: request_id,
         title,
@@ -151,7 +173,7 @@ export const toolDefinitions = [
         assets,
         partial,
         signal: extra?.signal,
-      }),
+      }), extra),
   },
   {
     name: "list_rabbitholes",
