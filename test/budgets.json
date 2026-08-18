@@ -8,30 +8,30 @@
       "description": "Built live client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build. The audited standalone image lifecycle deliberately adds upload rollback, asset deletion, and teardown guards.",
-      "baseline": 652808,
-      "ceiling": 685448.4,
-      "measured_at_commit": "0a3edc4"
+      "rationale": "Exact file size after a deterministic build. Docked notes (dots, read/edit popover, placement flight) deliberately add this client cost.",
+      "baseline": 687355,
+      "ceiling": 721722.75,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "bundle_frozen_client_bytes",
       "description": "Built frozen client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build. Shared draft/composer safety and frozen SVG handling intentionally remain in the frozen client.",
-      "baseline": 629424,
-      "ceiling": 660895.2,
-      "measured_at_commit": "0a3edc4"
+      "rationale": "Exact file size after a deterministic build. Docked-note read affordances deliberately ride the frozen client behind its mutation guards.",
+      "baseline": 660354,
+      "ceiling": 693371.7,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "web_initial_js_bytes",
       "description": "Statically loaded web application JavaScript",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded. BYOK pasted-image validation, cleanup, retry disclosure, and URL revocation deliberately add this closure cost.",
-      "baseline": 839027,
-      "ceiling": 880978.35,
-      "measured_at_commit": "0a3edc4"
+      "rationale": "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded. Docked notes ride the shared client bundle.",
+      "baseline": 872719,
+      "ceiling": 916354.95,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "pdf_runtime_distribution_bytes",
@@ -41,27 +41,27 @@
       "rationale": "Exact size of the lazily loaded production PDF.js module and worker.",
       "baseline": 1334801,
       "ceiling": 1401541.05,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "snapshot_math_bytes",
       "description": "Frozen HTML size for the math-heavy reference corpus",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact UTF-8 snapshot size. Ratcheted 2026-08-16: the 45e1f34 baseline had drifted 5.3% stale. Conversion code rides the frozen bundle behind the runtime frozen guard rather than a second build-time one.",
-      "baseline": 1139533,
-      "ceiling": 1196509.7,
-      "measured_at_commit": "dfc2bab+card-menu"
+      "rationale": "Exact UTF-8 snapshot size. Snapshots now carry the note extensions namespace and docked-note affordances.",
+      "baseline": 1184955,
+      "ceiling": 1244202.75,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "snapshot_assets_bytes",
       "description": "Frozen HTML size for the PNG/SVG reference corpus",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact UTF-8 snapshot size including assets. Ratcheted 2026-08-16: the 45e1f34 baseline had drifted 5.3% stale. Conversion code rides the frozen bundle behind the runtime frozen guard rather than a second build-time one.",
-      "baseline": 1139557,
-      "ceiling": 1196534.9,
-      "measured_at_commit": "dfc2bab+card-menu"
+      "rationale": "Exact UTF-8 snapshot size including assets. Snapshots now carry the note extensions namespace and docked-note affordances.",
+      "baseline": 1184989,
+      "ceiling": 1244238.45,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "snapshot_math_build_ms",
@@ -72,7 +72,7 @@
       "floor": 25,
       "baseline": 0.19,
       "ceiling": 25,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "snapshot_assets_build_ms",
@@ -81,9 +81,9 @@
       "tolerance": 2,
       "rationale": "Mean of a 20-build loop defeats timer coarsening; 3x ceiling plus a 25ms floor absorbs host noise.",
       "floor": 25,
-      "baseline": 0.33,
+      "baseline": 0.36,
       "ceiling": 25,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "cold_open_ms",
@@ -91,9 +91,9 @@
       "unit": "ms",
       "tolerance": 2,
       "rationale": "Minimum of isolated browser-context samples; 3x ceiling absorbs startup noise.",
-      "baseline": 61.3,
-      "ceiling": 183.9,
-      "measured_at_commit": "45e1f34"
+      "baseline": 61.1,
+      "ceiling": 183.3,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "stream_dom_batches",
@@ -104,7 +104,7 @@
       "floor": 6,
       "baseline": 9,
       "ceiling": 18,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "stream_update_ms",
@@ -112,9 +112,9 @@
       "unit": "ms",
       "tolerance": 2,
       "rationale": "Minimum of repeated samples; 3x ceiling absorbs browser scheduling noise.",
-      "baseline": 105.1,
-      "ceiling": 315.3,
-      "measured_at_commit": "45e1f34"
+      "baseline": 88.7,
+      "ceiling": 266.1,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "save_window_ms",
@@ -123,9 +123,9 @@
       "tolerance": 1,
       "rationale": "Minimum of repeated samples; 2x ceiling with a 100ms floor (poll quantization) still catches a lost flush-on-complete, which costs 400ms+.",
       "floor": 100,
-      "baseline": 53.5,
-      "ceiling": 107,
-      "measured_at_commit": "45e1f34"
+      "baseline": 48,
+      "ceiling": 100,
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "pdf_hole_serialized_bytes",
@@ -135,7 +135,7 @@
       "rationale": "Exact JSON byte size catches provenance growth.",
       "baseline": 78522,
       "ceiling": 94226.4,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "pdf_save_latency_ms",
@@ -146,7 +146,7 @@
       "floor": 20,
       "baseline": 0.28,
       "ceiling": 20,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "owned_stream_reducer_ms",
@@ -155,9 +155,9 @@
       "tolerance": 4,
       "rationale": "Minimum of repeated runs; a 10ms floor catches accidental whole-Map cloning while absorbing timer noise.",
       "floor": 10,
-      "baseline": 0.09,
+      "baseline": 0.06,
       "ceiling": 10,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     },
     {
       "id": "subtree_collect_ms",
@@ -166,9 +166,9 @@
       "tolerance": 4,
       "rationale": "Minimum of repeated runs; a 25ms floor catches repeated whole-graph scans while absorbing timer noise.",
       "floor": 25,
-      "baseline": 1.97,
+      "baseline": 1.94,
       "ceiling": 25,
-      "measured_at_commit": "45e1f34"
+      "measured_at_commit": "bb59262"
     }
   ]
 }
