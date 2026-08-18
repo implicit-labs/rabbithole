@@ -806,6 +806,13 @@ async function verifyStandaloneNotesAndEditing() {
       return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
         color: style.color, backgroundColor: style.backgroundColor, padding: style.padding };
     });
+    // Where the origin quote sits while the note is rendered — the editor has to
+    // slot in underneath it, not beside it, and must not move it a pixel.
+    const quoteAtRest = await anchoredCard.evaluate((card) => {
+      const cardRect = card.getBoundingClientRect();
+      const quoteRect = card.querySelector(".origin-quote").getBoundingClientRect();
+      return { left: quoteRect.left - cardRect.left, top: quoteRect.top - cardRect.top, width: quoteRect.width };
+    });
     await anchoredSurface.click({ position: { x: 8, y: 8 } });
     assert.equal(await anchoredCard.locator(".note-editor").count(), 0, "a single note-body click should remain ordinary document interaction");
     const clickedWordBox = await anchoredSurface.evaluate((surface) => {
@@ -844,8 +851,51 @@ async function verifyStandaloneNotesAndEditing() {
     assert.equal(editorSurface.caret[0], editorSurface.caret[1], "double-click editing should leave a collapsed caret, not a selection");
     assert(editorSurface.caret[0] >= clickedWordStart && editorSurface.caret[0] <= clickedWordStart + "anchored".length,
       `double-click editing should place the caret at the clicked point in the markdown source (caret ${editorSurface.caret[0]}, word at ${clickedWordStart})`);
+    assert.deepEqual(await anchoredCard.evaluate((card, atRest) => {
+      const body = card.querySelector(".node-body");
+      const quote = body.querySelector(".origin-quote");
+      const surface = body.querySelector(".note-edit-surface");
+      const actions = surface.querySelector(".ask-actions");
+      const cardRect = card.getBoundingClientRect();
+      const bodyRect = body.getBoundingClientRect();
+      const quoteRect = quote.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
+      return {
+        stack: getComputedStyle(body).flexDirection,
+        quoteUnmoved: Math.abs(quoteRect.left - cardRect.left - atRest.left) < 1
+          && Math.abs(quoteRect.top - cardRect.top - atRest.top) < 1
+          && Math.abs(quoteRect.width - atRest.width) < 1,
+        editorBelowQuote: surfaceRect.top >= quoteRect.bottom - 1,
+        surfaceFullWidth: Math.abs(surfaceRect.left - bodyRect.left) < 1 && Math.abs(surfaceRect.right - bodyRect.right) < 1,
+        barFullWidth: Math.abs(actionsRect.left - bodyRect.left) < 1 && Math.abs(actionsRect.right - bodyRect.right) < 1,
+        barAtBottom: Math.abs(actionsRect.bottom - bodyRect.bottom) < 1,
+        noOverflow: body.scrollHeight <= body.clientHeight + 1,
+      };
+    }, quoteAtRest), {
+      stack: "column", quoteUnmoved: true, editorBelowQuote: true,
+      surfaceFullWidth: true, barFullWidth: true, barAtBottom: true, noOverflow: true,
+    }, "editing a quoted note should stack the quote above a full-width editor and bar, not beside them");
+    // The quote's height is the card's too: a note long enough to hit the cap
+    // must still end inside the editor box the quote left behind.
+    await anchoredEditor.fill(Array.from({ length: 40 }, (_value, index) => `Cap line ${index} of an anchored note that has to wrap.`).join("\n"));
+    assert.deepEqual(await anchoredCard.evaluate((card) => {
+      const surface = card.querySelector(".note-edit-surface");
+      const input = surface.querySelector(".ask-input");
+      const editor = surface.querySelector(".note-editor");
+      const inputRect = input.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const scale = card.getBoundingClientRect().width / card.offsetWidth;
+      const contentBottom = inputRect.bottom - parseFloat(getComputedStyle(input).paddingBottom) * scale;
+      return {
+        atCap: editor.scrollHeight > editor.clientHeight && getComputedStyle(editor).overflowY === "auto",
+        capFits: editorRect.bottom <= contentBottom + 1,
+        capFills: editorRect.bottom >= contentBottom - 1,
+      };
+    }), { atCap: true, capFits: true, capFills: true },
+    "the note editor's height cap should account for the origin quote above it");
     await anchoredEditor.fill("Edited anchored **durably**");
-    await anchoredEditor.press("Control+Enter");
+    await anchoredCard.locator('.note-edit-surface .ask-commit[data-commit="note"]').click();
     await anchoredCard.locator(".doc-content strong", { hasText: "durably" }).waitFor();
     await page.waitForFunction(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
@@ -1497,7 +1547,7 @@ async function verifyNoteToAskConversion() {
     await emptyPage.close();
 
     let editor = await openNoteEditor(followupCard);
-    assert.deepEqual(await followupCard.locator(".note-editor-actions").evaluate((actions) => {
+    assert.deepEqual(await followupCard.locator(".note-edit-surface .ask-actions").evaluate((actions) => {
       const surface = actions.closest(".note-edit-surface");
       const commits = Array.from(actions.querySelectorAll(".ask-commit"));
       const actionsRect = actions.getBoundingClientRect();
@@ -1553,20 +1603,20 @@ async function verifyNoteToAskConversion() {
       flushBottom: true, flushSides: true, footerCorners: true, resizeHidden: true,
       hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
       commits: [
-        { kind: "note", hint: "⌘↵", label: "Save", title: "Save note (Command/Control+Enter)" },
-        { kind: "ask", hint: "⇧⌘↵", label: "Convert to Ask", title: "Convert this note into an ask (Shift+Command/Control+Enter)" },
+        { kind: "note", hint: undefined, label: "Note", title: "Save note" },
+        { kind: "ask", hint: "⌘↵", label: "Ask", title: "Ask (Command/Control+Enter)" },
       ],
-    }, "editing an existing note should use the standalone composer's flush footer with the existing Save and Convert commits");
+    }, "editing an existing note should use the standalone composer's flush footer and its verbatim Note/Ask bar");
     await editor.fill("");
-    assert.equal(await followupCard.locator('.note-editor-actions [data-commit="ask"]').isDisabled(), true,
+    assert.equal(await followupCard.locator('.note-edit-surface [data-commit="ask"]').isDisabled(), true,
       "an empty note question should disable Ask");
     await editor.fill("Saved follow-up note edit");
-    await editor.press("Control+Enter");
+    await followupCard.locator('.note-edit-surface .ask-commit[data-commit="note"]').click();
     await page.waitForFunction(async (id) => {
       const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
       return node?.origin?.kind === "note" && node.markdown === "Saved follow-up note edit";
     }, followupId);
-    assert.equal(providerBodies.length, 0, "Command+Enter should save the edit as a note without asking");
+    assert.equal(providerBodies.length, 0, "the Note commit should save the edit without asking");
 
     const anchoredBefore = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), anchored.id);
     assert.deepEqual(await convertFromMenu(anchored.card), { appeared: false, count: 0 },
@@ -1594,7 +1644,7 @@ async function verifyNoteToAskConversion() {
 
     editor = await openNoteEditor(followupCard);
     await editor.fill("Follow-up conversion via Ask button");
-    await followupCard.locator('.note-editor-actions [data-commit="ask"]').click();
+    await followupCard.locator('.note-edit-surface [data-commit="ask"]').click();
     await followupCard.locator(".doc-content", { hasText: "The follow-up note became this streamed answer." }).waitFor();
     const storedFollowup = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), followupId);
     assert.deepEqual({ parent_id: storedFollowup.parent_id, branch_type: storedFollowup.origin.branch_type,
@@ -1603,7 +1653,8 @@ async function verifyNoteToAskConversion() {
     "an anchorless child note should become a follow-up ask on the same parent");
 
     editor = await openNoteEditor(standalone.card);
-    await editor.press("Control+Shift+Enter");
+    // The composer's own Enter contract, kept verbatim by the editor: ⌘↵ asks.
+    await editor.press("Control+Enter");
     await standalone.card.locator(".doc-content", { hasText: "The standalone note borrowed the root context." }).waitFor();
     const storedStandalone = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), standalone.id);
     assert.equal(storedStandalone.parent_id, null, "a standalone note should remain parentless after conversion");

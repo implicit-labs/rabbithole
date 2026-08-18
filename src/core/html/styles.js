@@ -541,12 +541,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .has-draft .lens { display: none; }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
-.note-editor-actions.note-only .commit-actions::before { display: none; }
+.ask-actions.note-only .commit-actions::before { display: none; }
 
 /* A newly placed standalone note is the composer itself. It starts at the
    compact note height and grows down to the ordinary card cap; the shared
    action row remains the card's fixed footer throughout. */
-.node.note-draft .node-body { display: flex; padding: 0; overflow: hidden; }
+.node.note-draft .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .node.note-draft .node-body > .nc-inner { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
   margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0 0 var(--radius-card) var(--radius-card);
   background: transparent; box-shadow: none; transform: none; opacity: var(--nc-op, 1); transition: none; }
@@ -565,15 +565,22 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .node.note-draft .ask-actions .ask-commit { display: inline-flex; }
 .node.note-draft .node-composer, .node.note-draft .node-resize, .node.note-draft .node-collapse { display: none; }
 
-/* Editing an existing note is the same box as writing a new one: the card body
-   goes full-bleed, the action row is the card's bottom edge — hairline running
-   corner to corner, rounded into them — and the text scrolls underneath. Only
-   the labels differ (Save / Convert to Ask), because the note already exists.
-   The resize corner stands down: a drag triangle sitting on a flush footer is
-   a handle with nothing to hold. */
-.node.note-editing .node-body { display: flex; padding: 0; overflow: hidden; }
+/* Editing an existing note is the same box as writing a new one — same bar,
+   same two words: the card body goes full-bleed, the action row is the card's
+   bottom edge — hairline running corner to corner, rounded into them — and the
+   text scrolls underneath. The resize corner stands down: a drag triangle
+   sitting on a flush footer is a handle with nothing to hold. */
+.node.note-editing .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* A note branched off a selection keeps its origin quote stacked above the
+   editor, at the very inset the body's own padding gave it, so nothing moves on
+   the double-click. Only the editor below goes flush. A quote longer than the
+   card yields — scrolling inside itself — down to the editor's own floor, which
+   keeps the footer and a few lines of text on screen whatever was quoted. */
+.node.note-editing .node-body > :not(.note-edit-surface) { flex: 0 1 auto; min-height: 0; overflow: auto;
+  margin-left: 16px; margin-right: 16px; }
+.node.note-editing .node-body > :first-child:not(.note-edit-surface) { margin-top: 14px; }
 .node.note-editing .node-resize { display: none; }
-.note-edit-surface { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow: hidden;
+.note-edit-surface { display: flex; flex: 1 1 auto; min-height: 96px; flex-direction: column; overflow: hidden;
   border-radius: 0 0 var(--radius-card) var(--radius-card); }
 .note-edit-surface > .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px 8px; }
 /* The editor is the rendered note, pixel for pixel — the padding belongs to the

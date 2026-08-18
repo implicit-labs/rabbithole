@@ -578,7 +578,7 @@ export function updateCardComposer(node){
     if (node._noteComposer){ updateStandaloneNoteComposer(node); return; }
     if (node._noteEditor && !canConvertNote(node)){
       var convert = node._noteEditSurface && node._noteEditSurface.querySelector('[data-commit="ask"]');
-      if (convert){ convert.remove(); node._noteEditSurface.querySelector(".note-editor-actions")?.classList.add("note-only"); }
+      if (convert){ convert.remove(); node._noteEditSurface.querySelector(".ask-actions")?.classList.add("note-only"); }
     }
     if (!node.ncText) return;
     // A draft in progress keeps the drawer out even when the pointer wanders off.
@@ -702,6 +702,26 @@ export function fillBody(node){
   function cssPixels(style, property){
     return parseFloat(style[property]) || 0;
   }
+  // One bar for every note surface — the composer's own Note/Ask pair, built
+  // and keyed the same way whether the note is being written for the first time
+  // or edited afterwards. Note commits the text, Ask branches it, ⌘↵ asks.
+  function noteComposerActions(){
+    return cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
+  }
+  function noteCommitFromEnter(e){
+    return !e.altKey && (e.metaKey || e.ctrlKey) && isCommandEnter(e) ? "ask" : null;
+  }
+  // Whatever the editor sits under inside the card body — an origin quote, an
+  // origin crop — belongs to the body, not to the surface, so its height comes
+  // off the ceiling before the textarea takes its share.
+  function leadingBodyHeight(surface){
+    var total = 0;
+    for (var el = surface.previousElementSibling; el; el = el.previousElementSibling){
+      var style = getComputedStyle(el);
+      total += el.offsetHeight + cssPixels(style, "marginTop") + cssPixels(style, "marginBottom");
+    }
+    return total;
+  }
   // The textarea and card share one ceiling. Derive the text allowance from
   // the card's saved cap and the live composer chrome so neither can stop
   // growing while the other still has unused room. Both flush-footer note
@@ -713,7 +733,7 @@ export function fillBody(node){
     var surfaceStyle = getComputedStyle(input.parentNode);
     return Math.max(1,
       node.h - node.el.querySelector(".node-head").offsetHeight - actions.offsetHeight -
-      (attachmentStrip ? attachmentStrip.offsetHeight : 0) -
+      (attachmentStrip ? attachmentStrip.offsetHeight : 0) - leadingBodyHeight(input.parentNode) -
       cssPixels(cardStyle, "borderTopWidth") - cssPixels(cardStyle, "borderBottomWidth") -
       cssPixels(inputStyle, "paddingTop") - cssPixels(inputStyle, "paddingBottom") -
       cssPixels(surfaceStyle, "borderTopWidth") - cssPixels(surfaceStyle, "borderBottomWidth") -
@@ -753,7 +773,7 @@ export function fillBody(node){
     editor.value = node.md || "";
     editor.style.fontSize = dc.style.fontSize;
     var attachmentStrip = document.createElement("div"); attachmentStrip.className = "paste-attachment-strip"; attachmentStrip.hidden = true;
-    var actions = cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
+    var actions = noteComposerActions();
     input.appendChild(editor); composer.appendChild(input); composer.appendChild(attachmentStrip); composer.appendChild(actions); dc.replaceWith(composer);
     node._noteEditor = editor; node._noteComposer = composer; node._noteActions = actions; node._noteInput = input;
     node._noteAttachmentStrip = attachmentStrip;
@@ -986,9 +1006,7 @@ export function fillBody(node){
     });
     wireComposerActions({ text: editor, actions: actions, listen: scope.listen,
       hasDraft: function(){ return !!editor.value.trim() || attachments.length > 0; },
-      commitFromEnter: function(e){
-        return !e.altKey && (e.metaKey || e.ctrlKey) && isCommandEnter(e) ? "ask" : null;
-      },
+      commitFromEnter: noteCommitFromEnter,
       onCommit: function(kind, e){ e.stopPropagation(); submit(kind, e); },
       onLens: function(){} });
     // Moving between the textarea and its actions stays inside one surface.
@@ -1233,13 +1251,9 @@ export function rollbackNoteConversion(node){
     editor.spellcheck = true;
     editor.value = node.md || "";
     editor.style.fontSize = dc.style.fontSize;
-    // Editing an existing note is not the composer's "is this a note or a
-    // question" choice — the note already exists. So the pair reads Save /
-    // Convert to Ask, and ⌘↵ keeps the meaning it has always had here.
-    var actions = cardButton(composerActionsMarkup({ className: "note-editor-actions", includeLenses: false,
-      noteEnterShortcut: false, noteLabel: "Save", askLabel: "Convert to Ask",
-      noteKbdHint: "⌘↵", askKbdHint: "⇧⌘↵",
-      noteTitle: "Save note (Command/Control+Enter)", askTitle: "Convert this note into an ask (Shift+Command/Control+Enter)" }));
+    var actions = noteComposerActions();
+    // A note that cannot become an ask (root, has children, frozen) keeps the
+    // bar with Note alone — one button, so no divider down the middle.
     var convertible = canConvertNote(node);
     if (!convertible){ actions.querySelector('[data-commit="ask"]').remove(); actions.classList.add("note-only"); }
     input.appendChild(editor);
@@ -1335,11 +1349,10 @@ export function rollbackNoteConversion(node){
     });
     wireComposerActions({ text: editor, actions: actions,
       hasDraft: function(){ return !!editor.value.trim(); },
-      commitFromEnter: function(e){
-        if (!isCommandEnter(e) || e.altKey || !(e.metaKey || e.ctrlKey)) return null;
-        if (e.shiftKey) return canConvertNote(node) && editor.value.trim() ? "ask" : null;
-        return "note";
-      },
+      // The composer's own Enter contract, unchanged: ⌘↵ asks. On a note that
+      // cannot be converted the ask falls through to a plain save, which is the
+      // only thing the bar still offers.
+      commitFromEnter: noteCommitFromEnter,
       onCommit: function(kind, e){ e.stopPropagation(); finish(kind); },
       onLens: function(){} });
     surface.addEventListener("focusout", function(){

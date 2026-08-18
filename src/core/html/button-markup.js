@@ -55,30 +55,28 @@ export function buttonMarkup(options = {}) {
 
 // The one composer action row: four lenses at rest, the commit pair once a
 // draft exists. Every composer surface (selection popover, reader composer,
-// card drawer, standalone note/ask surface) renders this same commit markup;
-// surfaces without a parent document omit lenses through the builder option.
-/** @param {{ id?: string, className?: string, includeLenses?: boolean, noteEnterShortcut?: boolean,
- *   noteKbdHint?: string, askKbdHint?: string, noteTitle?: string, askTitle?: string,
- *   noteLabel?: string, askLabel?: string }} [options] */
+// card drawer, standalone note/ask surface, note editor) renders this same
+// commit markup — one Note and one Ask, worded once here so no surface can
+// grow a dialect; surfaces without a parent document omit lenses, and surfaces
+// that keep plain Enter for text say so through the two builder options.
+/** @param {{ id?: string, includeLenses?: boolean, noteEnterShortcut?: boolean }} [options] */
 export function composerActionsMarkup(options = {}) {
-  const className = ["ask-actions", options.className].filter(Boolean).join(" ");
   const noteEnterShortcut = options.noteEnterShortcut !== false;
-  const noteKbdHint = options.noteKbdHint ?? (noteEnterShortcut ? "↵" : undefined);
-  const askKbdHint = options.askKbdHint ?? "⌘↵";
+  const noteKbdHint = noteEnterShortcut ? "↵" : undefined;
   const lenses = options.includeLenses === false ? "" :
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "example" }, label: "Example ", kbdHint: "3" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "deeper" }, label: "Go Deeper ", kbdHint: "4" });
-  return "<div" + attribute("class", className) + attribute("id", options.id) + ">" +
+  return '<div class="ask-actions"' + attribute("id", options.id) + ">" +
     lenses +
     '<div class="commit-actions">' +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "note" },
-      title: options.noteTitle ?? (noteEnterShortcut ? "Save note (Enter)" : "Save note"),
-      label: (options.noteLabel ?? "Note") + " ", labelClass: "ask-commit-label", kbdHint: noteKbdHint }) +
+      title: noteEnterShortcut ? "Save note (Enter)" : "Save note",
+      label: "Note ", labelClass: "ask-commit-label", kbdHint: noteKbdHint }) +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "ask" },
-      title: options.askTitle ?? "Ask (Command/Control+Enter)",
-      label: (options.askLabel ?? "Ask") + " ", labelClass: "ask-commit-label", kbdHint: askKbdHint }) +
+      title: "Ask (Command/Control+Enter)",
+      label: "Ask ", labelClass: "ask-commit-label", kbdHint: "⌘↵" }) +
     "</div></div>";
 }
 
