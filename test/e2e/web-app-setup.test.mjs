@@ -1431,14 +1431,20 @@ async function verifyAskKeyUxAndRail() {
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
   await page.click("#t-settings");
   await page.waitForSelector("#settings-sheet");
-  await page.click('[data-settings-section="model"]');
-  await page.waitForSelector("#settings-panel");
   await page.waitForFunction(() => {
     const sheet = document.getElementById("settings-sheet");
     return sheet && !sheet.getAnimations({ subtree: true }).some((animation) => animation.playState === "running");
   }, null, { timeout: 5000 });
+  const appearanceHeight = await page.locator("#settings-sheet").evaluate((sheet) => Math.round(sheet.getBoundingClientRect().height));
+  await page.click('[data-settings-section="model"]');
+  await page.waitForSelector("#settings-panel");
+  assert.equal(await page.locator("#settings-sheet").evaluate((sheet) => Math.round(sheet.getBoundingClientRect().height)), appearanceHeight, "every section must render inside the same fixed sheet silhouette");
   assert.equal(await page.locator("#save-settings, #web-settings-close").count(), 0, "settings should apply live without save or close buttons");
-  assert.equal(await page.locator(".settings-section").first().getAttribute("class"), "settings-section provider-list-section", "provider should be the first settings decision");
+  assert.equal(await page.locator("#settings-panel > :first-child").getAttribute("class"), "provider-list", "provider should be the first settings decision, bare on the pane");
+  assert.deepEqual(await page.locator(".provider-list").evaluate((list) => {
+    const styles = getComputedStyle(list);
+    return { border: styles.borderTopWidth, background: styles.backgroundColor };
+  }), { border: "0px", background: "rgba(0, 0, 0, 0)" }, "the provider list must blend into the sheet, not ride in its own box");
   assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
   assert.equal(await page.getAttribute(".provider-list", "role"), "radiogroup", "one exclusive choice, expressed as one radiogroup");
   assert.equal(await page.getAttribute('[data-provider="openrouter"]', "aria-checked"), "true");

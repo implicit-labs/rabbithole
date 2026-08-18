@@ -2675,8 +2675,9 @@ async function verifyCanvasBranching() {
   assert(Math.abs(toolbarAlignment.settingsTop - toolbarAlignment.themeTop) < 0.5, "settings control should align with toolbar peers");
   assert.equal(toolbarAlignment.settingsHeight, toolbarAlignment.themeHeight, "settings control should match toolbar peer height");
   /* Settings is a centered modal sheet, not an anchored popover: fixed 640px
-     width, 176px sidebar, content-driven height, and a scrim you can still read
-     the canvas through while appearance changes land behind it. */
+     width, 176px sidebar, one fixed height every section shares, and a scrim
+     you can still read the canvas through while appearance changes land
+     behind it. */
   const sheetStandard = await page.evaluate(() => {
     const sheet = document.getElementById("settings-sheet");
     const scrim = document.getElementById("settings-sheet-scrim");
@@ -2689,9 +2690,7 @@ async function verifyCanvasBranching() {
       offCenterX: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
       offCenterY: Math.abs((rect.top + rect.bottom) / 2 - innerHeight / 2),
       height: rect.height,
-      layoutHeight: sheet.offsetHeight,
-      maxHeight: parseFloat(styles.maxHeight),
-      minHeight: parseFloat(styles.minHeight),
+      expectedHeight: Math.min(560, innerHeight - 96),
       radius: styles.borderTopLeftRadius,
       shadow: styles.boxShadow,
       role: sheet.getAttribute("role"),
@@ -2708,9 +2707,7 @@ async function verifyCanvasBranching() {
   assert.equal(sheetStandard.width, 640, "the settings sheet is a fixed 640px column");
   assert.equal(sheetStandard.sidebar, 176, "the settings sidebar is 176px");
   assert(sheetStandard.offCenterX < 1 && sheetStandard.offCenterY < 1, `settings should be centered, off by ${sheetStandard.offCenterX},${sheetStandard.offCenterY}px`);
-  assert(sheetStandard.height <= sheetStandard.maxHeight + 1, "the sheet height is content-driven under its ceiling, never fixed");
-  assert.equal(sheetStandard.minHeight, 440, "on a normal viewport the sheet keeps its 440px floor — a room, not a strip");
-  assert(sheetStandard.layoutHeight >= sheetStandard.minHeight - 1, "a sparse pane must still fill the floor rather than collapsing around its rows");
+  assert(Math.abs(sheetStandard.height - sheetStandard.expectedHeight) < 1, `the sheet keeps one fixed height so no section can move the frame (got ${sheetStandard.height}, wanted ${sheetStandard.expectedHeight})`);
   assert.equal(sheetStandard.radius, "12px", "the sheet uses the popover radius token");
   assert.notEqual(sheetStandard.shadow, "none", "the sheet carries the modal shadow");
   assert.equal(sheetStandard.role, "dialog");

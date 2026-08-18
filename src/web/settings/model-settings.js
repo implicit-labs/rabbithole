@@ -1287,15 +1287,16 @@ export function createModelSettings({
 
   /*
    * The pane is mounted by the settings sheet, not by this module: there is one
-   * settings surface in the product, and Model is a section of it. Everything
-   * below the provider list is the same code the anchored popover ran.
+   * settings surface in the product, and Model is a section of it. The sheet
+   * owns the frame and the gutter; this mounts only bare rows and whatever
+   * expands beneath the selected one — never a container of its own.
    */
   function mountPane(host) {
     surface = host;
     const settings = loadSettings();
     const preset = providerFor(settings.preset);
     const selectedRow = selectedRowId(settings);
-    surface.innerHTML = `<section id="settings-panel" class="settings-panel"><div class="settings-inner"><div class="settings-section provider-list-section"><div class="provider-list" role="radiogroup" aria-label="Where answers come from">${PROVIDER_ROWS.map((row) => providerRowMarkup(row, row.id === selectedRow)).join("")}</div></div></div></section>`;
+    surface.innerHTML = `<section id="settings-panel"><div class="provider-list" role="radiogroup" aria-label="Where answers come from">${PROVIDER_ROWS.map((row) => providerRowMarkup(row, row.id === selectedRow)).join("")}</div></section>`;
     const conditionalHost = document.createElement("div");
     conditionalHost.id = "settings-conditional-sections";
     surface.querySelector(`[data-provider-item="${selectedRow}"] .provider-body-slot`).append(conditionalHost);

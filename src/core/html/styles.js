@@ -735,12 +735,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .settings-sheet-scrim.closing { pointer-events: none; animation: settings-sheet-scrim-out var(--duration-fast) var(--ease-standard) both; }
 @keyframes settings-sheet-scrim-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes settings-sheet-scrim-out { from { opacity: 1; } to { opacity: 0; } }
-/* Height is content-driven between a floor and a cap: the cap keeps a dense
-   pane scrollable, the floor keeps a two-row pane from collapsing into a
-   squat strip — a room, not a shelf. Negative space below the rows is the
-   design; never fill it. Both clamps yield to a short viewport together. */
+/* One fixed height for every pane: switching sections must never move the
+   frame, so a dense pane scrolls inside the pane body and a sparse one keeps
+   its negative space — that space is the design; never fill it. The height
+   yields only to a short viewport. */
 .settings-sheet { display: grid; grid-template-columns: 176px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: min(640px, 100%);
-  max-height: min(560px, 100dvh - 96px); min-height: min(440px, 100dvh - 96px); overflow: hidden; outline: none;
+  height: min(560px, 100dvh - 96px); overflow: hidden; outline: none;
   border: 1px solid color-mix(in srgb, var(--border-focus) 58%, var(--border)); border-radius: var(--radius-popover);
   background: color-mix(in srgb, var(--node-bg) 96%, var(--bg)); box-shadow: var(--shadow-modal);
   font-family: var(--font-ui); color: var(--fg);
@@ -807,7 +807,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 @media (max-width: 760px) {
   .settings-sheet-scrim { padding: var(--space-6); }
-  .settings-sheet { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); max-height: min(560px, 100dvh - 48px); }
+  .settings-sheet { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: min(560px, 100dvh - 48px); }
   .settings-sheet-side { flex-direction: row; align-items: center; gap: var(--space-6); padding: var(--space-5) var(--space-6);
     border-right: 0; border-bottom: 1px solid var(--border); }
   .settings-sheet-title { margin: 0; padding-inline: 0; }

@@ -118,14 +118,14 @@ async function assertAppearanceOnlySettings(page, label) {
   await page.waitForSelector("#settings-sheet");
   assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance"],
     `${label}: a host that registers nothing should get Appearance and only Appearance`);
-  /* The floor matters most here: with a single two-row section the sheet must
-     still open as a room (440px on a normal viewport), never a squat strip. */
-  const floor = await page.locator("#settings-sheet").evaluate((sheet) => ({
+  /* The fixed height matters most here: with a single two-row section the
+     sheet must still open at the same frame every host shows — the space
+     below the rows is the design, never a squat strip. */
+  const frame = await page.locator("#settings-sheet").evaluate((sheet) => ({
     height: sheet.offsetHeight, // layout height: immune to the entrance scale
-    minHeight: parseFloat(getComputedStyle(sheet).minHeight),
+    expected: Math.min(560, innerHeight - 96),
   }));
-  assert.equal(floor.minHeight, 440, `${label}: the sheet should keep its 440px floor on a normal viewport`);
-  assert(floor.height >= floor.minHeight - 1, `${label}: an Appearance-only sheet must fill the floor, got ${floor.height}px`);
+  assert(Math.abs(frame.height - frame.expected) < 1, `${label}: an Appearance-only sheet must keep the fixed frame, got ${frame.height}px wanting ${frame.expected}px`);
   assert.deepEqual(await page.locator(".settings-sheet-sub").allTextContents(),
     ["What the canvas follows.", "Scales every card; each can fine-tune."],
     `${label}: both rows carry a one-line sub that describes the effect`);

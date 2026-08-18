@@ -478,10 +478,6 @@ body.blank-dragging #viewport::after {
   gap: 13px;
 }
 
-.settings-inner {
-  display: block;
-}
-
 .composer-start,
 .composer-entry {
   display: grid;
@@ -736,46 +732,6 @@ body.blank-dragging .composer-card {
   to { opacity: 1; }
 }
 
-.settings-panel {
-  display: block;
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.settings-section {
-  padding: 16px 18px;
-}
-
-/* Model is a section of the shared sheet, and the sheet's pane already owns the
-   page gutter — the section only owns the rhythm between rows. */
-.settings-pane-body .settings-section {
-  padding-inline: 0;
-}
-
-.settings-pane-body .settings-section:first-child {
-  padding-top: 0;
-}
-
-.settings-section + .settings-section {
-  border-top: 1px solid var(--border);
-}
-
-.provider-list-section {
-  padding: 2px 18px 18px;
-}
-
-/* The key belongs to the endpoint above it, so they read as one block rather than two
-   sections separated by a rule. */
-.endpoint-section {
-  padding-bottom: 8px;
-}
-
-.endpoint-section + .key-section {
-  border-top: 0;
-  padding-top: 8px;
-}
-
 .settings-row {
   display: flex;
   align-items: center;
@@ -855,32 +811,25 @@ body.blank-dragging .composer-card {
 
 /*
  * The flat provider list: five exclusive rows, the selected one expands in
- * place. One radiogroup replaces the old provider segments and both nested
- * switches; the segmented control below now belongs to parameters only.
+ * place. Rows sit bare on the sheet's pane — same 56px rhythm and type ramp
+ * as every other settings row; the dot column, not a box, is what says
+ * "radio group". The hover pill overhangs the pane gutter so the copy keeps
+ * the same left edge as the rows around it.
  */
-.provider-list {
-  border: 1px solid color-mix(in srgb, var(--fg) 9%, var(--border));
-  border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  overflow: hidden;
-}
-
-.provider-item + .provider-item {
-  border-top: 1px solid var(--border);
-}
-
 .provider-row {
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  width: calc(100% + 20px);
+  margin-inline: -10px;
   box-sizing: border-box;
-  min-height: 44px;
+  min-height: 56px;
   border: 0;
+  border-radius: var(--radius-control-lg);
   background: transparent;
   color: inherit;
-  padding: 11px 12px;
+  padding: 8px 10px;
   font: inherit;
   text-align: start;
   cursor: pointer;
@@ -888,13 +837,12 @@ body.blank-dragging .composer-card {
 }
 
 .provider-item:not(.selected) .provider-row:hover {
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  background: var(--hl);
 }
 
 .provider-row:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -2px;
-  border-radius: var(--radius-control);
 }
 
 .provider-dot {
@@ -939,7 +887,7 @@ body.blank-dragging .composer-card {
 
 .provider-copy strong {
   color: var(--fg);
-  font: var(--weight-semibold) var(--text-body)/1.25 var(--font-ui);
+  font: var(--weight-medium) var(--text-body)/1.25 var(--font-ui);
   transition: color var(--duration-fast) var(--ease-standard);
 }
 
@@ -948,8 +896,8 @@ body.blank-dragging .composer-card {
 }
 
 .provider-copy small {
-  color: var(--fg-dim);
-  font: var(--text-sm)/1.35 var(--font-ui);
+  color: var(--fg-faint);
+  font: var(--text-ui)/var(--leading-ui) var(--font-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1003,11 +951,12 @@ body.blank-dragging .composer-card {
 }
 
 /* Section internals are unchanged; inside a row they lose their dividers
-   (the row provides the grouping) and align to the title's leading edge
-   (12px row padding + 15px dot + 10px gap). */
+   (the dot column provides the grouping) and align to the title's leading
+   edge (15px dot + 10px gap past the pane gutter). Controls end on the
+   gutter, where every sheet row ends its controls. */
 .provider-body .settings-section {
   border-top: 0;
-  padding: 4px 14px 14px 37px;
+  padding: 4px 0 16px 25px;
 }
 
 .provider-body .settings-section + .settings-section {
@@ -1015,7 +964,7 @@ body.blank-dragging .composer-card {
 }
 
 .provider-body .settings-recovery {
-  margin: 4px 14px 10px 37px;
+  margin: 4px 0 10px 25px;
   padding: 10px 11px;
 }
 
@@ -1036,11 +985,11 @@ body.blank-dragging .composer-card {
 }
 
 .provider-body .settings-advanced summary {
-  padding: 8px 14px 8px 37px;
+  padding: 8px 0 8px 25px;
 }
 
 .provider-body .settings-advanced-grid {
-  padding: 2px 14px 14px 37px;
+  padding: 2px 0 16px 25px;
 }
 
 .provider-body .settings-complete-section {
@@ -2281,10 +2230,6 @@ body.blank-dragging .composer-card {
   .reasoning-choice button,
   .settings-select,
   .settings-complete-section .web-primary {
-    min-height: var(--control-h-lg);
-  }
-
-  .provider-row {
     min-height: var(--control-h-lg);
   }
 
