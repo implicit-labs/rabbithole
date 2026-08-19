@@ -20,7 +20,6 @@ import {
   updateComposerState
 } from "./ask-followups.js";
 import {
-  addDockedNote,
   closeDockedNotePopover,
   createDockedNote,
   createPlacedNote,
@@ -107,7 +106,6 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       renderDockedNotes: renderDockedNotes,
       positionDockedNotes: positionDockedNotes,
       closeDockedNotePopover: closeDockedNotePopover,
-      addDockedNote: addDockedNote,
       rollbackBranch: rollbackBranch,
       copyNodeMarkdown: copyNodeMarkdown,
       removeBranch: removeBranch,

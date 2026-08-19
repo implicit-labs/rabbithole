@@ -826,8 +826,9 @@ async function verifyDockedNotes() {
       actions: Array.from(surface.querySelectorAll(".note-pop-actions button"))
         .filter((button) => getComputedStyle(button).display !== "none").map((button) => ({
           label: Array.from(button.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim(),
-          chip: button.querySelector("kbd")?.textContent,
-          chipClass: button.querySelector("kbd")?.className,
+          chip: button.querySelector("kbd")?.textContent ?? null,
+          icon: !!button.querySelector("svg"),
+          ariaLabel: button.getAttribute("aria-label"),
           shortcuts: button.getAttribute("aria-keyshortcuts"),
         })),
       viewStyle: (() => {
@@ -838,11 +839,11 @@ async function verifyDockedNotes() {
       editors: surface.querySelectorAll(".note-editor").length,
     })), { role: "dialog", text: "The first docked note", focusInside: true,
       actions: [
-        { label: "Place on canvas", chip: "⌘↵", chipClass: "", shortcuts: "Meta+Enter Control+Enter" },
-        { label: "Delete", chip: "⌫", chipClass: "", shortcuts: "Backspace Delete" },
+        { label: "", chip: null, icon: true, ariaLabel: "Delete note", shortcuts: "Backspace Delete" },
+        { label: "Place on canvas", chip: "⌘↵", icon: false, ariaLabel: null, shortcuts: "Meta+Enter Control+Enter" },
       ], viewStyle: { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", padding: ["8px", "10px", "8px", "10px"] },
       editors: 0 },
-    "read state should be direct popover prose with the composer's exact kbd-chip markup");
+    "read state: icon-only delete on the left, Place on canvas with its chip on the right");
     const chipParity = await popover.evaluate((surface) => {
       const signature = (chip) => {
         const style = getComputedStyle(chip);
@@ -856,17 +857,80 @@ async function verifyDockedNotes() {
     });
     assert.deepEqual(chipParity.note, chipParity.composer, "read actions must reuse the composer chip pixel for pixel");
 
+    // One footer, constant geometry, and a text origin that never moves: the
+    // read state's measurements are the edit state's, glyph for glyph. The
+    // popover slides in over --popover-speed, so let the transform settle first.
+    await page.waitForFunction(() => {
+      const transform = getComputedStyle(document.getElementById("notepop")).transform;
+      return transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+    });
+    const readState = await popover.evaluate((surface) => {
+      const bar = surface.querySelector(".note-pop-actions");
+      const barRect = bar.getBoundingClientRect();
+      const view = surface.querySelector(".note-pop-view");
+      const viewRect = view.getBoundingClientRect();
+      const viewStyle = getComputedStyle(view);
+      const range = document.createRange();
+      const first = document.createTreeWalker(view, NodeFilter.SHOW_TEXT).nextNode();
+      range.setStart(first, 0); range.setEnd(first, 1);
+      const glyph = range.getBoundingClientRect();
+      const buttons = Array.from(bar.querySelectorAll("button")).map((button) => button.getBoundingClientRect().left);
+      return {
+        bar: { left: barRect.left, top: barRect.top, width: barRect.width, height: barRect.height },
+        hairline: getComputedStyle(bar).borderTopWidth,
+        deleteLeftOfPlace: buttons[0] < buttons[1],
+        origin: { left: viewRect.left + parseFloat(viewStyle.paddingLeft), top: viewRect.top + parseFloat(viewStyle.paddingTop) },
+        glyph: { left: glyph.left, top: glyph.top },
+      };
+    });
+    assert.equal(readState.hairline, "1px", "the read footer wears the composer bar's own hairline");
+    assert.equal(readState.deleteLeftOfPlace, true, "destructive sits on the left, the primary verb on the right");
+
     await popover.locator(".note-pop-view").dblclick();
     await popover.locator(".note-editor").waitFor();
     assert.deepEqual(await popover.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => ({
       commit: button.dataset.commit, hint: button.querySelector("kbd")?.textContent }))), [
       { commit: "note", hint: "⌘S" }, { commit: "ask", hint: "⌘↵" },
     ], "the popover edits with the composer's own bar");
+    const editState = await popover.evaluate((surface) => {
+      const bar = surface.querySelector(".note-pop-actions");
+      const barRect = bar.getBoundingClientRect();
+      const editor = surface.querySelector(".note-editor");
+      const editorRect = editor.getBoundingClientRect();
+      const style = getComputedStyle(editor);
+      const wrapStyle = getComputedStyle(editor.closest(".ask-input"));
+      return {
+        bar: { left: barRect.left, top: barRect.top, width: barRect.width, height: barRect.height },
+        hairline: getComputedStyle(bar).borderTopWidth,
+        bars: surface.querySelectorAll(".ask-actions, .note-pop-actions").length,
+        origin: { left: editorRect.left + parseFloat(style.paddingLeft), top: editorRect.top + parseFloat(style.paddingTop) },
+        chrome: { background: wrapStyle.backgroundColor, borderLeft: wrapStyle.borderLeftWidth, radius: wrapStyle.borderRadius },
+      };
+    });
+    const near = (a, b) => Math.abs(a - b) < 0.6;
+    assert(["left", "top", "width", "height"].every((side) => near(editState.bar[side], readState.bar[side])),
+      `read→edit must not move or resize the footer bar: ${JSON.stringify({ readState, editState })}`);
+    assert.equal(editState.hairline, "1px", "the edit footer keeps the same hairline");
+    assert.equal(editState.bars, 1, "one footer bar, never a second");
+    assert(near(editState.origin.left, readState.origin.left) && near(editState.origin.top, readState.origin.top),
+      `entering edit must not shift the text origin: ${JSON.stringify({ readState, editState })}`);
+    assert.deepEqual(editState.chrome, { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", radius: "0px" },
+      "the edit state is plain: no wash, no left rule, no radius");
     await popover.locator(".note-editor").fill("Text that Escape must throw away");
     await page.keyboard.press("Escape");
     await popover.locator(".note-pop-view").waitFor();
     assert.equal((await popover.locator(".note-pop-view").innerText()).trim(), "The first docked note",
       "Escape from the editor reverts to the note as saved");
+    const revertGlyph = await popover.evaluate((surface) => {
+      const view = surface.querySelector(".note-pop-view");
+      const range = document.createRange();
+      const first = document.createTreeWalker(view, NodeFilter.SHOW_TEXT).nextNode();
+      range.setStart(first, 0); range.setEnd(first, 1);
+      const glyph = range.getBoundingClientRect();
+      return { left: glyph.left, top: glyph.top };
+    });
+    assert(near(revertGlyph.left, readState.glyph.left) && near(revertGlyph.top, readState.glyph.top),
+      `a read→edit→read round trip must land the first glyph exactly where it was: ${JSON.stringify({ readState, revertGlyph })}`);
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
     assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("note-dot")), true,
@@ -896,19 +960,15 @@ async function verifyDockedNotes() {
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
 
-    // A note about the whole card: no selection, so the popover is the input.
+    // A note about the whole card: the card's own composer writes it. The ⋯
+    // menu carries no "Add note" of its own — one entry point, one path.
     await rootCard.locator(".node-more").click();
-    await page.click("#cm-note");
-    await popover.locator(".note-editor").waitFor();
+    assert.equal(await page.locator("#cm-note").count(), 0,
+      "the card menu offers no Add note anywhere — the card composer is the way in");
     await page.keyboard.press("Escape");
-    await popover.waitFor({ state: "hidden" });
-    assert.deepEqual((await noteIds()).length, 3, "an empty new note is discarded, never persisted");
-
-    await rootCard.locator(".node-more").click();
-    await page.click("#cm-note");
-    await popover.locator(".note-editor").waitFor();
-    await popover.locator(".note-editor").fill("A note about this whole card");
-    await popover.locator(".note-editor").press("Control+s");
+    await rootCard.locator(".nc-handle").click();
+    await rootCard.locator(".nc-inner textarea").fill("A note about this whole card");
+    await rootCard.locator('.nc-inner .ask-commit[data-commit="note"]').click();
     await page.waitForSelector(".note-dot-whole");
     const wholeId = await waitForStoredHole(page, (hole) => hole.nodes.some((node) => node.markdown === "A note about this whole card"),
       "the whole-card note to persist").then((hole) => hole.nodes.find((node) => node.markdown === "A note about this whole card").id);
@@ -970,13 +1030,14 @@ async function verifyDockedNotes() {
         edges: document.querySelectorAll(`#edges path[data-child="${id}"]`).length,
         dashed: getComputedStyle(document.querySelector(`#edges path[data-child="${id}"]`)).strokeDasharray,
         dots: root.querySelectorAll(`.note-dot[data-note="${id}"]`).length,
-        flights: document.querySelectorAll(".note-flight").length,
+        // The FLIP flight animates the real card and must leave no residue.
+        flight: (card.style.transform || "") + (card.style.opacity || "") + (card.style.willChange || ""),
         mark: root.querySelectorAll(`mark[data-child="${id}"].mark-note`).length,
       };
     }, secondId);
     assert.deepEqual({ docked: placed.docked, size: placed.size, dots: placed.dots, edges: placed.edges,
-      dashed: placed.dashed, flights: placed.flights, mark: placed.mark, rightOfParent: placed.rightOfParent },
-    { docked: false, size: { w: 420, h: 460 }, dots: 0, edges: 1, dashed: "none", flights: 0, mark: 1, rightOfParent: true },
+      dashed: placed.dashed, flight: placed.flight, mark: placed.mark, rightOfParent: placed.rightOfParent },
+    { docked: false, size: { w: 420, h: 460 }, dots: 0, edges: 1, dashed: "none", flight: "", mark: 1, rightOfParent: true },
     `the read-state place shortcut clears the flag, lands a standard-edged card near its parent, and retires the dot: ${JSON.stringify(placed)}`);
     assert.equal(await page.locator(".node").count(), cardsBefore + 1, "placing adds exactly one card");
     assert.equal(placed.markdown, "The second docked note", "placement never touches the note's words");
@@ -1871,6 +1932,46 @@ async function verifyNoteToAskConversion() {
     const followupId = await placeDockedNote(page, ".note-dot.note-dot-whole");
     const followupCard = page.locator(`.node[data-id="${followupId}"]`);
     await followupCard.locator(".doc-content", { hasText: "Follow-up note draft" }).waitFor();
+
+    // Entering edit ADDS the bar under the text — it never carves the bar out
+    // of the card: for a plain note the first line keeps its exact rect on the
+    // way in, and every line lands back where it was on the way out.
+    const measureFirstLine = (card) => {
+      const dc = card.querySelector(".doc-content");
+      const range = document.createRange();
+      const first = document.createTreeWalker(dc, NodeFilter.SHOW_TEXT).nextNode();
+      range.setStart(first, 0); range.setEnd(first, 1);
+      const glyph = range.getBoundingClientRect();
+      const rect = dc.getBoundingClientRect();
+      return { glyph: { left: glyph.left, top: glyph.top },
+        origin: { left: rect.left, top: rect.top },
+        height: card.getBoundingClientRect().height };
+    };
+    // Playwright's auto-scroll can leave the overflow-hidden canvas viewport
+    // displaced; the product owns that scroll at zero, so measure from zero.
+    await page.evaluate(() => { const viewport = document.getElementById("viewport"); viewport.scrollTop = 0; viewport.scrollLeft = 0; });
+    const restLine = await followupCard.evaluate(measureFirstLine);
+    await followupCard.locator(".doc-content").dblclick();
+    await followupCard.locator(".note-editor").waitFor();
+    const editLine = await followupCard.evaluate((card) => {
+      const editor = card.querySelector(".note-editor");
+      const rect = editor.getBoundingClientRect();
+      const style = getComputedStyle(editor);
+      return { origin: { left: rect.left + parseFloat(style.paddingLeft), top: rect.top + parseFloat(style.paddingTop) },
+        height: card.getBoundingClientRect().height,
+        bar: card.querySelector(".ask-actions").getBoundingClientRect().height };
+    });
+    const stable = (a, b) => Math.abs(a - b) < 0.6;
+    assert(stable(editLine.origin.left, restLine.origin.left) && stable(editLine.origin.top, restLine.origin.top),
+      `entering edit must keep the text column's origin: ${JSON.stringify({ restLine, editLine })}`);
+    assert(Math.abs(editLine.height - (restLine.height + editLine.bar)) < 1.5,
+      `while editing, the card grows by exactly the bar's height: ${JSON.stringify({ restLine, editLine })}`);
+    await followupCard.locator(".note-editor").press("Escape");
+    await followupCard.locator(".doc-content").waitFor();
+    const settledLine = await followupCard.evaluate(measureFirstLine);
+    assert(stable(settledLine.glyph.left, restLine.glyph.left) && stable(settledLine.glyph.top, restLine.glyph.top)
+      && Math.abs(settledLine.height - restLine.height) < 1,
+      `leaving edit must land every line back where it was: ${JSON.stringify({ restLine, settledLine })}`);
 
     const protectedNote = await createAnchoredNote("Protected note phrase", "Note with a child");
     await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));

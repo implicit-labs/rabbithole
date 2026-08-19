@@ -545,15 +545,20 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .has-draft .ask-commit { display: inline-flex; }
 .ask-actions.note-only .commit-actions::before { display: none; }
 
-/* A newly placed standalone note is the composer itself. It starts at the
-   compact note height and grows down to the ordinary card cap; the shared
-   action row remains the card's fixed footer throughout. */
-.node.note-draft .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* The flush-footer note surface, declared once for its two wearers: the
+   fresh standalone composer (.note-draft) and the editor over an existing
+   note (.note-edit-surface). The card body goes full-bleed, the text keeps
+   the body's own 14/16 inset, and the shared action row is the card's bottom
+   edge — hairline running corner to corner, rounded into them. */
+.node.note-draft .node-body, .node.note-editing .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.node.note-draft .ask-input, .note-edit-surface > .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px; }
+/* The editor is the prose it replaces — same face, same rhythm, and none of
+   the ask composer's own textarea insets — so entering it moves no word. */
+.node.note-draft .note-editor, .note-edit-surface .note-editor { max-height: none; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
+.node.note-draft .ask-actions, .note-edit-surface > .ask-actions { flex: 0 0 auto; }
 .node.note-draft .node-body > .nc-inner { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
   margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0 0 var(--radius-card) var(--radius-card);
   background: transparent; box-shadow: none; transform: none; opacity: var(--nc-op, 1); transition: none; }
-.node.note-draft .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px 8px; }
-.node.note-draft .note-editor { max-height: none; font-family: var(--font-doc); line-height: 1.72; color: var(--fg); }
 .node.note-draft .paste-attachment-strip { display: flex; flex: 0 0 auto; gap: var(--space-4); overflow-x: auto; padding: 0 var(--space-8) var(--space-4); }
 .node.note-draft .paste-attachment-strip[hidden] { display: none; }
 .paste-attachment { position: relative; flex: 0 0 auto; width: 58px; height: 50px; }
@@ -562,35 +567,25 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .paste-attachment-remove:hover { background: color-mix(in srgb, var(--accent) 12%, var(--node-head)); }
 .paste-attachment-remove:active { transform: scale(.97); }
 .paste-attachment-remove:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.node.note-draft .ask-actions { flex: 0 0 auto; }
 .node.note-draft .ask-actions .commit-actions { display: flex; }
 .node.note-draft .ask-actions .ask-commit { display: inline-flex; }
 .node.note-draft .node-composer, .node.note-draft .node-resize, .node.note-draft .node-collapse { display: none; }
 
-/* Editing an existing note is the same box as writing a new one — same bar,
-   same two words: the card body goes full-bleed, the action row is the card's
-   bottom edge — hairline running corner to corner, rounded into them — and the
-   text scrolls underneath. The resize corner stands down: a drag triangle
-   sitting on a flush footer is a handle with nothing to hold. */
-.node.note-editing .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 /* A note branched off a selection keeps its origin quote stacked above the
    editor, at the very inset the body's own padding gave it, so nothing moves on
    the double-click. Only the editor below goes flush. A quote longer than the
    card yields — scrolling inside itself — down to the editor's own floor, which
-   keeps the footer and a few lines of text on screen whatever was quoted. */
+   keeps the footer and a few lines of text on screen whatever was quoted.
+   The resize corner stands down: a drag triangle sitting on a flush footer is
+   a handle with nothing to hold. */
 .node.note-editing .node-body > :not(.note-edit-surface) { flex: 0 1 auto; min-height: 0; overflow: auto;
   margin-left: 16px; margin-right: 16px; }
 .node.note-editing .node-body > :first-child:not(.note-edit-surface) { margin-top: 14px; }
 .node.note-editing .node-resize { display: none; }
-.note-edit-surface { display: flex; flex: 1 1 auto; min-height: 96px; flex-direction: column; overflow: hidden;
+/* The surface holds its own floor — the quote above does the yielding, inside
+   its own scroll — so the footer and the text's last lines stay on screen. */
+.note-edit-surface { display: flex; flex: 1 0 auto; flex-direction: column; overflow: hidden;
   border-radius: 0 0 var(--radius-card) var(--radius-card); }
-.note-edit-surface > .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px 8px; }
-/* The editor is the rendered note, pixel for pixel — the padding belongs to the
-   wrapper, exactly as it belonged to the body, so the words never shift on the
-   double-click. That means undoing the ask composer's own textarea insets. */
-.note-edit-surface .note-editor { max-height: none; padding: 0; min-height: 1.72em;
-  font-family: var(--font-doc); line-height: 1.72; color: var(--fg); }
-.note-edit-surface > .ask-actions { flex: 0 0 auto; }
 
 /* ---------- docked notes ----------
    A note written about a card lives ON that card: the wash marks the words and
@@ -621,32 +616,20 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-pop { width: 304px; min-width: 0; }
 .note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain;
   padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
-.note-pop-edit { display: flex; flex-direction: column; overflow: hidden;
-  border-left: 2px solid var(--note-ink); border-radius: var(--radius-control); background: var(--note-hl); }
-.note-pop-edit > .ask-input { align-items: flex-start; padding: 10px 12px 6px; }
-/* The textarea is the prose it replaces, pixel for pixel — same face, same
-   rhythm — so switching states never moves a word. */
-.note-pop-edit .note-editor { max-height: 190px; padding: 0; font-family: var(--font-doc); font-size: var(--doc-size-canvas); line-height: var(--leading-doc); color: var(--fg); }
-.note-pop-edit > .ask-actions { flex: 0 0 auto; border-top: 1px solid color-mix(in srgb, var(--fg) 9%, transparent); background: none; }
-/* The read state's two verbs wear the composer's own pill — one control
-   vocabulary across every surface (see .lens, .ask-commit above). */
-.note-pop-actions { display: flex; align-items: center; gap: var(--space-1); padding-top: var(--space-3); }
-.note-pop.note-pop-editing .note-pop-actions { display: none; }
+/* The edit state is the read state with a caret: same inset, same face, same
+   rhythm — only the prose becomes a textarea, so no word ever moves. */
+.note-pop .ask-input { align-items: flex-start; padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
+.note-pop .note-editor { max-height: 190px; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
+/* One footer for both states, wearing the composer's own hairline bar (see
+   .ask-actions above), run out to the popover's edge. Read fills it with the
+   two verbs in the composer's pill; edit swaps in the Note / Ask commit pair —
+   same height, same position, nothing appears or disappears around it. */
+.note-pop .note-pop-actions { margin: 0 calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); }
+.note-pop-delete svg { display: block; }
 .note-pop-place { color: var(--note-ink); }
 /* Delete reads as ordinary text until you are on it, like every other
    destructive row in the product. */
-.note-pop-delete { margin-left: auto; }
 .note-pop-delete:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
-/* Placing a note is the one moment the note travels: a ghost of the note flies
-   from the mark it lived on to the card it becomes. */
-.note-flight { position: fixed; z-index: var(--layer-lightbox); overflow: hidden; padding: 12px 14px;
-  border: 1px solid var(--border); border-radius: var(--radius-popover); background: var(--node-bg); box-shadow: var(--shadow-popover);
-  color: var(--fg); font-family: var(--font-doc); font-size: var(--doc-size-canvas); line-height: var(--leading-doc);
-  pointer-events: none; opacity: 1; }
-.note-flight.note-flight-landing { opacity: 0.06;
-  transition: left var(--duration-slow) var(--ease-out), top var(--duration-slow) var(--ease-out),
-    width var(--duration-slow) var(--ease-out), height var(--duration-slow) var(--ease-out),
-    opacity var(--duration-fast) var(--ease-standard) var(--duration-slow); }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */

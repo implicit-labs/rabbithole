@@ -120,8 +120,7 @@ function defaultCanvasHooks(){
     // for them by hook rather than reaching into their module.
     renderDockedNotes: function(){},
     positionDockedNotes: function(){},
-    closeDockedNotePopover: function(){},
-    addDockedNote: function(){}
+    closeDockedNotePopover: function(){}
   };
 }
 
@@ -331,9 +330,6 @@ export function canConvertNote(node){
     // collapse button does.
     syncCollapseGroup(node, "cm-");
     document.getElementById("cm-rename").style.display = frozen ? "none" : "";
-    // A note about the whole card: an ephemeral draft has nothing to note about
-    // yet, and a snapshot takes no new writing.
-    document.getElementById("cm-note").style.display = frozen || closed ? "none" : "";
     document.getElementById("cm-convert").style.display = canConvertNote(node) && !!(node.md || "").trim() ? "" : "none";
     var showDelete = !frozen && node.id !== rootId;
     document.getElementById("cm-delete").style.display = showDelete ? "" : "none";
@@ -353,7 +349,6 @@ export function canConvertNote(node){
     cardMenuController.close();
     if (button.id === "cm-copy") canvasLifecycle.hooks.copyNodeMarkdown(node);
     else if (button.id === "cm-rename") startTitleEditing(node, node.titleEl);
-    else if (button.id === "cm-note") canvasLifecycle.hooks.addDockedNote(node, node.moreBtn);
     else if (button.id === "cm-convert") convertNoteToAsk(node, node.md);
     else if (button.id.indexOf("cm-collapse") === 0) runCollapseAction(node, button.id.slice(3));
     else if (button.id === "cm-delete") canvasLifecycle.hooks.removeBranch(node);
@@ -1059,9 +1054,12 @@ export function noteCommitFromEnter(e){
     scheduleEdges();
   }
   // Leaving the editor — saved, cancelled, or converted — hands the card's
-  // bottom edge back to its ordinary body padding and resize corner.
+  // bottom edge back to its ordinary body padding and resize corner, and its
+  // resting height back to layout.
   function endNoteEditingChrome(node){
-    if (node && node.el) node.el.classList.remove("note-editing");
+    if (!node || !node.el) return;
+    node.el.classList.remove("note-editing");
+    layoutNode(node);
   }
   function cancelNoteEditing(node, editor){
     var surface = node._noteEditSurface || editor;
@@ -1291,7 +1289,16 @@ export function convertNoteToAsk(node, text){
     var uploadedNames = new Set();
     var pendingPasteCount = 0;
     var pasteQueue = Promise.resolve();
-    function grow(){ autoGrowEl(editor, noteEditorCap(node, input, actions, null)); }
+    // The bar is added to the card, not carved out of the text: for the length
+    // of the edit the card's ceiling rises by the bar's own height, so every
+    // line of the note stays exactly where it was. layoutNode hands the resting
+    // height back on exit.
+    function grow(){
+      var grown = node.h + actions.offsetHeight;
+      if (node.el.style.height === "auto") node.el.style.maxHeight = grown + "px";
+      else node.el.style.height = grown + "px";
+      autoGrowEl(editor, noteEditorCap(node, input, actions, null) + actions.offsetHeight);
+    }
     function insertPastedImage(name){
       var start = editor.selectionStart;
       var end = editor.selectionEnd;

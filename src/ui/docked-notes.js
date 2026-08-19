@@ -22,7 +22,7 @@ import {
   world
 } from "./core.js";
 import { DEFAULT_CHILD, nodeOrder, placeChild as sharedPlaceChild } from "../core/layout.js";
-import { BRANCH_SELECTION, branchTypeOfNode, isDockedNote, truncate } from "../core/model.js";
+import { BRANCH_SELECTION, branchTypeOfNode, isDockedNote } from "../core/model.js";
 import {
   autoGrowEl,
   canConvertNote,
@@ -222,9 +222,10 @@ export function placeDockedNote(node, sourceRect){
   return true;
 }
 
-// The one moment a note travels. A ghost of the note leaves the mark it lived
-// on and lands on the card it became — same motion vocabulary as the reader's
-// flight, and skipped entirely when the canvas isn't the surface being watched.
+// The one moment a note travels: a FLIP on the real card. The card is created
+// at its destination, an initial transform maps it back onto the dot or dialog
+// it came from, and one composited transition carries it to identity — no
+// ghost, no per-frame layout, no second copy of the text.
 function flyNoteToCard(sourceRect, node){
   var card = node.el;
   if (!card) return;
@@ -233,27 +234,38 @@ function flyNoteToCard(sourceRect, node){
     return;
   }
   var target = card.getBoundingClientRect();
-  var ghost = document.createElement("div");
-  ghost.className = "note-flight";
-  ghost.setAttribute("aria-hidden", "true");
-  ghost.textContent = truncate(node.md || "", 220);
-  ghost.style.left = sourceRect.left + "px";
-  ghost.style.top = sourceRect.top + "px";
-  ghost.style.width = Math.max(28, sourceRect.width) + "px";
-  ghost.style.height = Math.max(18, sourceRect.height) + "px";
-  document.body.appendChild(ghost);
+  if (!target.width || !target.height){ playLandingCue(card, "flash"); return; }
+  // The card lives in the zoomed world, so screen deltas divide by the camera.
+  var scale = view.scale || 1;
+  var dx = (sourceRect.left - target.left) / scale;
+  var dy = (sourceRect.top - target.top) / scale;
+  var sx = Math.max(0.05, sourceRect.width / target.width);
+  var sy = Math.max(0.05, sourceRect.height / target.height);
+  card.style.transformOrigin = "top left";
+  card.style.transform = "translate(" + dx + "px," + dy + "px) scale(" + sx + "," + sy + ")";
+  card.style.opacity = "0.05";
+  card.style.willChange = "transform, opacity";
   var scope = dockedLifecycle.scope;
+  var settled = false;
   function settle(){
-    ghost.remove();
-    if (card.isConnected) playLandingCue(card, "flash");
+    if (settled) return;
+    settled = true;
+    card.removeEventListener("transitionend", onTransitionEnd);
+    card.style.transition = "";
+    card.style.transform = "";
+    card.style.opacity = "";
+    card.style.willChange = "";
+    card.style.transformOrigin = "";
+  }
+  function onTransitionEnd(e){
+    if (e.target === card && e.propertyName === "transform") settle();
   }
   function launch(){
-    if (!ghost.isConnected) return;
-    ghost.classList.add("note-flight-landing");
-    ghost.style.left = target.left + "px";
-    ghost.style.top = target.top + "px";
-    ghost.style.width = target.width + "px";
-    ghost.style.height = target.height + "px";
+    if (!card.isConnected){ settle(); return; }
+    card.style.transition = "transform var(--duration-slow) var(--ease-out), opacity var(--duration-slow) var(--ease-out)";
+    card.style.transform = "";
+    card.style.opacity = "";
+    card.addEventListener("transitionend", onTransitionEnd);
     if (scope) scope.timeout(settle, 520); else setTimeout(settle, 520);
   }
   if (scope) scope.raf(launch); else requestAnimationFrame(launch);
@@ -455,17 +467,10 @@ export function openDockedNote(node, trigger, state, placement){
   if (!node) return;
   openNotePopover({
     node: node,
-    parentId: node.parent_id,
     trigger: trigger || affordanceFor(node) || document.getElementById("notepop"),
     state: state === "edit" && editingAllowed() ? "edit" : "read",
     placement: placement
   });
-}
-
-/** The card ⋯ menu's "Add note": no selection exists, so the popover is the input. */
-export function addDockedNote(parent, trigger){
-  if (!parent || !editingAllowed()) return;
-  openNotePopover({ node: null, parentId: parent.id, trigger: trigger, state: "edit", placement: "bottom-end" });
 }
 
 /* A ⌘K hit on a docked note: it has no card of its own, so travel to the card
@@ -496,8 +501,8 @@ function openNotePopover(options){
   // anything anchored there, so an in-flight glide would close it on its very
   // next frame. Reaching for a note yields the glide, exactly as the ⋯ menu does.
   cancelViewAnimation();
-  popSession = { node: options.node || null, parentId: options.parentId, trigger: options.trigger,
-    state: "read", editor: null, popover: null };
+  popSession = { node: options.node, trigger: options.trigger,
+    state: "read", editor: null, popover: null, readFooter: null };
   // Visible before its contents: a textarea inside a hidden surface cannot take
   // focus, and the editor claims the caret in the same frame it appears.
   surface.classList.add("visible");
@@ -523,8 +528,11 @@ function closeNotePopover(settings){
   if (settings.commit !== false && session.state === "edit") commitEditor(session, "close");
   var surface = popEl();
   if (surface){
-    surface.classList.remove("visible", "note-pop-editing");
+    surface.classList.remove("visible");
     surface.querySelector(".note-pop-body").replaceChildren();
+    // The edit state borrowed the footer's slot for the commit pair; hand the
+    // read bar back so the next open starts from the surface's own markup.
+    if (session.readFooter) surface.querySelector(".note-pop-actions").replaceWith(session.readFooter);
   }
   if (session.popover) session.popover.close(settings);
 }
@@ -534,10 +542,15 @@ function renderPopoverState(state){
   if (!session || !surface) return;
   session.state = state;
   session.editor = null;
-  surface.classList.toggle("note-pop-editing", state === "edit");
   var body = surface.querySelector(".note-pop-body");
+  var footer = surface.querySelector(".note-pop-actions");
   if (state === "edit"){
-    body.replaceChildren(buildNoteEditor(session));
+    // One footer bar, constant geometry: the read bar lends its slot to the
+    // composer's commit pair and takes it back on the way out.
+    var editor = buildNoteEditor(session);
+    if (!session.readFooter){ session.readFooter = footer; }
+    footer.replaceWith(editor.actions);
+    body.replaceChildren(editor.input);
     // Sized and focused only once it is in the document: height needs layout
     // and focus needs a visible box.
     autoGrowEl(session.editor, 190);
@@ -545,35 +558,40 @@ function renderPopoverState(state){
     session.editor.setSelectionRange(session.editor.value.length, session.editor.value.length);
     return;
   }
+  if (session.readFooter && footer !== session.readFooter){
+    footer.replaceWith(session.readFooter);
+    footer = session.readFooter;
+  }
+  session.readFooter = null;
   var view = document.createElement("div");
   view.className = "note-pop-view";
   view.title = editingAllowed() ? "Double-click to edit" : "";
   view.tabIndex = 0;
   view.appendChild(buildDocContent(session.node, CANVAS_BASE));
   body.replaceChildren(view);
-  var placeable = editingAllowed() && isDockedNote(session.node);
-  surface.querySelector(".note-pop-place").style.display = placeable ? "" : "none";
-  surface.querySelector(".note-pop-delete").style.display = editingAllowed() ? "" : "none";
+  // A snapshot reads and nothing more — the whole bar stands down with its verbs.
+  footer.style.display = editingAllowed() ? "" : "none";
+  surface.querySelector(".note-pop-place").style.display = isDockedNote(session.node) ? "" : "none";
 }
 
-/* The edit state is the composer's own bar — the same Note / Ask pair, the same
-   keys — because a note being written for the first time and a note being
-   rewritten are the same act. */
+/* The edit state is the read state with a caret — same inset, same face — and
+   the composer's own bar: the same Note / Ask pair, the same keys, because a
+   note being written for the first time and a note being rewritten are the
+   same act. */
 function buildNoteEditor(session){
-  var wrap = document.createElement("div");
-  wrap.className = "note-pop-edit has-draft";
   var input = document.createElement("div");
   input.className = "ask-input";
   var editor = document.createElement("textarea");
   editor.className = "note-editor md";
   editor.rows = 1;
   editor.spellcheck = true;
-  editor.setAttribute("aria-label", session.node ? "Edit note" : "Write a note");
-  editor.value = session.node ? (session.node.md || "") : "";
+  editor.setAttribute("aria-label", "Edit note");
+  editor.value = session.node.md || "";
   // The editor is the prose it replaces, including whatever the reading-size
   // preference and the note's own scale make that prose.
-  editor.style.fontSize = fontPx(CANVAS_BASE, session.node ? session.node.font_scale : 1) + "px";
+  editor.style.fontSize = fontPx(CANVAS_BASE, session.node.font_scale) + "px";
   var actions = noteComposerActions();
+  actions.classList.add("note-pop-actions", "has-draft");
   // A note that cannot become an ask keeps the bar with Note alone — one
   // button, so no divider down the middle.
   if (!canAskFromNote(session)){
@@ -581,7 +599,6 @@ function buildNoteEditor(session){
     actions.classList.add("note-only");
   }
   input.appendChild(editor);
-  wrap.append(input, actions);
   session.editor = editor;
   function syncCommits(){
     var disabled = !editor.value.trim();
@@ -597,14 +614,13 @@ function buildNoteEditor(session){
     onCommit: function(kind, e){ e.stopPropagation(); commitEditor(popSession, kind); },
     onLens: function(){} });
   syncCommits();
-  return wrap;
+  return { input: input, actions: actions };
 }
 
 /* Asking from a docked note is one motion: the note gains a place and then
    becomes the question, so the answer has something to hang from. */
 function canAskFromNote(session){
-  if (!editingAllowed()) return false;
-  return session.node ? canConvertNote(session.node) : true;
+  return editingAllowed() && canConvertNote(session.node);
 }
 
 function commitEditor(session, kind){
@@ -612,26 +628,11 @@ function commitEditor(session, kind){
   var text = session.editor.value.trim();
   var node = session.node;
   if (!text){
-    // An empty note is no note: a brand-new one is discarded, an existing one
-    // keeps the words it already had.
-    if (!node) closeNotePopover({ commit: false });
-    else if (kind !== "close") renderPopoverState("read");
+    // An empty note is no note: the note keeps the words it already had.
+    if (kind !== "close") renderPopoverState("read");
     return;
   }
-  if (!node && kind === "note-window"){
-    var sourceRect = session.trigger && session.trigger.getBoundingClientRect
-      ? session.trigger.getBoundingClientRect() : null;
-    node = createPlacedNote(nodes[session.parentId], text, { sourceRect: sourceRect });
-    if (!node) return;
-    session.node = node;
-    closeNotePopover({ restoreFocus: false, commit: false });
-    return;
-  }
-  if (!node){
-    node = createDockedNote(nodes[session.parentId], text);
-    if (!node) return;
-    session.node = node;
-  } else if (text !== (node.md || "")){
+  if (text !== (node.md || "")){
     node.md = text;
     refreshNodeHtml(node);
     persistNoteText(node);
@@ -649,11 +650,11 @@ function commitEditor(session, kind){
     session.state = "read";
     return;
   }
-  // Saving returns to the read state — you see what you wrote — anchored on the
-  // affordance the note now has (a brand-new note has just grown its dot).
-  var trigger = affordanceFor(node) || session.trigger;
-  closeNotePopover({ restoreFocus: false, commit: false });
-  openDockedNote(node, trigger, "read");
+  // Saving re-renders in place to the read state — you see what you wrote,
+  // in the same dialog, with nothing torn down to blink or jump.
+  renderPopoverState("read");
+  if (session.popover) session.popover.update();
+  focusPopover();
 }
 
 function persistNoteText(node){
@@ -721,11 +722,10 @@ function onPopoverDblClick(event){
 }
 
 /* Escape gives back one level at a time: an edit reverts to the note as saved,
-   the read state closes the dialog. A brand-new note has no saved state to
-   revert to, so its first Escape discards it whole. */
+   the read state closes the dialog. */
 function onPopoverEscape(){
   if (!popSession) return;
-  if (popSession.state === "edit" && popSession.node){
+  if (popSession.state === "edit"){
     renderPopoverState("read");
     focusPopover();
     return;
