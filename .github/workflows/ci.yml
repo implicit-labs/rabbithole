@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 # A newer push to the same ref supersedes in-flight verification; the newer
@@ -11,10 +12,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # Node-only gates plus the production build artifact deploy-pages consumes.
+  checks:
     runs-on: ubuntu-latest
-    # Observed p95 ~15m (dominated by cold Playwright downloads); 2x headroom.
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,11 +25,70 @@ jobs:
       - run: npm ci
       # CI is the only net for check:types; local `npm test` does not run it.
       - run: npm run check:types
+      - run: npm run build
+      - run: npm run check:dist
+      - run: npm run check:purity
+      - run: npm run test:unit
+      # Build the deployable site once here so deploy-pages.yml can download
+      # the exact verified bytes instead of rebuilding them.
+      - name: Build the production site for deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npm run build:publish
+      - name: Upload the production site artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish
+          path: publish
+          retention-days: 3
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
-      # Browser binaries are keyed on the Playwright version; on a hit only the
-      # OS libraries (--with-deps' apt half) still need installing.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      # Chromium's OS libraries are preinstalled on the runner image, so no
+      # install-deps here — only the browser binary on a cache miss.
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      - run: npm run build
+      # Contracts ride here, not in checks: compatibility-security launches
+      # chromium, and this is the lightest job that already installs it.
+      - run: npm run test:contracts
+      - run: npm run test:integration
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
@@ -37,24 +97,68 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium firefox webkit
-      - name: Install Playwright OS dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium firefox webkit
+        run: npx playwright install chromium firefox webkit
+      # Only firefox/webkit need apt OS libraries (chromium's are preinstalled),
+      # and only the shards whose bin actually launches those browsers pay for
+      # them. The shard script owns the bin assignment, so ask it.
+      - name: Determine whether this shard needs browser OS dependencies
+        id: needs-deps
+        run: echo "value=$(node test/support/e2e-shard.mjs --needs-deps ${{ matrix.shard }} 3)" >> "$GITHUB_OUTPUT"
+      # The default Ubuntu mirrors can stall apt indefinitely; cap every
+      # transfer and the whole step so a bad mirror costs minutes, not a run.
+      - name: Install firefox/webkit OS dependencies
+        if: steps.needs-deps.outputs.value == 'true'
+        timeout-minutes: 4
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99ci-timeouts >/dev/null <<'EOF'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          EOF
+          for i in 1 2; do
+            if npx playwright install-deps firefox webkit; then
+              break
+            fi
+            if [ "$i" = 2 ]; then
+              exit 1
+            fi
+            sleep 5
+          done
       - run: npm run build
-      - run: npm run check:dist
-      - run: npm run check:purity
-      # Full hermetic suite; deploy-pages.yml reuses this verdict per SHA
-      # instead of re-running it. test:performance runs inside this serial
-      # chain, so no other test load shares the runner while it gauges.
-      - run: npm test
+      - run: node test/support/e2e-shard.mjs ${{ matrix.shard }} 3
+
+  # Isolated so the budget gauges never share a runner with other browser jobs.
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      - run: npm run build
+      - run: npm run test:performance
 
   packaging:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       matrix:
-        node-version: ["18.x", "20.x"]
+        node-version: ["18.x", "20.x", "22.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

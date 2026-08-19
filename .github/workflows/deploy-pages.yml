@@ -1,8 +1,8 @@
 name: Deploy Cloudflare Pages
 
 # Deploys only a SHA the CI workflow has fully verified (check:types, build
-# checks, complete `npm test`, packaging matrix). The suite is not re-run
-# here; CI's success for the exact head SHA is the gate.
+# checks, the full parallel test suite, packaging matrix). The suite is not
+# re-run here; CI's success for the exact head SHA is the gate.
 on:
   workflow_run:
     workflows: [CI]
@@ -70,16 +70,32 @@ jobs:
             exit 1
           fi
 
+      # CI already built publish/ from this exact SHA and uploaded it; deploy
+      # the verified bytes instead of rebuilding them here.
+      - name: Download the verified production build from CI
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: publish
+          path: publish
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Manual dispatch has no CI artifact handle, so it rebuilds from the
+      # verified SHA it checked out above.
       - name: Set up Node.js
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: github.event_name == 'workflow_dispatch'
         run: npm ci
 
       - name: Build the production site
+        if: github.event_name == 'workflow_dispatch'
         run: npm run build:publish
 
       - name: Deploy the verified commit to Cloudflare Pages
