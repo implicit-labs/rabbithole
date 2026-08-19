@@ -608,10 +608,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* The button's own border box never moves and never scales: it is the anchor
    the note dialog is pinned to, and getBoundingClientRect includes transforms,
    so the hover grow lives on the ::after that carries the ink instead. */
-.note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0;
+.note-dot { position: absolute; right: 0; width: 7px; height: 7px; padding: 0; border: 0;
   background: none; cursor: pointer; pointer-events: auto; }
 .note-dots-reader .note-dot { right: auto; left: 12px; }
-.note-dots-inside .note-dot { left: auto; right: 4px; }
+.note-dots-inside .note-dot { left: auto; right: 0; }
 /* 7px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
 .note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
 .note-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
