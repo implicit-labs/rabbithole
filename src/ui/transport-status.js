@@ -459,10 +459,9 @@ function handleServer(msg){
   // ===========================================================================
   var bannerKey = null;
   var bannerDismissed = {};
-  function setBanner(key, warn, title, msg){
+  function setBanner(key, title, msg){
     bannerKey = key;
     if (bannerDismissed[key]){ bannerNotice.hide(); return; }
-    document.getElementById("banner").classList.toggle("warn", !!warn);
     bannerNotice.show({ title: title, message: msg, onDismiss: function(){
       if (bannerKey) bannerDismissed[bannerKey] = true;
     } });
@@ -486,20 +485,20 @@ export function refreshStatus(){
       clearBanner(); // a snapshot needs no liveness story — the copy explains itself
     } else if (phase === "closed"){
       if (closedReason === "done")
-        setBanner("done", false, "Session ended", "This Rabbithole is saved. Reopen it from your terminal any time to keep exploring." + savedNote);
+        setBanner("done", "Session ended", "This Rabbithole is saved. Reopen it from your terminal any time to keep exploring." + savedNote);
       else if (closedReason === "superseded")
-        setBanner("superseded", false, "Reopened elsewhere", "This Rabbithole was just reopened in another tab — continue there. This view is now read-only.");
+        setBanner("superseded", "Reopened elsewhere", "This Rabbithole was just reopened in another tab — continue there. This view is now read-only.");
       else if (closedReason === "timeout")
-        setBanner("timeout", true, "Session timed out", "Everything is saved. Reopen this Rabbithole from your terminal to continue." + savedNote);
+        setBanner("timeout", "Session timed out", "Everything is saved. Reopen this Rabbithole from your terminal to continue." + savedNote);
       else
-        setBanner("closed", true, "The agent has left", "Everything answered so far is saved. Reopen this Rabbithole from your terminal to keep exploring." + savedNote);
+        setBanner("closed", "The agent has left", "Everything answered so far is saved. Reopen this Rabbithole from your terminal to keep exploring." + savedNote);
     } else if (phase === "away"){
       if (connLost)
-        setBanner("connlost", true, "Connection lost", "Can't reach the agent session — it may have exited. Your Rabbithole is saved; reopen it from your terminal to continue.");
+        setBanner("connlost", "Connection lost", "Can't reach the agent session — it may have exited. Your Rabbithole is saved; reopen it from your terminal to continue.");
       else if (agentReason === "stalled")
-        setBanner("stalled", true, "The agent went quiet", "No response for a while — it may have stopped. You can keep asking: questions are saved and answered when the agent returns.");
+        setBanner("stalled", "The agent went quiet", "No response for a while — it may have stopped. You can keep asking: questions are saved and answered when the agent returns.");
       else
-        setBanner("cancelled", true, "The agent stopped listening", "The tool call was cancelled. You can keep asking — questions are saved and answered when the agent picks this hole back up.");
+        setBanner("cancelled", "The agent stopped listening", "The tool call was cancelled. You can keep asking — questions are saved and answered when the agent picks this hole back up.");
     } else {
       clearBanner();
       bannerDismissed = {};

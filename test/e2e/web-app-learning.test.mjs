@@ -19,6 +19,7 @@ const app = await bootWebApp();
 const { browser, baseUrl } = app;
 try {
   await verifyNoticePrimitive();
+  await verifyBannerGlass();
   await verifyStatefulCheckCycle();
   await verifyBranchContentSizing();
   await verifySharedCanvasDialogs();
@@ -74,6 +75,58 @@ async function verifyBranchContentSizing() {
 
   await context.close();
   console.log("ok web app: branch cards hug short content and cap long content at the saved height");
+}
+
+async function verifyBannerGlass() {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.keyboard.press("Escape");
+  await createDocument(page, "# Banner surface\n\nStatus notices wear the toast's glass.");
+
+  const hidden = await page.evaluate(() => {
+    const style = getComputedStyle(document.getElementById("banner"));
+    return { display: style.display, opacity: style.opacity, pointerEvents: style.pointerEvents,
+      borderLeft: style.borderLeftWidth, borderRight: style.borderRightWidth };
+  });
+  assert.equal(hidden.display, "flex", "the banner stays in layout so opacity can animate it");
+  assert.equal(hidden.opacity, "0", "a hidden banner is fully transparent");
+  assert.equal(hidden.pointerEvents, "none", "a hidden banner must not intercept clicks");
+  assert.equal(hidden.borderLeft, hidden.borderRight, "the accent line is gone: the border is uniform");
+
+  await page.evaluate(() => {
+    document.getElementById("banner-title").textContent = "The agent has left";
+    document.getElementById("banner-msg").textContent = "Everything answered so far is saved.";
+    document.getElementById("banner").classList.add("visible");
+  });
+  await page.waitForFunction(() => getComputedStyle(document.getElementById("banner")).opacity === "1");
+  const visible = await page.evaluate(() => {
+    const banner = document.getElementById("banner");
+    const snapshot = () => {
+      const style = getComputedStyle(banner);
+      const all = {};
+      for (const prop of style) all[prop] = style.getPropertyValue(prop);
+      return JSON.stringify(all);
+    };
+    const plain = snapshot();
+    banner.classList.add("warn");
+    const warned = snapshot();
+    banner.classList.remove("warn");
+    const style = getComputedStyle(banner);
+    const x = document.getElementById("banner-x");
+    return { pointerEvents: style.pointerEvents,
+      backdrop: style.backdropFilter || style.webkitBackdropFilter || "none",
+      radius: style.borderRadius, warnInert: plain === warned,
+      xAria: x.getAttribute("aria-label"), xRadius: getComputedStyle(x).borderRadius };
+  });
+  assert.equal(visible.pointerEvents, "auto", "a visible banner takes pointer events");
+  assert.notEqual(visible.backdrop, "none", "the banner wears the popover glass blur");
+  assert.equal(visible.radius, "12px", "popover radius, not the pill");
+  assert.equal(visible.warnInert, true, "the retired .warn class must not change any computed style");
+  assert.equal(visible.xAria, "Dismiss banner", "the dismiss button keeps its aria label");
+  assert.equal(visible.xRadius, "999px", "the dismiss button adopts the quiet pill idiom");
+  await context.close();
+  console.log("ok web app: the status banner wears the undo toast's glass with no accent line");
 }
 
 async function verifyStatefulCheckCycle() {

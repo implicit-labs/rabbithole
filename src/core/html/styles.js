@@ -185,8 +185,8 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
   .math-pending::after, .viz-pending::after { animation: none; }
   .rh-lightbox, .rh-lightbox-viewport { animation: none; }
   .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .tool-icon,
-  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, .anchored-menu, #branch-undo { transition: none !important; }
-  #ask, .anchored-menu, #branch-undo, .node.node-enter { transform: none; }
+  .node${""}::after, .node.node-enter, .nc-handle, .nc-inner, #ask, .anchored-menu, #branch-undo, #banner { transition: none !important; }
+  #ask, .anchored-menu, #branch-undo, #banner, .node.node-enter { transform: none; }
   .node.node-enter { opacity: 1; }
 }
 
@@ -852,12 +852,22 @@ body.frozen.session-over .ll-frozen { display: inline; }
 .ll-frozen { display: none; color: var(--fg-faint); font-weight: 500; }
 
 /* ---------- status banner + hint ---------- */
-#banner { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 95; display: none; align-items: flex-start; gap: 10px; max-width: min(560px, 92vw); background: var(--bar-bg); border: 1px solid var(--border); border-left: 3px solid var(--fg-faint); border-radius: 10px; padding: 10px 12px 10px 14px; box-shadow: var(--shadow); font-size: 12.5px; line-height: 1.55; color: var(--fg); }
-#banner.visible { display: flex; }
-#banner.warn { border-left-color: var(--warn); }
-#banner .banner-title { font-weight: 600; color: var(--fg-bold); display: block; margin-bottom: 1px; }
-#banner-x { background: none; border: none; color: var(--fg-faint); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px; flex-shrink: 0; }
-#banner-x:hover { color: var(--fg-bold); }
+/* The undo toast's twin at the top edge: same glass surface, same layout-based
+   centering (auto margins keep transform free for motion). It drops down into
+   place — the mirror of the toast rising from the bottom. */
+#banner { position: fixed; z-index: var(--layer-toast); inset-inline: 0; top: 52px; margin-inline: auto; width: fit-content;
+  display: flex; align-items: flex-start; gap: 10px; max-width: min(560px, 92vw);
+  padding: 10px 12px 10px 14px; border: var(--surface-popover-border); border-radius: var(--radius-popover);
+  background: var(--surface-popover-bg); -webkit-backdrop-filter: var(--surface-popover-blur); backdrop-filter: var(--surface-popover-blur);
+  color: var(--fg); box-shadow: var(--shadow-popover); font: var(--text-ui)/var(--leading-ui) var(--font-ui);
+  opacity: 0; pointer-events: none; transform: translateY(-6px);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
+#banner.visible { opacity: 1; pointer-events: auto; transform: translateY(0); transition-duration: var(--duration-enter); }
+#banner .banner-title { font-weight: var(--weight-semibold); color: var(--fg-bold); display: block; margin-bottom: 1px; }
+#banner-x { background: none; border: none; color: var(--fg-faint); cursor: pointer; font-size: 14px; line-height: 1;
+  padding: 3px 7px; border-radius: var(--radius-pill); flex-shrink: 0; transition: var(--transition-color); }
+#banner-x:hover { color: var(--fg-bold); background: color-mix(in srgb, var(--fg) 10%, transparent); }
+#banner-x:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
 /* #hint carries transient feedback only ("that ask was undone…") — there is no
    persistent instruction bar; the UI has to explain itself. */
