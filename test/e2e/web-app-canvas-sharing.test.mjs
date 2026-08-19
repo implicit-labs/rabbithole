@@ -1183,7 +1183,8 @@ async function verifyDockedNoteTextGeometry() {
       "",
       "Amber bicycles cross deliberate gardens while patient readers follow every branching sentence through quiet graphite margins without surrendering the generous measure of surrounding document canvas precise overlay.",
     ].join("\n"));
-
+    assert.equal(await page.locator(".node.root .node-body").evaluate((body) => getComputedStyle(body).paddingRight), "12px",
+      "document text should use the card measure up to the dot lane");
     const cardBefore = await measureTextGeometry(page, ".node.root .node-body", "surrounding document canvas Amber");
     await selectText(page, "surrendering");
     await page.waitForSelector("#ask.visible");

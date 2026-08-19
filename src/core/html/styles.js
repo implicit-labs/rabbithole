@@ -368,6 +368,9 @@ body.mode-flight #viewport { display: block; }
    padding box — inside the card, scrolling with the words they mark. */
 .node-body { position: relative; padding: 14px 16px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain;
   touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+/* Document prose uses the full card measure up to the dot's 11px ink lane
+   (4px inset + 7px dot), with one pixel of clearance. */
+.node:not(.node-note) > .node-body:not(.pdf-body) { padding-right: var(--space-6); }
 .note-editor { appearance: none; display: block; box-sizing: border-box; width: 100%; min-height: 1.72em; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0; background: transparent; box-shadow: none; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
 .node-resize:hover { opacity: 1; }
@@ -608,10 +611,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* The button's own border box never moves and never scales: it is the anchor
    the note dialog is pinned to, and getBoundingClientRect includes transforms,
    so the hover grow lives on the ::after that carries the ink instead. */
-.note-dot { position: absolute; right: 0; width: 7px; height: 7px; padding: 0; border: 0;
+.note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0;
   background: none; cursor: pointer; pointer-events: auto; }
 .note-dots-reader .note-dot { right: auto; left: 12px; }
-.note-dots-inside .note-dot { left: auto; right: 0; }
+.note-dots-inside .note-dot { left: auto; right: 4px; }
 /* 7px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
 .note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
 .note-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
