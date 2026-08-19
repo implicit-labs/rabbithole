@@ -9,6 +9,7 @@ import { toPersistedHole } from "../../core/schema.js";
 import { parseRequestBody } from "./http.js";
 import { writeSseEvent } from "./sse.js";
 import { buildSessionExportHtml } from "./session-export.js";
+import { log } from "../logger.js";
 
 const require = createRequire(import.meta.url);
 const pdfPackageRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
@@ -97,14 +98,14 @@ export async function handleSessionRequest(session, req, res) {
     for (const event of session.outboundEvents) {
       if (event.id > after) writeSseEvent(res, event);
     }
+    const reconnecting = session.everConnected && session.sseClients.size === 0;
     session.everConnected = true;
-    session.clearDisconnectClose();
     session.sseClients.add(res);
+    log(`Session ${session.id} SSE ${reconnecting ? "reconnected" : "connected"} (${session.sseClients.size} client${session.sseClients.size === 1 ? "" : "s"})`);
     req.on("close", () => {
-      session.sseClients.delete(res);
-      // If the browser is gone (tab closed) and doesn't reconnect within the
-      // grace window, close the session instead of blocking until timeout.
-      if (session.everConnected && session.sseClients.size === 0) session.scheduleDisconnectClose();
+      if (session.sseClients.delete(res)) {
+        log(`Session ${session.id} SSE disconnected (${session.sseClients.size} client${session.sseClients.size === 1 ? "" : "s"} remaining)`);
+      }
     });
     return;
   }

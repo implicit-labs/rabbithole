@@ -221,7 +221,7 @@ async function runSessionLifecycleFixture() {
     });
     session.queue.length = 0;
     let upgradeNode = session.nodes.get(upgradeAsk.node_id);
-    session.pushEvent({ status: "session_closed", session_id: session.id });
+    session.pushEvent({ status: "session_closed", session_id: session.id, reason: "base_url_test_event" });
     const next = await session.answerBranch({
       requestId: upgradeAsk.request_id,
       title: "Fetched Child",
@@ -229,6 +229,7 @@ async function runSessionLifecycleFixture() {
     });
     upgradeNode = session.nodes.get(upgradeAsk.node_id);
     assert.equal(next.status, "session_closed");
+    assert.equal(next.reason, "base_url_test_event");
     assert.equal(upgradeNode.base_url, "https://other.example/articles/page.md");
     assert.equal(upgradeNode.base_url_source, "frontmatter");
     const upgradeHtml = await renderMarkdownToHtml(upgradeNode.markdown, { baseUrl: upgradeNode.base_url });

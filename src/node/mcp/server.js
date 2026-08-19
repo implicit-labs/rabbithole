@@ -37,7 +37,7 @@ const server = new McpServer(
       "Entries with on_lineage: true are in the direct thread of the question (usually the note the human is replying to) — treat them as the document under discussion.",
       "Other entries are the human's ambient margin notes — context to weigh, never questions to answer.",
       "Anchored notes reference the marked text in on_selected_text.",
-      "A session_closed result may include 'notes' — the human's notes at close (e.g. margin feedback left before hitting Done); review them before wrapping up.",
+      "A session_closed result includes its close reason and may include 'notes' — the human's notes at close (e.g. margin feedback left before hitting Done); review them before wrapping up.",
       "When a branch_request includes region.image_path, it is the new selection clip or immediate parent's clip.",
       "Read that image before answering and trust it",
       "over extracted text for math, tables, and figures. The region page number is included alongside it.",

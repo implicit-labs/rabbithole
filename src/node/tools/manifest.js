@@ -95,7 +95,7 @@ export const toolDefinitions = [
       "nothing is lost and asks are saved. A status='already_listening' result means another live " +
       "background call owns delivery; do not call again. When the human explicitly asks to reopen or " +
       "show the canvas, resume with { hole_id, focus: true }. " +
-      "It returns status='session_closed' when the human clicks Done or closes the tab.",
+      "It returns status='session_closed' with a reason when the human clicks Done or the session otherwise ends.",
     input: obj({
       title: str("Document title (required for a new hole)", { optional: true, maxLength: 2000 }),
       content: str("Raw markdown for the starting document", { optional: true, maxLength: 10485760 }),

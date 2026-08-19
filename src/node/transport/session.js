@@ -20,13 +20,6 @@ import { unavailableContextUsage } from "../context/usage.js";
 
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SAVE_DEBOUNCE_MS = 400;
-// Once the browser has connected at least once, treat a sustained loss of every
-// SSE client as the human having closed the tab — close after a grace window.
-// Kept generous so a reload, a network blip, or a laptop sleep/wake (all of
-// which EventSource recovers from automatically) never kills a live session the
-// human is still reading; the only cost of waiting is that the already-blocking
-// agent call releases a little later after a genuine tab close.
-const DISCONNECT_GRACE_MS = 60 * 1000;
 // Cap on retained SSE events for reconnect replay, so a long-lived session
 // doesn't grow this array without bound.
 const MAX_REPLAY_EVENTS = 500;
@@ -115,6 +108,7 @@ export class RabbitHoleSession {
     this.server = null;
     this.url = null;
     this.closed = false;
+    this.closeReason = null;
     this.closePromise = null;
 
     this.queue = []; // agent-facing events awaiting consumption
@@ -133,7 +127,6 @@ export class RabbitHoleSession {
 
     this.sseClients = new Set();
     this.everConnected = false;
-    this.disconnectTimer = null;
     this.outboundEvents = [];
     this.lastOutboundEventId = 0;
     this.contextUsage = unavailableContextUsage();
@@ -210,26 +203,6 @@ export class RabbitHoleSession {
     }, SESSION_TIMEOUT_MS);
   }
 
-  // Close the session a short while after the browser disconnects (tab closed),
-  // unless it reconnects (reload) within the grace window.
-  scheduleDisconnectClose() {
-    if (this.closed || this.disconnectTimer) return;
-    this.disconnectTimer = setTimeout(() => {
-      this.disconnectTimer = null;
-      if (!this.closed && this.sseClients.size === 0) {
-        log(`Session ${this.id} closing — browser disconnected`);
-        this.close("disconnected");
-      }
-    }, DISCONNECT_GRACE_MS);
-  }
-
-  clearDisconnectClose() {
-    if (this.disconnectTimer) {
-      clearTimeout(this.disconnectTimer);
-      this.disconnectTimer = null;
-    }
-  }
-
   close(reason = "session_closed") {
     if (this.closed) return this.closePromise;
     for (const request of this.convertRequests.values()) if (request.markdown) this.restoreNodeConversion(request.node_id);
@@ -238,6 +211,7 @@ export class RabbitHoleSession {
     for (const filePath of this.regionFiles.values()) fs.unlink(filePath).catch(() => {});
     this.regionFiles.clear();
     this.closed = true;
+    this.closeReason = reason;
     this.onContextClose?.(this);
     this.contextBusy = false;
     if (this.contextBroadcastTimer) {
@@ -249,7 +223,6 @@ export class RabbitHoleSession {
       this.timeoutHandle = null;
     }
     this.clearAnswerWatchdog();
-    this.clearDisconnectClose();
     this.closePromise = this.flushSave();
 
     this.broadcast({ type: "session_closed", reason });
@@ -263,7 +236,7 @@ export class RabbitHoleSession {
     this.waiter = null;
     if (waiter) {
       waiter.cleanup?.();
-      waiter.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id }));
+      waiter.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id, reason }));
     }
 
     if (this.shutdownScheduled) return this.closePromise;
@@ -300,7 +273,9 @@ export class RabbitHoleSession {
    * pending asks stop pretending an answer is coming.
    */
   waitForEvent(signal) {
-    if (this.closed) return Promise.resolve(this.deliverToAgent({ status: "session_closed", session_id: this.id }));
+    if (this.closed) return Promise.resolve(this.deliverToAgent({
+      status: "session_closed", session_id: this.id, reason: this.closeReason,
+    }));
     this.touch();
     this.setContextBusy(false);
     this.markAgentAttached();

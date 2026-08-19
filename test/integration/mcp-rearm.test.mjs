@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +11,7 @@ const { openRabbithole, answerBranch } = await import("../../src/node/rabbithole
 const { closeAllSessions, getSession } = await import("../../src/node/sessions.js");
 const { defaultFsStore } = await import("../../src/node/fs-store.js");
 const { toolDefinitions } = await import("../../src/node/tools/manifest.js");
+const { RabbitHoleSession } = await import("../../src/node/transport/session.js");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,6 +44,129 @@ function rootNode(id = "root") {
     read: true,
     created_at: new Date().toISOString(),
   };
+}
+
+function useFakeTimeouts() {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers = new Map();
+  let now = 0;
+  let nextId = 1;
+
+  globalThis.setTimeout = (callback, delay = 0, ...args) => {
+    const id = nextId++;
+    timers.set(id, { at: now + Number(delay), callback: () => callback(...args) });
+    return id;
+  };
+  globalThis.clearTimeout = (id) => timers.delete(id);
+
+  return {
+    advance(ms) {
+      const target = now + ms;
+      while (true) {
+        const due = [...timers].filter(([, timer]) => timer.at <= target)
+          .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!due) break;
+        const [id, timer] = due;
+        timers.delete(id);
+        now = timer.at;
+        timer.callback();
+      }
+      now = target;
+    },
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+  };
+}
+
+class FakeSseRequest extends EventEmitter {
+  constructor(url = "/sse") {
+    super();
+    this.method = "GET";
+    this.url = url;
+    this.headers = {};
+  }
+}
+
+class FakeSseResponse {
+  constructor() {
+    this.chunks = [];
+  }
+
+  writeHead(status, headers) {
+    this.status = status;
+    this.headers = headers;
+  }
+
+  write(chunk) {
+    this.chunks.push(String(chunk));
+    return true;
+  }
+
+  end() {}
+}
+
+async function runTransientSseReconnectFixture() {
+  const fakeTimeouts = useFakeTimeouts();
+  let session;
+  let firstRequest;
+  let reconnectRequest;
+  try {
+    session = new RabbitHoleSession({
+      holeId: "transient-sse-reconnect",
+      title: "Transient SSE Reconnect",
+      rootId: "root",
+      nodes: [rootNode()],
+      isResume: false,
+      renderPage: () => "",
+    });
+    session.url = "http://127.0.0.1";
+
+    let waiterSettled = false;
+    const durableWaiter = session.waitForEvent().then((event) => {
+      waiterSettled = true;
+      return event;
+    });
+    firstRequest = new FakeSseRequest();
+    const firstResponse = new FakeSseResponse();
+    await session.handleRequest(firstRequest, firstResponse);
+    assert.equal(firstResponse.status, 200);
+    assert.equal(session.sseClients.size, 1);
+
+    firstRequest.emit("close");
+    assert.equal(session.sseClients.size, 0, "losing the last SSE client marks the browser disconnected");
+    fakeTimeouts.advance(60_001);
+    await Promise.resolve();
+    assert.equal(session.closed, false, "SSE loss must not close the session after the former grace window");
+    assert.equal(waiterSettled, false, "SSE loss must not resolve the durable agent waiter");
+
+    reconnectRequest = new FakeSseRequest("/sse?after=0");
+    const reconnectResponse = new FakeSseResponse();
+    await session.handleRequest(reconnectRequest, reconnectResponse);
+    session.broadcast({ type: "agent_status", attached: true, reason: "reconnect_test" });
+    assert.match(reconnectResponse.chunks.join(""), /"type":"agent_status"/, "a reconnected SSE client receives later events");
+
+    await session.handleBrowserEvent({
+      type: "branch_request",
+      parent_id: session.rootId,
+      request_id: "request-after-reconnect",
+      node_id: "node-after-reconnect",
+      selected_text: "Root",
+      question: "Does delivery survive the reconnect?",
+    });
+    const delivered = await durableWaiter;
+    assert.equal(delivered.status, "branch_request");
+    assert.equal(delivered.request_id, "request-after-reconnect");
+  } finally {
+    firstRequest?.emit("close");
+    reconnectRequest?.emit("close");
+    fakeTimeouts.restore();
+    await session?.close("sse_reconnect_test_complete");
+  }
+
+  console.log("ok SSE reconnect: transient loss stays live past 60s and preserves bidirectional delivery");
 }
 
 async function runZeroIdleTurnsAndSingleListenerFixture() {
@@ -454,6 +579,7 @@ async function runDoneNotesDeliveryFixture() {
   assert.deepEqual(await blocked, {
     status: "session_closed",
     session_id: session.id,
+    reason: "done",
     notes: [
       noteEntry(session, "done-standalone-note", "Check the conclusion too."),
       noteEntry(session, "done-anchored-note", "Tighten this paragraph.", { on_node_id: session.rootId, on_selected_text: "feedback target" }),
@@ -466,6 +592,7 @@ async function runDoneNotesDeliveryFixture() {
 }
 
 try {
+  await runTransientSseReconnectFixture();
   await runZeroIdleTurnsAndSingleListenerFixture();
   await runOrphanedWaiterRecoveryFixture();
   await runProgressKeepaliveFixture();

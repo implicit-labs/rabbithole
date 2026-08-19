@@ -73,8 +73,8 @@ function assertBranchRequestShape(result, session, requestId, nodeId) {
   assert.deepEqual(result.lineage, ["Markdown Wire Root"]);
 }
 
-function assertSessionClosedShape(result, sessionId) {
-  assert.deepEqual(result, { status: "session_closed", session_id: sessionId });
+function assertSessionClosedShape(result, sessionId, reason) {
+  assert.deepEqual(result, { status: "session_closed", session_id: sessionId, reason });
 }
 
 async function postEvent(session, payload) {
@@ -158,7 +158,7 @@ async function runEmptySessionClosedFixture() {
   assert(session);
   await session.close("empty_close_wire_done");
   const closed = await session.waitForEvent();
-  assertSessionClosedShape(closed, session.id);
+  assertSessionClosedShape(closed, session.id, "empty_close_wire_done");
   assert.equal(Object.hasOwn(closed, "notes"), false, "an empty session_closed result must omit notes");
   console.log("ok MCP markdown wire: empty session_closed omits notes");
 }
@@ -451,10 +451,15 @@ async function runMarkdownWireFixture() {
   assert.deepEqual(closedWithNotes, {
     status: "session_closed",
     session_id: session.id,
+    reason: "markdown_wire_done",
     notes: [standaloneNoteEntry, anchoredNoteEntry],
   }, "a blocked agent call receives all hole notes on session_closed without lineage flags");
   assert.deepEqual(await session.waitForEvent(), closedWithNotes, "post-close waitForEvent uses the same notes-enriched delivery seam");
-  assertSessionClosedShape(await answerBranch({ sessionId: session.id, requestId, content: "late" }), session.id);
+  assertSessionClosedShape(
+    await answerBranch({ sessionId: session.id, requestId, content: "late" }),
+    session.id,
+    "markdown_wire_done"
+  );
   console.log("ok MCP markdown wire: markdown-only hydration/SSE, note-thread and close delivery, streaming, canonical export, and web-import round trip");
 }
 

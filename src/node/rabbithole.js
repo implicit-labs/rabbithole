@@ -145,7 +145,7 @@ async function resumeRabbithole(holeId, signal, assets, focus = false) {
 export async function answerBranch({ sessionId, requestId, title, content, partial, baseUrl, assets, signal }) {
   const session = getSession(sessionId);
   if (!session || session.isClosed()) {
-    return { status: "session_closed", session_id: sessionId };
+    return { status: "session_closed", session_id: sessionId, reason: session?.closeReason || "session_closed" };
   }
   return session.answerBranch({
     requestId,
