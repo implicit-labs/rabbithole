@@ -135,6 +135,10 @@ html[data-theme="dark"] .rh-lightbox-img:not([data-rh-pasted="1"]) { padding: 8p
    the document selection as inactive (near-invisible) — so we paint it ourselves. */
 ::highlight(rh-ask) { background-color: rgba(59,91,204,0.22); background-color: var(--hl-strong); }
 .doc-content mark.hl { position: relative; background: var(--hl); color: inherit; border-radius: 2px; padding: 0.02em 1px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+/* A note wash is paint over an untouched text run. Empty absolute fragments
+   preserve the exact shaping, measure, and line breaks the prose had before
+   the note existed; the fragment boxes provide the same clickable wash. */
+.doc-content mark.mark-overlay { position: absolute; display: block; margin: 0; padding: 0; }
 .doc-content mark.hl::after { content: ""; position: absolute; inset: -0.05em -2px; border-radius: 3px; background: var(--hl-strong); opacity: 0; pointer-events: none; transition: opacity 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 .doc-content mark.mark-pending { border-bottom: 2px dotted color-mix(in srgb, var(--accent) 55%, transparent); }
 .doc-content mark.mark-ready { border-bottom: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); }

@@ -30,6 +30,7 @@ try {
   await verifyMobileSelectionSurface(browser, "chromium");
   await verifyMobileSelectionSurface(mobileWebKit, "webkit");
   await verifyAnchoredNotes();
+  await verifyDockedNoteTextGeometry();
   await verifyDockedNotes();
   await verifyNotePopoverWysiwyg();
   await verifyNotePopoverAnchorStability();
@@ -1163,6 +1164,124 @@ async function verifyDockedNotes() {
   } finally {
     await context.close();
   }
+}
+
+/* A dot is annotation chrome, never document geometry. Exercise both hosts
+   with prose whose last word really does wrap when an inline mark gains even
+   two pixels: this catches the visible reflow, not just a container width. */
+async function verifyDockedNoteTextGeometry() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  await routeProvider(page);
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, [
+      "# Docked note geometry",
+      "",
+      "Amber bicycles cross deliberate gardens while patient readers follow every branching sentence through quiet graphite margins without surrendering the generous measure of the surrounding document canvas Amber.",
+      "",
+      "Amber bicycles cross deliberate gardens while patient readers follow every branching sentence through quiet graphite margins without surrendering the generous measure of surrounding document canvas precise overlay.",
+    ].join("\n"));
+
+    const cardBefore = await measureTextGeometry(page, ".node.root .node-body", "surrounding document canvas Amber");
+    await selectText(page, "surrendering");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Canvas geometry note");
+    await page.click('#ask .ask-commit[data-commit="note"]');
+    await page.waitForFunction(() => document.querySelectorAll(".node.root .note-dot").length === 1);
+    const cardAfter = await measureTextGeometry(page, ".node.root .node-body", "surrounding document canvas Amber");
+    assertDockedNoteGeometry(cardAfter, cardBefore, "canvas card text must not move when its first docked note appears");
+    await page.locator(".node.root .note-dot").hover();
+    assertDockedNoteGeometry(
+      await measureTextGeometry(page, ".node.root .node-body", "surrounding document canvas Amber"),
+      cardAfter,
+      "hovering a canvas dot must not move card text",
+    );
+
+    await page.evaluate(() => document.querySelector(".node.root [aria-label='Expand document']").click());
+    await page.waitForSelector("body:not(.mode-canvas) #reader-main .note-dot");
+    await page.waitForTimeout(400);
+    const readerBefore = await measureTextGeometry(page, "#reader-main .reader-col", "surrounding document canvas precise overlay");
+    await selectText(page, "overlay", "#reader-main .doc-content[data-node-id]");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "Reader geometry note");
+    await page.click('#ask .ask-commit[data-commit="note"]');
+    await page.waitForFunction(() => document.querySelectorAll("#reader-main .note-dot").length === 2);
+    const readerAfter = await measureTextGeometry(page, "#reader-main .reader-col", "surrounding document canvas precise overlay");
+    assertDockedNoteGeometry(readerAfter, readerBefore, "reader text must not move when another docked note appears");
+    await page.locator("#reader-main .note-dot").last().hover();
+    assertDockedNoteGeometry(
+      await measureTextGeometry(page, "#reader-main .reader-col", "surrounding document canvas precise overlay"),
+      readerAfter,
+      "hovering a reader dot must not move reader text",
+    );
+    await page.locator("#reader-main .note-dot").last().click();
+    await page.waitForSelector("#notepop.visible");
+    await page.keyboard.press("Backspace");
+    await page.waitForFunction(() => document.querySelectorAll("#reader-main .note-dot").length === 1);
+    assertDockedNoteGeometry(
+      await measureTextGeometry(page, "#reader-main .reader-col", "surrounding document canvas precise overlay"),
+      readerBefore,
+      "removing a reader dot must not move reader text",
+    );
+    console.log("ok web app: docked notes have zero text geometry impact in cards and reader");
+  } finally {
+    await context.close();
+  }
+}
+
+function assertDockedNoteGeometry(actual, expected, message) {
+  assert.equal(actual.columnWidth, expected.columnWidth, `${message}: text column width`);
+  assert.deepEqual(actual.edgeLines, expected.edgeLines, `${message}: first and last line rects`);
+  assert.deepEqual(actual.lineTexts, expected.lineTexts, `${message}: visual line breaks`);
+}
+
+async function measureTextGeometry(page, surfaceSelector, paragraphNeedle) {
+  return page.evaluate(({ surfaceSelector, paragraphNeedle }) => {
+    const surface = document.querySelector(surfaceSelector);
+    const column = surface.querySelector(".doc-content");
+    const paragraph = Array.from(column.querySelectorAll("p"))
+      .find((candidate) => candidate.textContent.includes(paragraphNeedle));
+    if (!paragraph) throw new Error(`Geometry paragraph not found: ${paragraphNeedle}`);
+    const characters = [];
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      for (let offset = 0; offset < node.length; offset += 1) {
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 1);
+        const rect = range.getBoundingClientRect();
+        characters.push({ char: node.data[offset], rect });
+      }
+    }
+    const lines = [];
+    for (const character of characters) {
+      let line = lines.find((candidate) => Math.abs(candidate.top - character.rect.top) < 0.1);
+      if (!line) {
+        line = { top: character.rect.top, characters: [] };
+        lines.push(line);
+      }
+      line.characters.push(character);
+    }
+    const quarterPixel = (value) => Math.round(value * 4) / 4;
+    const lineGeometry = (line) => {
+      const ink = line.characters.filter(({ char }) => /\S/.test(char));
+      const left = Math.min(...ink.map(({ rect }) => rect.left));
+      const right = Math.max(...ink.map(({ rect }) => rect.right));
+      const top = Math.min(...ink.map(({ rect }) => rect.top));
+      const bottom = Math.max(...ink.map(({ rect }) => rect.bottom));
+      return { text: line.characters.map(({ char }) => char).join("").trim(),
+        left: quarterPixel(left), right: quarterPixel(right), top: quarterPixel(top), bottom: quarterPixel(bottom),
+        width: quarterPixel(right - left), height: quarterPixel(bottom - top) };
+    };
+    return {
+      columnWidth: quarterPixel(column.getBoundingClientRect().width),
+      edgeLines: [lineGeometry(lines[0]), lineGeometry(lines.at(-1))],
+      lineTexts: lines.map((line) => line.characters.map(({ char }) => char).join("").trim()),
+    };
+  }, { surfaceSelector, paragraphNeedle });
 }
 
 /* WYSIWYG between the popover's two states: for plain text the note dialog is
@@ -4001,9 +4120,9 @@ async function waitForCanvasText(page, text) {
   await page.locator(".node", { hasText: text }).first().waitFor();
 }
 
-async function selectText(page, needle) {
-  await page.evaluate((text) => {
-    const root = document.querySelector(".node .doc-content[data-node-id]");
+async function selectText(page, needle, rootSelector = ".node .doc-content[data-node-id]") {
+  await page.evaluate(({ text, rootSelector }) => {
+    const root = document.querySelector(rootSelector);
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
@@ -4019,7 +4138,7 @@ async function selectText(page, needle) {
       return;
     }
     throw new Error(`Text not found: ${text}`);
-  }, needle);
+  }, { text: needle, rootSelector });
 }
 
 async function selectAcrossBlocks(page, startNeedle, endNeedle) {

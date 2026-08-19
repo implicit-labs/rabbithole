@@ -58,14 +58,44 @@ export function applyChildHighlights(dc, node){
     var a = k.origin.anchor;
     var r = rangeFromOffsets(dc, a.offset_start, a.offset_end);
     if (!r) return;
-    wrapRange(r, k.id, "hl " + (k.status === "answered" ? "mark-ready" : "mark-pending") + (isNoteNode(k) ? " mark-note" : ""));
+    var note = isNoteNode(k);
+    var cls = "hl " + (k.status === "answered" ? "mark-ready" : "mark-pending") + (note ? " mark-note" : "");
+    if (note) overlayRange(r, k.id, cls);
+    else wrapRange(r, k.id, cls);
   });
 }
 
 export function wrapInContainer(dc, anchor, childId, cls){
   if (!dc || !anchor || dc.classList.contains("rh-pdf") || anchor.pdf) return;
   var rr = rangeFromOffsets(dc, anchor.offset_start, anchor.offset_end);
-  if (rr){ try { wrapRange(rr, childId, cls); } catch(e){} }
+  if (rr){
+    try {
+      if (/(^|\s)mark-note(\s|$)/.test(cls)) overlayRange(rr, childId, cls);
+      else wrapRange(rr, childId, cls);
+    } catch(e){}
+  }
+}
+
+/* Re-measure note washes after a card/reader resize. The fragments are empty
+   paint and hit-test boxes, so this pass cannot feed back into text layout. */
+export function syncTextOverlayMarks(root){
+  if (!root || !root.querySelectorAll) return;
+  var containers = root.matches && root.matches(".doc-content") ? [root] : root.querySelectorAll(".doc-content");
+  for (var c = 0; c < containers.length; c++){
+    var dc = containers[c];
+    var marks = dc.querySelectorAll("mark.mark-overlay[data-child]");
+    var seen = {};
+    for (var i = 0; i < marks.length; i++){
+      var childId = marks[i].dataset.child;
+      if (seen[childId]) continue;
+      seen[childId] = true;
+      var child = nodes[childId], anchor = child && child.origin && child.origin.anchor;
+      if (!anchor || anchor.pdf) continue;
+      var range = rangeFromOffsets(dc, anchor.offset_start, anchor.offset_end);
+      if (!range) continue;
+      overlayRange(range, childId, marks[i].className.replace(/\s*mark-overlay\b/, ""));
+    }
+  }
 }
 
 export function upgradeMarks(root, childId){
@@ -144,6 +174,40 @@ function initializeMark(m, childId, cls){
   var child = nodes[childId];
   m.setAttribute("aria-label", "Open branch: " + ((child && child.title) || "Untitled"));
   return m;
+}
+
+function overlayRange(range, childId, cls){
+  var ancestor = range.commonAncestorContainer;
+  var dc = (ancestor.nodeType === 1 ? ancestor : ancestor.parentElement).closest(".doc-content");
+  if (!dc) return;
+  var rects = Array.from(range.getClientRects()).filter(function(rect){ return rect.width > 0 && rect.height > 0; });
+  var selector = 'mark.mark-overlay[data-child="' + childId + '"]';
+  var marks = Array.from(dc.querySelectorAll(selector));
+  var fragmentCount = Math.max(1, rects.length);
+  while (marks.length < fragmentCount){
+    var mark = document.createElement("mark");
+    dc.appendChild(mark); marks.push(mark);
+  }
+  while (marks.length > fragmentCount) marks.pop().remove();
+  for (var i = 0; i < marks.length; i++) initializeMark(marks[i], childId, cls + " mark-overlay");
+  if (!rects.length){
+    marks[0].style.width = "0"; marks[0].style.height = "0";
+    return;
+  }
+  var offsetParent = marks[0].offsetParent;
+  if (!offsetParent) return;
+  var parentRect = offsetParent.getBoundingClientRect();
+  var scaleX = offsetParent.offsetWidth ? parentRect.width / offsetParent.offsetWidth : 1;
+  var scaleY = offsetParent.offsetHeight ? parentRect.height / offsetParent.offsetHeight : scaleX;
+  if (!scaleX) scaleX = 1;
+  if (!scaleY) scaleY = scaleX;
+  for (var j = 0; j < marks.length; j++){
+    var rect = rects[j], current = marks[j];
+    current.style.left = ((rect.left - parentRect.left) / scaleX + offsetParent.scrollLeft) + "px";
+    current.style.top = ((rect.top - parentRect.top) / scaleY + offsetParent.scrollTop) + "px";
+    current.style.width = (rect.width / scaleX) + "px";
+    current.style.height = (rect.height / scaleY) + "px";
+  }
 }
 
 export function mountPdfRectMark(container, anchor, childId, cls) {

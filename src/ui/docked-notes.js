@@ -38,7 +38,7 @@ import {
 } from "./canvas-view.js";
 import { renderMarginNotes } from "./reader.js";
 import { removeBranch } from "./branch-surfaces.js";
-import { mountPdfRectMark, wrapInContainer } from "./text-marks.js";
+import { mountPdfRectMark, syncTextOverlayMarks, wrapInContainer } from "./text-marks.js";
 import { wireComposerActions } from "./composer-state.js";
 import { openPopover } from "./primitives/popover.js";
 import { createModuleLifecycle } from "./lifecycle.js";
@@ -88,6 +88,10 @@ export function initDockedNotes(){
       // not bubble, so the reposition is caught on the way down.
       scope.listen(surface, "scroll", scheduleEdges, true);
     });
+    // Reader line breaks can change with the viewport. Repaint the empty note
+    // overlays and move their dots after that reflow; neither pass can affect
+    // the prose that caused it.
+    scope.listen(window, "resize", positionDockedNotes);
     var surface = popEl();
     scope.listen(surface, "click", onPopoverClick);
     scope.listen(surface, "dblclick", onPopoverDblClick);
@@ -359,6 +363,7 @@ function syncDotColumn(host, notes, reader){
    a neighbour is already there. Canvas rects arrive scaled by the camera; the
    column's own coordinates never are. */
 export function positionDockedNotes(){
+  syncTextOverlayMarks(document);
   var layers = document.querySelectorAll(".note-dots");
   for (var i = 0; i < layers.length; i++) positionDotColumn(layers[i]);
 }
