@@ -99,16 +99,19 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium firefox webkit
       # Only firefox/webkit need apt OS libraries (chromium's are preinstalled),
-      # and only the shards whose bin actually launches those browsers pay for
-      # them. The shard script owns the bin assignment, so ask it.
-      - name: Determine whether this shard needs browser OS dependencies
+      # and each shard installs only the browsers its bin actually launches.
+      # The shard script owns the bin assignment, so ask it.
+      - name: Determine which browser OS dependencies this shard needs
         id: needs-deps
-        run: echo "value=$(node test/support/e2e-shard.mjs --needs-deps ${{ matrix.shard }} 3)" >> "$GITHUB_OUTPUT"
+        run: echo "browsers=$(node test/support/e2e-shard.mjs --needs-deps ${{ matrix.shard }} 3)" >> "$GITHUB_OUTPUT"
       # The default Ubuntu mirrors can stall apt indefinitely; cap every
       # transfer and the whole step so a bad mirror costs minutes, not a run.
-      - name: Install firefox/webkit OS dependencies
-        if: steps.needs-deps.outputs.value == 'true'
-        timeout-minutes: 4
+      # 8 minutes accommodates a slow-but-alive mirror (a healthy install is
+      # ~1m; a slow one was observed to need >4m); true stalls die at the
+      # Acquire timeouts and get one retry well before the step cap.
+      - name: Install browser OS dependencies
+        if: steps.needs-deps.outputs.browsers != ''
+        timeout-minutes: 8
         run: |
           sudo tee /etc/apt/apt.conf.d/99ci-timeouts >/dev/null <<'EOF'
           Acquire::Retries "3";
@@ -116,7 +119,7 @@ jobs:
           Acquire::https::Timeout "20";
           EOF
           for i in 1 2; do
-            if npx playwright install-deps firefox webkit; then
+            if npx playwright install-deps ${{ steps.needs-deps.outputs.browsers }}; then
               break
             fi
             if [ "$i" = 2 ]; then

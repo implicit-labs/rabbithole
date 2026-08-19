@@ -5,9 +5,10 @@
 //     nonzero exit (the child's code is propagated).
 //
 //   node test/support/e2e-shard.mjs --needs-deps <index> <total>
-//     Prints "true" iff this shard contains a file whose playwright import
-//     destructures firefox or webkit (those browsers need apt OS libraries
-//     on the runner; chromium's are preinstalled).
+//     Prints the space-separated browsers in this shard whose apt OS
+//     libraries the runner lacks — the ones whose playwright import
+//     destructures firefox or webkit (chromium's are preinstalled).
+//     Prints nothing for a chromium-only shard.
 //
 // Packing is greedy by descending file byte size (stable name tiebreak):
 // each file lands in the currently lightest bin, so the assignment depends
@@ -46,13 +47,15 @@ function packIntoBins(files, total) {
 // True iff the file itself launches firefox or webkit, judged from its
 // playwright import destructuring. A bare word match is too loose: e.g.
 // style.webkitBackdropFilter would count a chromium-only file.
-function importsExtraBrowsers(file) {
+function importedExtraBrowsers(file) {
   const source = fs.readFileSync(file, "utf8");
   const importPattern = /import\s*\{([^}]*)\}\s*from\s*["']playwright["']/g;
+  const browsers = new Set();
   for (const match of source.matchAll(importPattern)) {
-    if (/\b(firefox|webkit)\b/.test(match[1])) return true;
+    if (/\bfirefox\b/.test(match[1])) browsers.add("firefox");
+    if (/\bwebkit\b/.test(match[1])) browsers.add("webkit");
   }
-  return false;
+  return browsers;
 }
 
 function usage() {
@@ -73,7 +76,11 @@ if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index <
 const bin = packIntoBins(listTestFiles(), total)[index];
 
 if (needsDepsMode) {
-  console.log(bin.files.some(importsExtraBrowsers) ? "true" : "false");
+  const needed = new Set();
+  for (const file of bin.files) {
+    for (const browser of importedExtraBrowsers(file)) needed.add(browser);
+  }
+  console.log([...needed].sort().join(" "));
   process.exit(0);
 }
 
