@@ -990,6 +990,21 @@ async function verifyDockedNotes() {
     "the whole-card ring should stay proportional at 9px with a 2px stroke");
     await page.keyboard.press("Escape");
 
+    // The 24px hit targets are clipped at the dot layer, never at the pointer:
+    // a docked note must not hand the card body a horizontal scrollbar, and
+    // the fat target must keep catching clicks beyond the dot's own ink.
+    assert.deepEqual(await rootCard.locator(".node-body").evaluate((body) => {
+      const dot = body.querySelector(".note-dot");
+      const box = dot.getBoundingClientRect();
+      const hits = (x, y) => document.elementFromPoint(x, y) === dot;
+      return {
+        horizontalOverflow: body.scrollWidth - body.clientWidth,
+        centerHits: hits(box.left + box.width / 2, box.top + box.height / 2),
+        haloHits: hits(box.left - box.width * 0.6, box.top + box.height / 2),
+      };
+    }), { horizontalOverflow: 0, centerHits: true, haloHits: true },
+    "docked dots must add no horizontal scroll to the card body while their 24px targets keep catching the pointer");
+
     // Reader: the same notes, in the reader's real margin.
     await page.evaluate(() => document.querySelector(".node.root [aria-label='Expand document']").click());
     await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
@@ -998,6 +1013,13 @@ async function verifyDockedNotes() {
       const column = document.querySelector(".reader-col").getBoundingClientRect();
       return dots.map((dot) => Math.round(dot.getBoundingClientRect().left - column.right));
     }), [12, 12, 12], "reader dots stand in the real margin, 12px past the column edge");
+    assert.deepEqual(await page.locator("#reader-main").evaluate((main) => {
+      const dot = main.querySelector(".note-dot");
+      const box = dot.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return { horizontalOverflow: main.scrollWidth - main.clientWidth, centerHits: hit === dot };
+    }), { horizontalOverflow: 0, centerHits: true },
+    "margin dots must add no horizontal scroll to the reader while staying clickable");
     assert.deepEqual(await page.locator("#margin-notes .side-item").evaluateAll((items) => items.map((item) => item.dataset.child)),
       [directPlacedId], "only the placed note belongs in the branch rail; docked notes must stay out");
     await page.keyboard.press("Escape");

@@ -592,16 +592,21 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    a graphite dot sits in the card's own right padding, level with the anchor's
    line. Never an outboard rail — outboard dots read as orphans on a crowded
    canvas and get clipped by the neighbouring card — and never a reflow. The
-   reader has a real margin, so there the same dots move to the column edge. */
-.note-dots { position: absolute; inset: 0; pointer-events: none; }
-.note-dots.note-dots-reader { left: 100%; right: auto; margin-left: 12px; width: 12px; }
+   reader has a real margin, so there the same dots move to the column edge.
+   The layer clips its own x-axis: the 24px hit targets otherwise poke past the
+   card's right padding and hand every scrolling ancestor a phantom horizontal
+   scrollbar. clip, never hidden — hidden would make the layer a scroll
+   container (and visible+hidden on one box is illegal); clip+visible is the
+   pair that clips without one. */
+.note-dots { position: absolute; inset: 0; pointer-events: none; overflow-x: clip; overflow-y: visible; }
+.note-dots.note-dots-reader { left: 100%; right: auto; margin-left: 0; width: 24px; }
 .note-dots.note-dots-inside { left: auto; right: 0; margin-left: 0; }
 /* The button's own border box never moves and never scales: it is the anchor
    the note dialog is pinned to, and getBoundingClientRect includes transforms,
    so the hover grow lives on the ::after that carries the ink instead. */
 .note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0;
   background: none; cursor: pointer; pointer-events: auto; }
-.note-dots-reader .note-dot { right: auto; left: 0; }
+.note-dots-reader .note-dot { right: auto; left: 12px; }
 .note-dots-inside .note-dot { left: auto; right: 4px; }
 /* 7px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
 .note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
