@@ -32,6 +32,7 @@ try {
   await verifyAnchoredNotes();
   await verifyDockedNotes();
   await verifyNotePopoverWysiwyg();
+  await verifyNotePopoverAnchorStability();
   await verifyStandaloneNotesAndEditing();
   await verifyStandaloneImagePaste();
   await verifyNoteToAskConversion();
@@ -797,12 +798,14 @@ async function verifyDockedNotes() {
     const column = await page.locator(".node.root .note-dot").evaluateAll((dots) => dots.map((dot) => {
       const box = dot.getBoundingClientRect();
       const mark = document.querySelector(`mark[data-child="${dot.dataset.note}"]`).getBoundingClientRect();
-      const style = getComputedStyle(dot);
+      // The visible ink (and its hover grow) lives on ::after; the button's own
+      // box is the popover anchor and must stay untransformed.
+      const ink = getComputedStyle(dot, "::after");
       const hit = getComputedStyle(dot, "::before");
       return { id: dot.dataset.note, top: parseFloat(dot.style.top),
         offLine: (box.top + box.height / 2) - (mark.top + mark.height / 2),
         size: { width: box.width, height: box.height }, hit: { width: hit.width, height: hit.height },
-        transition: { duration: style.transitionDuration, timing: style.transitionTimingFunction } };
+        transition: { duration: ink.transitionDuration, timing: ink.transitionTimingFunction } };
     }));
     assert.deepEqual(column.map((dot) => dot.id), [firstId, secondId], "dots follow the order of the anchors they mark");
     assert(Math.abs(column[0].offLine) < 2, `the first dot should sit on its anchor's line: ${JSON.stringify(column)}`);
@@ -981,8 +984,8 @@ async function verifyDockedNotes() {
     "a whole-card note is a hollow ring at the top of the column");
     assert.deepEqual(await page.locator(`.note-dot[data-note="${wholeId}"]`).evaluate((dot) => {
       const box = dot.getBoundingClientRect();
-      const style = getComputedStyle(dot);
-      return { size: { width: box.width, height: box.height }, border: style.borderTopWidth };
+      const ink = getComputedStyle(dot, "::after");
+      return { size: { width: box.width, height: box.height }, border: ink.borderTopWidth };
     }), { size: { width: 9, height: 9 }, border: "2px" },
     "the whole-card ring should stay proportional at 9px with a 2px stroke");
     await page.keyboard.press("Escape");
@@ -1245,6 +1248,210 @@ async function verifyNotePopoverWysiwyg() {
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
     console.log("ok web app: note popover reads and edits at one height, and ⌘S leaves no focus ring");
+  } finally {
+    await context.close();
+  }
+}
+
+/* The note dialog is pinned to its dot. Ordinary mousing must never move it —
+   the anchor's own border box is hover-immune — a wobble near the side-flip
+   threshold must never teleport it, and a dot-column re-render must hand the
+   open dialog the very same dot back, still tracking. */
+async function verifyNotePopoverAnchorStability() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  await routeProvider(page);
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const filler = Array.from({ length: 20 }, (_, index) =>
+      `Filler paragraph ${index + 1} keeps the card's body taller than its frame so the anchor can scroll.`).join("\n\n");
+    await createDocument(page, [
+      "# Anchor stability",
+      "",
+      "The first anchor opens the page with a line of prose to mark.",
+      "",
+      "One quiet paragraph keeps the dialog's footprint clear of the margin below.",
+      "",
+      "A second quiet paragraph gives the dialog room to breathe over the prose.",
+      "",
+      "The second anchor waits here, below the dialog, with a placement anchor nearby.",
+      "",
+      filler,
+    ].join("\n"));
+    const popover = page.locator("#notepop");
+    const rootCard = page.locator(".node.root");
+
+    async function dockNote(selection, markdown) {
+      const before = await page.evaluate(async () =>
+        (await window.__rabbitholeTest.readStoredHole()).nodes.filter((node) => node.origin?.kind === "note").length);
+      await selectText(page, selection);
+      await page.waitForSelector("#ask.visible");
+      await page.fill("#ask-text", markdown);
+      await page.click('#ask .ask-commit[data-commit="note"]');
+      const hole = await waitForStoredHole(page, (stored) =>
+        stored.nodes.filter((node) => node.origin?.kind === "note").length === before + 1, "the docked note to persist");
+      return hole.nodes.find((node) => node.markdown === markdown).id;
+    }
+
+    // A placed note window gives the pointer another card to wander across.
+    await selectText(page, "placement anchor");
+    await page.waitForSelector("#ask.visible");
+    await page.fill("#ask-text", "A placed neighbour card");
+    await page.press("#ask-text", "Control+Shift+Enter");
+    const neighbour = page.locator(".node-note", { hasText: "A placed neighbour card" });
+    await neighbour.waitFor();
+
+    const firstId = await dockNote("first anchor", "The pinned note under test");
+    const secondId = await dockNote("second anchor", "The neighbouring dot");
+
+    await page.locator(`.note-dot[data-note="${firstId}"]`).click();
+    await popover.waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+      const transform = getComputedStyle(document.getElementById("notepop")).transform;
+      return transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+    });
+    const popRect = () => popover.evaluate((surface) => {
+      const box = surface.getBoundingClientRect();
+      return { left: box.left, top: box.top, placement: surface.dataset.placement };
+    });
+    const settled = await popRect();
+    assert(settled.placement.startsWith("bottom"), `the dialog opens below a dot near the card's top: ${JSON.stringify(settled)}`);
+    const still = async (name) => {
+      await page.waitForTimeout(160); // outlive the dot ink's 0.12s hover grow
+      const now = await popRect();
+      assert(Math.abs(now.left - settled.left) < 1 && Math.abs(now.top - settled.top) < 1 && now.placement === settled.placement,
+        `${name} must not move the note dialog: ${JSON.stringify({ settled, now })}`);
+    };
+
+    // Hovering the wash lights the dot as its partner and grows the ink — but
+    // the button box the dialog is anchored to must not move by a pixel.
+    await rootCard.locator(`mark[data-child="${firstId}"]`).hover();
+    await page.waitForTimeout(160);
+    assert.deepEqual(await page.evaluate((id) => {
+      const dot = document.querySelector(`.note-dot[data-note="${id}"]`);
+      const box = dot.getBoundingClientRect();
+      return { partner: dot.classList.contains("note-dot-partner"),
+        box: { width: box.width, height: box.height },
+        ink: getComputedStyle(dot, "::after").transform };
+    }, firstId), { partner: true, box: { width: 7, height: 7 }, ink: "matrix(1.12, 0, 0, 1.12, 0, 0)" },
+    "the wash-hover partner grow lives on the ink, never on the anchor's own box");
+    await still("hovering the note's wash");
+    await page.locator(`.note-dot[data-note="${firstId}"]`).hover();
+    await page.waitForTimeout(160);
+    assert.deepEqual(await page.evaluate((id) => {
+      const dot = document.querySelector(`.note-dot[data-note="${id}"]`);
+      const box = dot.getBoundingClientRect();
+      return { box: { width: box.width, height: box.height }, ink: getComputedStyle(dot, "::after").transform };
+    }, firstId), { box: { width: 7, height: 7 }, ink: "matrix(1.12, 0, 0, 1.12, 0, 0)" },
+    "hovering the dot itself grows the ink without touching the anchor's box");
+    await still("hovering the note's own dot");
+    // Wander the pointer across the rest of the canvas: the sibling dot,
+    // another card, and the parent card's prose.
+    const stops = await page.evaluate((id) => {
+      const center = (el) => { const box = el.getBoundingClientRect(); return { x: box.left + box.width / 2, y: box.top + box.height / 2 }; };
+      const body = document.querySelector(".node.root .node-body").getBoundingClientRect();
+      return [
+        center(document.querySelector(`.note-dot[data-note="${id}"]`)),
+        center(document.querySelector(".node-note .doc-content")),
+        { x: body.left + 60, y: body.top + 40 },
+        { x: body.left + body.width / 2, y: body.top + body.height / 2 },
+      ];
+    }, secondId);
+    for (const [index, stop] of stops.entries()) {
+      await page.mouse.move(stop.x, stop.y, { steps: 4 });
+      await still(`wandering the pointer (stop ${index + 1})`);
+    }
+
+    // Near the flip threshold, a drift inside the hysteresis margin must nudge
+    // the dialog along, never teleport it across its anchor; a real shortfall
+    // must still flip it.
+    const threshold = await page.evaluate((id) => new Promise((resolve) => {
+      const pop = document.getElementById("notepop");
+      const dot = document.querySelector(`.note-dot[data-note="${id}"]`);
+      const style = getComputedStyle(pop);
+      const gap = parseFloat(style.getPropertyValue("--surface-gap")) || 0;
+      const edge = parseFloat(style.getPropertyValue("--surface-edge")) || 0;
+      const scale = new DOMMatrixReadOnly(getComputedStyle(document.getElementById("world")).transform).a || 1;
+      const viewport = window.visualViewport;
+      const viewportBottom = viewport ? viewport.offsetTop + viewport.height : innerHeight;
+      const need = pop.getBoundingClientRect().height + gap + edge;
+      const move = (screenDelta) => { dot.style.top = (parseFloat(dot.style.top) + screenDelta / scale) + "px"; };
+      // The dialog repositions off its own surface mutations; an inert text
+      // node is the cheapest way to ask for one honest update pass.
+      const requestUpdate = () => pop.querySelector(".note-pop-body").appendChild(document.createTextNode(""));
+      const twoFrames = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+      const reading = () => {
+        const box = pop.getBoundingClientRect();
+        return { placement: pop.dataset.placement, top: box.top, bottom: box.bottom, dotTop: dot.getBoundingClientRect().top };
+      };
+      // Park the anchor so the dialog still fits below it — by two pixels.
+      move((viewportBottom - need - 2) - dot.getBoundingClientRect().bottom);
+      requestUpdate();
+      twoFrames(() => {
+        const parked = reading();
+        move(4); // now 2px short of fitting: inside the hysteresis margin
+        requestUpdate();
+        twoFrames(() => {
+          const nudged = reading();
+          move(140); // a real shortfall: the anchor dives for the edge
+          requestUpdate();
+          twoFrames(() => resolve({ parked, nudged, shortfall: reading() }));
+        });
+      });
+    }), firstId);
+    assert(threshold.parked.placement.startsWith("bottom"),
+      `the dialog should sit below an anchor it still fits under: ${JSON.stringify(threshold)}`);
+    assert.equal(threshold.nudged.placement, threshold.parked.placement,
+      `a drift inside the hysteresis margin must never flip the dialog to the other side: ${JSON.stringify(threshold)}`);
+    // The anchor moved 4px down but the viewport clamp concedes only 2 of them.
+    assert(Math.abs(threshold.nudged.top - threshold.parked.top - 2) < 1,
+      `inside the margin the dialog follows its anchor, it does not teleport: ${JSON.stringify(threshold)}`);
+    assert(threshold.shortfall.placement.startsWith("top") && threshold.shortfall.bottom < threshold.shortfall.dotTop,
+      `a real shortfall must still flip the dialog above its anchor: ${JSON.stringify(threshold)}`);
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden" });
+
+    // A save re-renders the dot column while the dialog is open: the dialog's
+    // anchor must be the very same element afterwards — and still tracking.
+    await page.locator(`.note-dot[data-note="${secondId}"]`).click();
+    await popover.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.getElementById("notepop").contains(document.activeElement));
+    await page.evaluate((id) => { window.__testDotBefore = document.querySelector(`.note-dot[data-note="${id}"]`); }, secondId);
+    await popover.locator(".note-pop-view").dblclick();
+    await popover.locator(".note-editor").waitFor();
+    await popover.locator(".note-editor").fill("The neighbouring dot, revised");
+    await popover.locator(".note-editor").press("Control+s");
+    await popover.locator(".note-pop-view").waitFor();
+    await waitForStoredHole(page, (hole) => hole.nodes.find((node) => node.id === secondId)?.markdown === "The neighbouring dot, revised",
+      "the revised note to persist");
+    assert.equal(await page.evaluate((id) => document.querySelector(`.note-dot[data-note="${id}"]`) === window.__testDotBefore, secondId),
+      true, "re-rendering the dot column must reuse the open dialog's anchor, not conjure a stranger");
+    const tracked = await page.evaluate((id) => new Promise((resolve) => {
+      const pop = document.getElementById("notepop");
+      const dot = document.querySelector(`.note-dot[data-note="${id}"]`);
+      const gap = parseFloat(getComputedStyle(pop).getPropertyValue("--surface-gap")) || 0;
+      const geometry = () => {
+        const dotBox = dot.getBoundingClientRect();
+        const box = pop.getBoundingClientRect();
+        return { gap: box.top - dotBox.bottom, endOffset: dotBox.right - box.right, dotTop: dotBox.top };
+      };
+      const before = geometry();
+      // Scroll the card's own body: the mark moves, the dot follows the mark,
+      // and the dialog must follow the dot.
+      dot.closest(".node-body").scrollTop += 36;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        pop.querySelector(".note-pop-body").appendChild(document.createTextNode(""));
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve({ before, after: geometry(), expectedGap: gap })));
+      }));
+    }), secondId);
+    assert(tracked.after.dotTop < tracked.before.dotTop - 20,
+      `scrolling the body must actually move the anchor: ${JSON.stringify(tracked)}`);
+    assert(Math.abs(tracked.after.gap - tracked.expectedGap) < 1 && Math.abs(tracked.after.endOffset) < 1,
+      `after a re-render the dialog still rides its dot through an anchor move: ${JSON.stringify(tracked)}`);
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden" });
+    console.log("ok web app: note popover stays pinned through hover, threshold wobble, and dot-column re-renders");
   } finally {
     await context.close();
   }

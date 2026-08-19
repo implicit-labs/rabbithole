@@ -596,18 +596,25 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-dots { position: absolute; inset: 0; pointer-events: none; }
 .note-dots.note-dots-reader { left: 100%; right: auto; margin-left: 12px; width: 12px; }
 .note-dots.note-dots-inside { left: auto; right: 0; margin-left: 0; }
-.note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%;
-  background: var(--note-ink); box-shadow: 0 0 0 2px var(--node-bg); cursor: pointer; pointer-events: auto;
-  transition: transform var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-standard); }
-.note-dots-reader .note-dot { right: auto; left: 0; box-shadow: 0 0 0 2px var(--bg); }
+/* The button's own border box never moves and never scales: it is the anchor
+   the note dialog is pinned to, and getBoundingClientRect includes transforms,
+   so the hover grow lives on the ::after that carries the ink instead. */
+.note-dot { position: absolute; right: 4px; width: 7px; height: 7px; padding: 0; border: 0;
+  background: none; cursor: pointer; pointer-events: auto; }
+.note-dots-reader .note-dot { right: auto; left: 0; }
 .note-dots-inside .note-dot { left: auto; right: 4px; }
 /* 7px of ink, 24px of target: the pointer aims at the margin, not the pixel. */
 .note-dot::before { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
-.note-dot:hover, .note-dot.note-dot-partner { transform: scale(1.12); background: color-mix(in srgb, var(--note-ink) 74%, var(--fg-bold)); }
+.note-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: var(--note-ink); box-shadow: 0 0 0 2px var(--node-bg);
+  transition: transform var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-standard); }
+.note-dots-reader .note-dot::after { box-shadow: 0 0 0 2px var(--bg); }
+.note-dot:hover::after, .note-dot.note-dot-partner::after { transform: scale(1.12); background: color-mix(in srgb, var(--note-ink) 74%, var(--fg-bold)); }
 /* A note about the whole card has no line to sit beside, so it reads as an
    outline at the top of the column instead of a filled anchor. */
-.note-dot-whole { width: 9px; height: 9px; background: var(--node-bg); border: 2px solid var(--note-ink); box-shadow: 0 0 0 1.5px var(--node-bg); }
-.note-dots-reader .note-dot-whole { background: var(--bg); box-shadow: 0 0 0 1.5px var(--bg); }
+.note-dot-whole { width: 9px; height: 9px; }
+.note-dot-whole::after { background: var(--node-bg); border: 2px solid var(--note-ink); box-shadow: 0 0 0 1.5px var(--node-bg); }
+.note-dots-reader .note-dot-whole::after { background: var(--bg); box-shadow: 0 0 0 1.5px var(--bg); }
 .note-dot:focus { outline: none; }
 .note-dot:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 

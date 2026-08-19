@@ -329,18 +329,30 @@ function syncDotColumn(host, notes, reader){
     host.appendChild(layer);
   }
   layer.classList.toggle("note-dots-reader", !!reader);
-  var fragment = document.createDocumentFragment();
-  notes.forEach(function(note){
-    var dot = document.createElement("button");
-    dot.type = "button";
+  // Dots keep their identity across re-renders: an open popover is anchored to
+  // its dot element, so a rebuild must update in place, never replace. A
+  // destroyed trigger would strand the dialog — anchoring bails on a
+  // disconnected anchor and never recovers.
+  var existing = {};
+  for (var i = layer.children.length - 1; i >= 0; i--){
+    var child = layer.children[i];
+    existing[child.dataset.note] = child;
+  }
+  notes.forEach(function(note, index){
+    var dot = existing[note.id];
+    if (!dot){
+      dot = document.createElement("button");
+      dot.type = "button";
+      dot.dataset.note = note.id;
+      dot.setAttribute("aria-haspopup", "dialog");
+      dot.setAttribute("aria-expanded", "false");
+    }
     dot.className = "note-dot" + (noteAnchorOf(note) ? "" : " note-dot-whole");
-    dot.dataset.note = note.id;
-    dot.setAttribute("aria-haspopup", "dialog");
-    dot.setAttribute("aria-expanded", "false");
     dot.setAttribute("aria-label", dotLabel(note));
-    fragment.appendChild(dot);
+    if (layer.children[index] !== dot) layer.insertBefore(dot, layer.children[index] || null);
   });
-  layer.replaceChildren(fragment);
+  // Every wanted dot now sits at its own index; anything beyond them is stale.
+  while (layer.children.length > notes.length) layer.lastChild.remove();
 }
 
 /* Each dot sits on its anchor's line box, nudging off the exact line only when
@@ -470,9 +482,12 @@ function editingAllowed(){ return !frozen && !closed; }
 /** Open a note the human already has on screen (dot, wash, or ⌘K result). */
 export function openDockedNote(node, trigger, state, placement){
   if (!node) return;
+  // No affordance, no dialog: a popover must never anchor to itself.
+  var anchor = trigger || affordanceFor(node);
+  if (!anchor) return;
   openNotePopover({
     node: node,
-    trigger: trigger || affordanceFor(node) || document.getElementById("notepop"),
+    trigger: anchor,
     state: state === "edit" && editingAllowed() ? "edit" : "read",
     placement: placement
   });

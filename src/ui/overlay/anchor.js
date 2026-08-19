@@ -20,13 +20,23 @@ function clampToViewport(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function oppositeSide(side) {
+  return side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left";
+}
+
+// An open surface keeps the side it opened on. Anchors wobble by fractions of
+// a pixel — hover transforms, streaming re-measures, dot repositioning — and a
+// naive side flip near the threshold teleports the surface across its anchor.
+// Only a real shortfall beyond this margin earns a flip after opening.
+var FLIP_HYSTERESIS = 8;
+
 export function anchorSurface(trigger, surface, options) {
   options = options || {};
   var contextElement = trigger && trigger.contextElement;
   var observedTrigger = contextElement || trigger;
   var virtual = !!contextElement || !(trigger instanceof Element);
   var placement = options.placement || "bottom-end", disposed = false, frame = 0, updating = false;
-  var lastLeft = null, lastTop = null;
+  var lastLeft = null, lastTop = null, settledSide = null;
 
   function updateNow() {
     frame = 0;
@@ -50,14 +60,18 @@ export function anchorSurface(trigger, surface, options) {
       top = viewport.top + (viewport.height - box.height) / 2;
     } else {
       var vertical = side === "top" || side === "bottom";
+      // Sticky side: once a side has been settled on, keep preferring it.
+      if (settledSide === side || settledSide === oppositeSide(side)) side = settledSide;
       var before = vertical ? anchor.top - viewport.top : anchor.left - viewport.left;
       var after = vertical ? viewport.top + viewport.height - anchor.bottom : viewport.left + viewport.width - anchor.right;
       var mainSize = vertical ? box.height : box.width;
       var preferredSpace = side === "top" || side === "left" ? before : after;
       var alternateSpace = side === "top" || side === "left" ? after : before;
-      if (preferredSpace < mainSize + gap + edge && alternateSpace > preferredSpace) {
-        side = side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left";
+      var slack = settledSide === side ? FLIP_HYSTERESIS : 0;
+      if (preferredSpace + slack < mainSize + gap + edge && alternateSpace > preferredSpace) {
+        side = oppositeSide(side);
       }
+      settledSide = side;
       if (side === "top" || side === "bottom") {
         top = side === "bottom" ? anchor.bottom + gap : anchor.top - box.height - gap;
         left = align === "start" ? anchor.left : align === "end" ? anchor.right - box.width : anchor.left + (anchor.width - box.width) / 2;
