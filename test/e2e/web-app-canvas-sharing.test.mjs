@@ -31,6 +31,7 @@ try {
   await verifyMobileSelectionSurface(mobileWebKit, "webkit");
   await verifyAnchoredNotes();
   await verifyDockedNotes();
+  await verifyNotePopoverWysiwyg();
   await verifyStandaloneNotesAndEditing();
   await verifyStandaloneImagePaste();
   await verifyNoteToAskConversion();
@@ -1134,6 +1135,116 @@ async function verifyDockedNotes() {
       assert(treatment.contrast >= 4.5, `${treatment.theme}: placed-note prose contrast should remain accessible (${treatment.contrast})`);
     }
     console.log("ok web app: docked notes read, edit, place, delete, ask, and rehydrate on their card");
+  } finally {
+    await context.close();
+  }
+}
+
+/* WYSIWYG between the popover's two states: for plain text the note dialog is
+   exactly as tall reading as it is editing — single line, multi-paragraph, and
+   at the long-note clamp — and a ⌘S save leaves no focus ring behind. */
+async function verifyNotePopoverWysiwyg() {
+  const context = await browser.newContext();
+  await seedConfiguredOpenRouter(context);
+  const page = await context.newPage();
+  await routeProvider(page);
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, [
+      "# Popover WYSIWYG",
+      "",
+      "The first anchor and the second anchor share one line of this document.",
+      "",
+      "The third anchor lives one paragraph further down the page.",
+    ].join("\n"));
+    const popover = page.locator("#notepop");
+
+    async function dockNote(selection, markdown) {
+      const before = await page.evaluate(async () =>
+        (await window.__rabbitholeTest.readStoredHole()).nodes.filter((node) => node.origin?.kind === "note").length);
+      await selectText(page, selection);
+      await page.waitForSelector("#ask.visible");
+      await page.fill("#ask-text", markdown);
+      await page.click('#ask .ask-commit[data-commit="note"]');
+      const hole = await waitForStoredHole(page, (stored) =>
+        stored.nodes.filter((node) => node.origin?.kind === "note").length === before + 1, "the docked note to persist");
+      return hole.nodes.find((node) => node.markdown === markdown).id;
+    }
+
+    async function popoverHeights(id) {
+      await page.locator(`.note-dot[data-note="${id}"]`).click();
+      await popover.waitFor({ state: "visible" });
+      await popover.locator(".note-pop-view").waitFor();
+      // The popover slides in over --popover-speed; measure only once settled.
+      await page.waitForFunction(() => {
+        const transform = getComputedStyle(document.getElementById("notepop")).transform;
+        return transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+      });
+      const read = await popover.evaluate((surface) => surface.getBoundingClientRect().height);
+      await popover.locator(".note-pop-view").dblclick();
+      await popover.locator(".note-editor").waitFor();
+      const edit = await popover.evaluate((surface) => surface.getBoundingClientRect().height);
+      return { read, edit };
+    }
+
+    const singleId = await dockNote("first anchor", "A one line plain note");
+    const multiId = await dockNote("second anchor",
+      "First paragraph of the note.\n\nSecond paragraph after a blank line.\n\nThird paragraph rounds it out.");
+    const longId = await dockNote("third anchor", Array.from({ length: 14 }, (_, index) =>
+      `Line ${index + 1} of a very long note that must hit the shared clamp.`).join("\n\n"));
+
+    // Exact WYSIWYG: a plain-text note keeps one popover height across states.
+    const single = await popoverHeights(singleId);
+    assert(Math.abs(single.edit - single.read) < 1,
+      `a single-line note must keep the same popover height in read and edit: ${JSON.stringify(single)}`);
+
+    // ⌘S returns to the read state with focus alive inside the dialog — the
+    // read shortcuts must still fire — but with no visible focus outline.
+    await popover.locator(".note-editor").press("Control+s");
+    await popover.locator(".note-pop-view").waitFor();
+    const savedFocus = await page.evaluate(() => {
+      const active = document.activeElement;
+      const style = getComputedStyle(active);
+      return { inside: document.getElementById("notepop").contains(active),
+        outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth,
+        focusVisible: active.matches(":focus-visible") };
+    });
+    assert.equal(savedFocus.inside, true, `saving must keep focus inside the popover: ${JSON.stringify(savedFocus)}`);
+    assert(savedFocus.outlineStyle === "none" || parseFloat(savedFocus.outlineWidth) === 0 || !savedFocus.focusVisible,
+      `saving with ⌘S must not paint a focus outline: ${JSON.stringify(savedFocus)}`);
+    // Proof the keyboard flow survived the ringless focus target: the read
+    // state's delete shortcut still lands without touching the mouse.
+    await page.keyboard.press("Backspace");
+    await page.waitForFunction((id) => !document.querySelector(`.note-dot[data-note="${id}"]`), singleId);
+
+    const multi = await popoverHeights(multiId);
+    assert(Math.abs(multi.edit - multi.read) < 1,
+      `a multi-paragraph plain note must keep the same popover height in read and edit: ${JSON.stringify(multi)}`);
+    // Escape from the editor is the same keyboard path as ⌘S: no outline either.
+    await page.keyboard.press("Escape");
+    await popover.locator(".note-pop-view").waitFor();
+    const escapedFocus = await page.evaluate(() => {
+      const active = document.activeElement;
+      const style = getComputedStyle(active);
+      return { inside: document.getElementById("notepop").contains(active),
+        outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth,
+        focusVisible: active.matches(":focus-visible") };
+    });
+    assert.equal(escapedFocus.inside, true, `escaping the editor must keep focus inside the popover: ${JSON.stringify(escapedFocus)}`);
+    assert(escapedFocus.outlineStyle === "none" || parseFloat(escapedFocus.outlineWidth) === 0 || !escapedFocus.focusVisible,
+      `escaping the editor must not paint a focus outline: ${JSON.stringify(escapedFocus)}`);
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden" });
+
+    // Both states clamp a long note at one shared ceiling, so the frame never
+    // jumps entering or leaving the editor.
+    const long = await popoverHeights(longId);
+    assert(Math.abs(long.edit - long.read) < 1,
+      `a clamped long note must keep the same popover height in read and edit: ${JSON.stringify(long)}`);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await popover.waitFor({ state: "hidden" });
+    console.log("ok web app: note popover reads and edits at one height, and ⌘S leaves no focus ring");
   } finally {
     await context.close();
   }

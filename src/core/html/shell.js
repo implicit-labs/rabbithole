@@ -142,7 +142,7 @@ export const CANVAS_SHELL = `
 <!-- A docked note reads and edits in place: one anchored, non-modal dialog,
      opened from the wash or its margin dot. No header, no close button — Esc
      and outside-click dismiss it, exactly like every other product surface. -->
-<div id="notepop" class="anchored-menu note-pop" role="dialog" aria-label="Note">
+<div id="notepop" class="anchored-menu note-pop" role="dialog" aria-label="Note" tabindex="-1">
   <div class="note-pop-body"></div>
   <!-- One footer for both states: destructive on the left, primary on the
        right; the edit state swaps in the composer's commit pair, same bar. -->

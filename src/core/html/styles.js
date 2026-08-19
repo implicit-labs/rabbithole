@@ -614,12 +614,23 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* The note's own surface: the product's popover, sized to a paragraph. No
    header and no ×; read prose sits directly on that surface like a comment. */
 .note-pop { width: 304px; min-width: 0; }
+/* Saving with ⌘S parks the keyboard on the dialog surface itself; a dialog
+   carries no focus ring of its own, so the save never paints an outline. */
+.note-pop:focus { outline: none; }
 .note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain;
   padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
+/* WYSIWYG with the textarea: a blank line in the source is one line box, so
+   the rendered paragraph gap must be exactly one line box too — then a plain
+   note keeps the identical popover height in read and edit. The .md last-child
+   reset stays in charge of the trailing edge via :not(:last-child). */
+.note-pop-view .md p:not(:last-child) { margin-bottom: calc(var(--leading-doc) * 1em); }
 /* The edit state is the read state with a caret: same inset, same face, same
    rhythm — only the prose becomes a textarea, so no word ever moves. */
 .note-pop .ask-input { align-items: flex-start; padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
-.note-pop .note-editor { max-height: 190px; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
+/* 248px = the read view's 264px ceiling minus its 16px block padding: both
+   states clamp a long note at the same total height (kept in step with
+   NOTE_POP_EDITOR_MAX in docked-notes.js). */
+.note-pop .note-editor { max-height: 248px; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
 /* One footer for both states, wearing the composer's own hairline bar (see
    .ask-actions above), run out to the popover's edge. Read fills it with the
    two verbs in the composer's pill; edit swaps in the Note / Ask commit pair —

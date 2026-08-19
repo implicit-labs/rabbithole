@@ -59,6 +59,11 @@ import { teardownNode } from "./node-teardown.js";
  * edits — on the wash, on the dot, or on the note's own text in the popover.
  */
 
+// The read view clamps at 264px including its 16px block padding (styles.js
+// .note-pop-view); the textarea wears the same 248px content ceiling so a long
+// note keeps one popover height across read and edit.
+var NOTE_POP_EDITOR_MAX = 248;
+
 var DOT_STACK_GAP = 14;   // minimum vertical rhythm between two dots
 var DOT_RADIUS = 3.5;
 var WHOLE_CARD_TOP = 2;   // the ring leads the column, level with the first line
@@ -553,7 +558,7 @@ function renderPopoverState(state){
     body.replaceChildren(editor.input);
     // Sized and focused only once it is in the document: height needs layout
     // and focus needs a visible box.
-    autoGrowEl(session.editor, 190);
+    autoGrowEl(session.editor, NOTE_POP_EDITOR_MAX);
     session.editor.focus({ preventScroll: true });
     session.editor.setSelectionRange(session.editor.value.length, session.editor.value.length);
     return;
@@ -605,7 +610,7 @@ function buildNoteEditor(session){
     var commits = actions.querySelectorAll(".ask-commit");
     for (var i = 0; i < commits.length; i++) commits[i].disabled = disabled;
   }
-  editor.addEventListener("input", function(){ autoGrowEl(editor, 190); syncCommits(); });
+  editor.addEventListener("input", function(){ autoGrowEl(editor, NOTE_POP_EDITOR_MAX); syncCommits(); });
   wireComposerActions({ text: editor, actions: actions,
     hasDraft: function(){ return !!editor.value.trim(); },
     // The note editor's Enter contract everywhere: Enter is a newline, ⌘↵ asks,
@@ -661,9 +666,14 @@ function persistNoteText(node){
   postBrowserEvent({ type: "node_update", node_id: node.id, title: node.title, markdown: node.md });
 }
 
+/* A keyboard save (or Escape out of the editor) puts focus on the dialog
+   surface, not the prose: the surface keeps every popover shortcut alive —
+   Esc, ⌫, ⌘↵, double-click — but wears no focus ring by design, so the note
+   never comes back from a save outlined. */
 function focusPopover(){
-  var view = popEl().querySelector(".note-pop-view");
-  if (view) try { view.focus({ preventScroll: true }); } catch(_e){}
+  var surface = popEl();
+  if (!surface) return;
+  try { surface.focus({ preventScroll: true }); } catch(_e){}
 }
 
 function affordanceRect(node){
