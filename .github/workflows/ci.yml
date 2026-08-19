@@ -74,7 +74,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Generous only for the rare run that must pull apt packages through a
+    # sick mirror to repopulate the deb cache; steady state is ~3 minutes.
+    timeout-minutes: 22
     strategy:
       fail-fast: false
       matrix:
@@ -104,19 +106,32 @@ jobs:
       - name: Determine which browser OS dependencies this shard needs
         id: needs-deps
         run: echo "browsers=$(node test/support/e2e-shard.mjs --needs-deps ${{ matrix.shard }} 3)" >> "$GITHUB_OUTPUT"
-      # The default Ubuntu mirrors can stall apt indefinitely; cap every
-      # transfer and the whole step so a bad mirror costs minutes, not a run.
-      # 8 minutes accommodates a slow-but-alive mirror (a healthy install is
-      # ~1m; a slow one was observed to need >4m); true stalls die at the
-      # Acquire timeouts and get one retry well before the step cap.
+      # The Ubuntu mirrors have been observed both stalling outright and
+      # crawling at ~100KB/s, so the network is not something this job may
+      # depend on: the downloaded .debs are cached, apt is told to keep and
+      # read them from a runner-owned directory, and after one populating run
+      # every install is served from disk. Acquire timeouts plus a retry
+      # handle the update phase; the step cap only bounds a populate through
+      # a sick mirror.
+      - name: Cache apt browser packages
+        if: steps.needs-deps.outputs.browsers != ''
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apt-archives
+          key: apt-debs-${{ runner.os }}-${{ steps.needs-deps.outputs.browsers }}-${{ steps.playwright-version.outputs.version }}
+          restore-keys: |
+            apt-debs-${{ runner.os }}-${{ steps.needs-deps.outputs.browsers }}-
       - name: Install browser OS dependencies
         if: steps.needs-deps.outputs.browsers != ''
-        timeout-minutes: 8
+        timeout-minutes: 15
         run: |
-          sudo tee /etc/apt/apt.conf.d/99ci-timeouts >/dev/null <<'EOF'
+          mkdir -p "$HOME/.cache/apt-archives/partial"
+          sudo tee /etc/apt/apt.conf.d/99ci-timeouts >/dev/null <<EOF
           Acquire::Retries "3";
           Acquire::http::Timeout "20";
           Acquire::https::Timeout "20";
+          APT::Keep-Downloaded-Packages "true";
+          Dir::Cache::archives "$HOME/.cache/apt-archives/";
           EOF
           for i in 1 2; do
             if npx playwright install-deps ${{ steps.needs-deps.outputs.browsers }}; then
