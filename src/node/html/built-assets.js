@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { CANVAS_STYLES } from "../../core/html/styles.js";
+import { serializeForInlineScript } from "../../core/utils.js";
 import { createSourceReader, devEnabled, getCoreHtml } from "./dev-reload.js";
 
 const CLIENT_PATH = new URL("../../../dist/client.js", import.meta.url);
@@ -37,3 +38,27 @@ export const getDompurifyScript = createSourceReader(DOMPURIFY_SCRIPT_PATH);
 export const getMermaidScript = createSourceReader(MERMAID_SCRIPT_PATH);
 export const getPdfWorkerScript = createSourceReader(PDF_WORKER_PATH);
 export const getPdfJsScript = createSourceReader(PDFJS_PATH);
+export const getFrozenClientLiteral = memoizedTransform(readFrozenClientSource, serializeForInlineScript);
+export const getInlinePdfWorkerScript = memoizedTransform(getPdfWorkerScript, escapeScriptClose);
+export const getInlinePdfJsScript = memoizedTransform(getPdfJsScript, escapeScriptClose);
+
+function readFrozenClientSource() {
+  return UI_ASSETS ? UI_ASSETS.frozenClientSource : readFrozenClient();
+}
+
+function escapeScriptClose(source) {
+  return source.replace(/<\/script/gi, "<\\/script");
+}
+
+function memoizedTransform(read, transform) {
+  let previousSource = null;
+  let transformed = null;
+  return function readTransformed() {
+    const source = read();
+    if (source !== previousSource) {
+      previousSource = source;
+      transformed = transform(source);
+    }
+    return transformed;
+  };
+}

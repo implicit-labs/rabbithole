@@ -35,16 +35,16 @@ function defaultSnapshotHooks(){
 }
 
 var snapshotHooks = defaultSnapshotHooks();
-var preparedMermaidSource = "";
+var preparedSources = Object.create(null);
 
 export function setSnapshotHooks(hooks) {
   snapshotHooks = Object.assign(defaultSnapshotHooks(), hooks || {});
-  preparedMermaidSource = "";
+  preparedSources = Object.create(null);
 }
 
 export function resetSnapshotHooks() {
   snapshotHooks = defaultSnapshotHooks();
-  preparedMermaidSource = "";
+  preparedSources = Object.create(null);
 }
 
 function snapshotViewState() {
@@ -100,10 +100,28 @@ function extractDompurifySource() {
   if (typeof snapshotHooks.getDompurifySource === "function") {
     return snapshotHooks.getDompurifySource() || "";
   }
-  var script = document.scripts && document.scripts[0] ? document.scripts[0].textContent || "" : "";
   var marker = "\n(function(){";
-  var idx = script.indexOf(marker);
-  return idx === -1 ? "" : script.slice(0, idx);
+  var scripts = document.scripts || [];
+  for (var i = 0; i < scripts.length; i++) {
+    var script = scripts[i].textContent || "";
+    var idx = script.indexOf(marker);
+    if (idx !== -1) return script.slice(0, idx);
+  }
+  return "";
+}
+
+async function prepareSource(name, getter, fallback) {
+  var value = typeof getter === "function" ? await getter() : (typeof fallback === "function" ? fallback() : fallback);
+  preparedSources[name] = value || "";
+  return preparedSources[name];
+}
+
+function preparedSource(name, getter, fallback) {
+  if (Object.prototype.hasOwnProperty.call(preparedSources, name)) return preparedSources[name];
+  var value = typeof getter === "function" ? getter() : (typeof fallback === "function" ? fallback() : fallback);
+  // buildSnapshotHtml is deliberately synchronous. Async host adapters are
+  // resolved by buildSnapshotProjection before assembly.
+  return value && typeof value.then !== "function" ? value : "";
 }
 
 export async function buildSnapshotProjection() {
@@ -112,33 +130,43 @@ export async function buildSnapshotProjection() {
   await flushPendingSaves();
   var hole = await snapshotHooks.getSnapshotHole();
   var projection = createSnapshotProjection(hole, viewState, await buildAssetData(hole.nodes));
-  preparedMermaidSource = "";
-  if (snapshotProjectionUsesMermaid(projection)) {
+  var usesMermaid = snapshotProjectionUsesMermaid(projection);
+  var usesPdf = snapshotProjectionUsesPdf(projection);
+  preparedSources = Object.create(null);
+  await Promise.all([
+    prepareSource("stylesheet", snapshotHooks.getStylesheetText, ""),
+    prepareSource("dompurify", snapshotHooks.getDompurifySource, extractDompurifySource),
+    prepareSource("frozenClient", snapshotHooks.getFrozenClientSource, function(){ return window.__RABBITHOLE_FROZEN_CLIENT__ || ""; })
+  ]);
+  if (usesMermaid) {
     if (typeof snapshotHooks.getMermaidSource !== "function") throw new Error("Mermaid runtime is unavailable for this snapshot");
-    preparedMermaidSource = await snapshotHooks.getMermaidSource() || "";
-    if (!preparedMermaidSource) throw new Error("Mermaid runtime is unavailable for this snapshot");
+    if (!await prepareSource("mermaid", snapshotHooks.getMermaidSource, "")) throw new Error("Mermaid runtime is unavailable for this snapshot");
+  }
+  if (usesPdf) {
+    await Promise.all([
+      prepareSource("pdfWorker", snapshotHooks.getPdfWorkerSource, ""),
+      prepareSource("pdfJs", snapshotHooks.getPdfJsSource, "")
+    ]);
   }
   return projection;
 }
 
 export function buildSnapshotHtml(snapshotProjection) {
   var title = (snapshotProjection && snapshotProjection.hole && snapshotProjection.hole.title) || "Rabbithole";
-  var styleText = typeof snapshotHooks.getStylesheetText === "function"
-    ? snapshotHooks.getStylesheetText()
-    : "";
+  var usesMermaid = snapshotProjectionUsesMermaid(snapshotProjection);
+  var usesPdf = snapshotProjectionUsesPdf(snapshotProjection);
+  var styleText = preparedSource("stylesheet", snapshotHooks.getStylesheetText, "");
   if (!styleText) throw new Error("Frozen stylesheet is unavailable");
-  var dompurifySource = extractDompurifySource();
-  var frozenClient = typeof snapshotHooks.getFrozenClientSource === "function"
-    ? snapshotHooks.getFrozenClientSource()
-    : window.__RABBITHOLE_FROZEN_CLIENT__;
+  var dompurifySource = preparedSource("dompurify", snapshotHooks.getDompurifySource, extractDompurifySource);
+  var frozenClient = preparedSource("frozenClient", snapshotHooks.getFrozenClientSource, function(){ return window.__RABBITHOLE_FROZEN_CLIENT__; });
   if (!frozenClient) throw new Error("Frozen client bundle is unavailable");
   return assembleSnapshotHtml({
     title,
     stylesheetText: styleText,
     dompurifySource,
-    mermaidSource: snapshotProjectionUsesMermaid(snapshotProjection) ? preparedMermaidSource : "",
-    pdfWorkerSource: snapshotProjectionUsesPdf(snapshotProjection) && typeof snapshotHooks.getPdfWorkerSource === "function" ? snapshotHooks.getPdfWorkerSource() : "",
-    pdfJsSource: snapshotProjectionUsesPdf(snapshotProjection) && typeof snapshotHooks.getPdfJsSource === "function" ? snapshotHooks.getPdfJsSource() : "",
+    mermaidSource: usesMermaid ? preparedSource("mermaid", snapshotHooks.getMermaidSource, "") : "",
+    pdfWorkerSource: usesPdf ? preparedSource("pdfWorker", snapshotHooks.getPdfWorkerSource, "") : "",
+    pdfJsSource: usesPdf ? preparedSource("pdfJs", snapshotHooks.getPdfJsSource, "") : "",
     frozenClientSource: frozenClient,
     snapshotProjection,
   });

@@ -7,15 +7,20 @@
  */
 
 import { escapeHtml, serializeForInlineScript } from "../../core/utils.js";
-import { getDompurifyScript, getMermaidScript, getPdfJsScript, getPdfWorkerScript, getUiAssets } from "./built-assets.js";
+import { getDompurifyScript, getFrozenClientLiteral, getInlinePdfJsScript, getInlinePdfWorkerScript, getMermaidScript, getUiAssets } from "./built-assets.js";
 import { getCoreHtml } from "./dev-reload.js";
 
 export async function buildCanvasHtml(hydration) {
   const title = hydration?.title || "Rabbithole";
   const hydrationJson = serializeForInlineScript(hydration);
-  const { stylesheetText, clientSource, frozenClientSource } = await getUiAssets();
+  const { stylesheetText, clientSource } = await getUiAssets();
   const { CANVAS_SHELL } = await getCoreHtml();
-  const liveSnapshotSource = `  window.__RABBITHOLE_FROZEN_CLIENT__ = ${serializeForInlineScript(frozenClientSource)};\n`;
+  const usesPdf = !!hydration?.nodes?.some((node) => node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted);
+  const pdfRuntimeCarriers = usesPdf
+    ? `<script type="application/vnd.rabbithole+pdfjs" id="rabbithole-pdfjs-runtime">${getInlinePdfJsScript()}</script>
+<script type="application/vnd.rabbithole+pdf-worker" id="rabbithole-pdf-worker-runtime">${getInlinePdfWorkerScript()}</script>`
+    : "";
+  const liveSnapshotSource = `  window.__RABBITHOLE_FROZEN_CLIENT__ = ${getFrozenClientLiteral()};\n`;
   const liveSnapshotHoleHook = `      getSnapshotHole: async function(){
         var response = await fetch("/snapshot-hole", { cache: "no-store" });
         if (!response.ok) throw new Error("Snapshot document is unavailable");
@@ -35,8 +40,7 @@ ${stylesheetText}
 <body>
 ${CANVAS_SHELL}
 <script type="application/vnd.rabbithole+mermaid" id="rabbithole-mermaid-runtime">${getMermaidScript()}</script>
-<script type="application/vnd.rabbithole+pdfjs" id="rabbithole-pdfjs-runtime">${getPdfJsScript().replace(/<\/script/gi, "<\\/script")}</script>
-<script type="application/vnd.rabbithole+pdf-worker" id="rabbithole-pdf-worker-runtime">${getPdfWorkerScript().replace(/<\/script/gi, "<\\/script")}</script>
+${pdfRuntimeCarriers}
 <script>
 ${getDompurifyScript()}
 (function(){

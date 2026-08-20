@@ -6,6 +6,7 @@ import {
   closeCardMenu,
   disposeCanvasView,
   initCanvasView,
+  raiseCard,
   registerCanvasHooks,
   scheduleEdges,
   setMode
@@ -94,6 +95,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       updateComposerState: updateComposerState,
       scheduleViewSave: host.scheduleViewSave || noop,
       setMode: setMode,
+      raiseCard: raiseCard,
       mountDocImages: mountImages,
       animateScroll: animateScroll,
       renderDockedNotes: renderDockedNotes

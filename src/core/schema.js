@@ -52,9 +52,9 @@ function toPersistedNode(node, { cloneExtensions = true } = {}) {
   };
 }
 
-/** @param {unknown} raw */
-export function parsePersistedHole(raw) {
-  const hole = /** @type {Record<string, any>} */ (cloneJson(raw));
+/** @param {unknown} raw @param {{ clone?: boolean }} [options] */
+export function parsePersistedHole(raw, { clone = true } = {}) {
+  const hole = /** @type {Record<string, any>} */ (clone ? cloneJson(raw) : raw);
   if (!hole || typeof hole !== "object" || Array.isArray(hole)) {
     throw new Error("Persisted Rabbithole must be an object");
   }

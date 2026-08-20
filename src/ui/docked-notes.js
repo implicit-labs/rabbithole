@@ -33,6 +33,7 @@ import {
   effH,
   noteCommitFromEnter,
   noteComposerActions,
+  raiseCard,
   renderVisibility,
   scheduleEdges
 } from "./canvas-view.js";
@@ -210,6 +211,7 @@ export function placedChildrenOf(id){
 
 function presentPlacedNote(node, parent, sourceRect){
   if (canvasBuilt && !node.el) createNodeEl(node, false);
+  if (node.el) raiseCard(node.el);
   renderVisibility();
   renderDockedNotes(parent);
   drawEdges();
@@ -362,9 +364,10 @@ function syncDotColumn(host, notes, reader){
 /* Each dot sits on its anchor's line box, nudging off the exact line only when
    a neighbour is already there. Canvas rects arrive scaled by the camera; the
    column's own coordinates never are. */
-export function positionDockedNotes(){
-  syncTextOverlayMarks(document);
-  var layers = document.querySelectorAll(".note-dots");
+export function positionDockedNotes(root){
+  root = root && root.querySelectorAll ? root : document;
+  syncTextOverlayMarks(root);
+  var layers = root.matches && root.matches(".note-dots") ? [root] : root.querySelectorAll(".note-dots");
   for (var i = 0; i < layers.length; i++) positionDotColumn(layers[i]);
 }
 

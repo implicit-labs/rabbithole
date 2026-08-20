@@ -246,7 +246,7 @@ async function verifyPublishOutput() {
     process.exit(publish.status || 1);
   }
   const publishDir = path.join(ROOT, "publish");
-  for (const file of ["index.html", "app.js", "styles.css", "pdf.mjs", "pdf.worker.mjs", "og.jpg", "robots.txt", "llms.txt", "favicon.svg", "_redirects", "_headers", "sitemap.xml", "about/index.html", "about/styles.css", "about/about.js", "about/demo-ask.mp4", "about/demo-map.mp4"]) {
+  for (const file of ["index.html", "app.js", "styles.css", "katex.css", "dompurify.js", "pdf.mjs", "pdf.worker.mjs", "og.jpg", "robots.txt", "llms.txt", "favicon.svg", "_redirects", "_headers", "sitemap.xml", "about/index.html", "about/styles.css", "about/about.js", "about/demo-ask.mp4", "about/demo-map.mp4"]) {
     await fs.access(path.join(publishDir, file));
   }
   const redirects = await fs.readFile(path.join(publishDir, "_redirects"), "utf8");
@@ -257,7 +257,9 @@ async function verifyPublishOutput() {
   assert(redirects.includes("/self-host https://github.com/shlokkhemani/rabbithole#run-the-browser-version-locally 302"), "the stable self-host route should lead to local browser instructions");
   const headers = await fs.readFile(path.join(publishDir, "_headers"), "utf8");
   assert(headers.includes("/app.js\n  Cache-Control: public, max-age=0, must-revalidate"), "the mutable app entry must revalidate after every deployment");
-  assert.equal(headers.includes("/chunks/*"), false, "a chunk-free application must not publish dead chunk caching policy");
+  assert(headers.includes("/chunks/*\n  Cache-Control: public, max-age=31536000, immutable"), "content-hashed deferred chunks should stay immutable between deployments");
+  const chunks = await fs.readdir(path.join(publishDir, "chunks"));
+  assert(chunks.some((name) => /^canvas-runtime-[A-Z0-9]+\.js$/.test(name)), "the hosted canvas runtime should remain outside the landing-page entry chunk");
   const html = await fs.readFile(path.join(publishDir, "index.html"), "utf8");
   assert(html.includes("Rabbithole — an infinite canvas for learning"));
   assert(html.includes("connect-src 'self' blob: https: http: https://openrouter.ai https://api.github.com"), "web CSP should allow source-PDF blobs, any custom endpoint including one on the local network, and the public GitHub star-count request");
@@ -267,14 +269,10 @@ async function verifyPublishOutput() {
   const canonicalScript = html.match(/<script id="canonical-host-script">([\s\S]*?)<\/script>/)?.[1] || "";
   assert.equal(canonicalScript, 'if(location.hostname==="www.rabbithole.ing")location.replace("https://rabbithole.ing"+location.pathname+location.search+location.hash);');
   assert.equal(html.indexOf('<script id="canonical-host-script">'), html.indexOf("<head>") + "<head>\n".length, "host canonicalization should be the first thing in the head");
-  const entryVersions = [...html.matchAll(/(?:favicon\.svg|styles\.css|dompurify\.js|frozen-source\.js|app\.js)\?v=([a-f0-9]{12})/g)].map((match) => match[1]);
-  assert.equal(entryVersions.length, 5, "every mutable browser entry asset should carry a content-derived version");
+  const entryVersions = [...html.matchAll(/(?:favicon\.svg|styles\.css|app\.js)\?v=([a-f0-9]{12})/g)].map((match) => match[1]);
+  assert.equal(entryVersions.length, 3, "every critical browser entry asset should carry a content-derived version");
   assert.equal(new Set(entryVersions).size, 1, "browser entry assets should share one atomic release version");
-  const chunkNames = await fs.readdir(path.join(publishDir, "chunks")).catch((error) => {
-    if (error?.code === "ENOENT") return [];
-    throw error;
-  });
-  assert.deepEqual(chunkNames, [], "the published app must not reintroduce fragile application lazy chunks");
+  assert(chunks.every((name) => /-[A-Z0-9]+\.js$/.test(name)), "every deferred application chunk should carry a content-derived filename");
   const initialStyleAt = html.indexOf('id="initial-theme-style"');
   const initialScriptAt = html.indexOf('id="initial-theme-script"');
   const stylesheetAt = html.indexOf('rel="stylesheet"');

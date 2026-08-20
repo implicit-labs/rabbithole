@@ -28,10 +28,20 @@
       "description": "Statically loaded web application JavaScript",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded. Docked notes ride the shared client bundle.",
-      "baseline": 872719,
-      "ceiling": 916354.95,
-      "measured_at_commit": "bb59262"
+      "rationale": "Exact transitive size of app.js and its static chunks; canvas, export, math, and PDF runtimes stay outside the landing-page critical path.",
+      "baseline": 295169,
+      "ceiling": 309927.45,
+      "measured_at_commit": "f542661"
+    },
+    {
+      "id": "web_initial_css_bytes",
+      "description": "CSS loaded before the hosted app becomes interactive",
+      "unit": "bytes",
+      "tolerance": 0.05,
+      "rationale": "Exact size of every initial stylesheet; math fonts and rules remain lazy with the canvas runtime.",
+      "baseline": 150208,
+      "ceiling": 157718.4,
+      "measured_at_commit": "f542661"
     },
     {
       "id": "pdf_runtime_distribution_bytes",

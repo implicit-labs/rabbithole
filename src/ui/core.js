@@ -29,6 +29,7 @@ export var canvasBuilt = false;   // canvas DOM is built lazily on first entry
 export var canvasFramed = false;  // frame-all runs once; afterwards the view is preserved
 export var viewAdjusted = false;  // only user-adjusted camera state is persisted
 var orderCounter = 0;
+var stackCounter = 0;
 var loadingTimers = new Set();
 
 // refs
@@ -100,6 +101,7 @@ export function initCore(inputHydration) {
   canvasFramed = false;
   viewAdjusted = false;
   orderCounter = 0;
+  stackCounter = 0;
   loadingTimers.clear();
   readerMain = document.getElementById("reader-main");
   // The lineage trail is owned by the UI, not the shell: it lives inside the
@@ -172,6 +174,7 @@ function resetCoreState(){
   canvasFramed = false;
   viewAdjusted = false;
   orderCounter = 0;
+  stackCounter = 0;
   loadingTimers.clear();
   readerMain = breadcrumbEl = viewport = world = edgesSvg = null;
   ask = askText = zoomLabel = hintEl = bannerEl = null;
@@ -204,6 +207,7 @@ export function setCanvasBuilt(value){ canvasBuilt = !!value; }
 export function setCanvasFramed(value){ canvasFramed = !!value; }
 export function setViewAdjusted(value){ viewAdjusted = !!value; }
 export function nextOrder(){ return orderCounter++; }
+export function nextStack(){ return stackCounter++; }
   // ---------- helpers ----------
 export function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -236,7 +240,15 @@ export function unregisterNode(id) {
     return node;
   }
 export function childrenOf(id) {
-    return childrenByParent[id] ? childrenByParent[id].filter(function(node){ return !node._pendingDelete; }) : [];
+    var siblings = childrenByParent[id];
+    if (!siblings) return [];
+    // The overwhelmingly common path has no undo-pending removal. Return the
+    // maintained adjacency list directly and allocate only during that brief
+    // state; callers treat this collection as read-only.
+    for (var i = 0; i < siblings.length; i++) {
+      if (siblings[i]._pendingDelete) return siblings.filter(function(node){ return !node._pendingDelete; });
+    }
+    return siblings;
   }
 export function isVisible(node, cache){
     if (node._pendingDelete) return false;

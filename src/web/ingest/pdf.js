@@ -73,21 +73,28 @@ async function ingestPdf(source, {
       notes,
     };
     if (includeText !== false) result.page_lines = [];
-    for (let index = 0; index < processedPages.length; index += 1) {
-      const pageNumber = processedPages[index];
-      onProgress?.({ phase: "page", message: `Preparing page ${index + 1} of ${processedPages.length}`, page: pageNumber, index: index + 1, total: processedPages.length, pageCount: doc.numPages });
+    let completedPages = 0;
+    const pageResults = await mapConcurrent(processedPages, 4, async (pageNumber) => {
       let page = null;
       try {
         page = await doc.getPage(pageNumber);
-        result.page_metadata.push(pdfPageMetadata(page, pageNumber));
-        if (includeText !== false) {
-          result.page_lines.push({ page: pageNumber, lines: await extractPdfPageLines(page) });
-        }
+        return {
+          metadata: pdfPageMetadata(page, pageNumber),
+          lines: includeText !== false ? await extractPdfPageLines(page) : null,
+        };
       } catch (err) {
-        notes.push(`Page ${pageNumber} could not be fully processed: ${err instanceof Error ? err.message : String(err)}`);
+        return { error: `Page ${pageNumber} could not be fully processed: ${err instanceof Error ? err.message : String(err)}` };
       } finally {
         page?.cleanup?.();
+        completedPages += 1;
+        onProgress?.({ phase: "page", message: `Preparing page ${completedPages} of ${processedPages.length}`, page: pageNumber, index: completedPages, total: processedPages.length, pageCount: doc.numPages });
       }
+    });
+    for (let index = 0; index < pageResults.length; index += 1) {
+      const pageResult = pageResults[index];
+      if (pageResult.error) { notes.push(pageResult.error); continue; }
+      result.page_metadata.push(pageResult.metadata);
+      if (includeText !== false) result.page_lines.push({ page: processedPages[index], lines: pageResult.lines });
     }
 
     // Import and the first viewer mount are one user action. Transfer the
@@ -101,6 +108,19 @@ async function ingestPdf(source, {
       await loadingTask.destroy().catch(() => {});
     }
   }
+}
+
+async function mapConcurrent(values, concurrency, fn) {
+  const results = new Array(values.length);
+  let next = 0;
+  async function worker() {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await fn(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return results;
 }
 
 export async function ingestPdfToStoredHole({

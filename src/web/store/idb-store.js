@@ -75,7 +75,8 @@ export class IdbStore {
     const raw = await requestToPromise(tx.objectStore(HOLES).get(safeHoleId));
     await done;
     if (!raw) return null;
-    return parsePersistedHole(raw);
+    // IndexedDB has already returned a structured clone owned by this request.
+    return parsePersistedHole(raw, { clone: false });
   }
 
   async saveHole(hole, options = {}) {
@@ -125,6 +126,22 @@ export class IdbStore {
     const row = await requestToPromise(tx.objectStore(ASSETS).get([safeHoleId, safeName]));
     await done;
     return row ? row.blob : null;
+  }
+
+  async getAssets(holeId) {
+    const safeHoleId = assertSafeHoleId(holeId);
+    const db = await this.open();
+    const tx = db.transaction(ASSETS, "readonly");
+    const done = txDone(tx);
+    const store = tx.objectStore(ASSETS);
+    const rows = await requestToPromise(this.IDBKeyRange
+      ? store.getAll(this.IDBKeyRange.bound([safeHoleId, ""], [safeHoleId, "\uffff"]))
+      : store.getAll());
+    await done;
+    return rows
+      .filter((row) => row.hole_id === safeHoleId)
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((row) => ({ name: row.name, blob: row.blob }));
   }
 
   async putAsset(holeId, name, bytes) {

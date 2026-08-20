@@ -5,6 +5,7 @@ import {
 
 var assetData = null;
 var assetNames = null;
+var utf8Encoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
 
 export function setRendererAssetData(data) {
   assetData = data && typeof data === "object" ? data : null;
@@ -17,8 +18,8 @@ export function registerRendererAssetName(name) {
 
 function browserEncodeBase64Utf8(value) {
   var source = String(value == null ? "" : value);
-  if (typeof TextEncoder === "function") {
-    var bytes = new TextEncoder().encode(source);
+  if (utf8Encoder) {
+    var bytes = utf8Encoder.encode(source);
     var chunks = [];
     for (var i = 0; i < bytes.length; i += 8192) {
       var end = Math.min(i + 8192, bytes.length);

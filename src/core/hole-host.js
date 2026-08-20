@@ -12,6 +12,13 @@ export function createSaveChain({ save, debounceMs, onTimerChange = () => {} }) 
   let timer = null;
   /** @type {Promise<unknown>} */
   let savingChain = Promise.resolve();
+  let changeVersion = 0;
+  let persistedVersion = 0;
+  let queuedVersion = 0;
+
+  function markDirty() {
+    changeVersion += 1;
+  }
 
   function flush() {
     if (timer) {
@@ -19,12 +26,27 @@ export function createSaveChain({ save, debounceMs, onTimerChange = () => {} }) 
       timer = null;
       onTimerChange(null);
     }
+    // Visibility changes, exports, route transitions, and disposal can all ask
+    // for durability after the latest version is already queued. Reuse that
+    // promise instead of cloning and writing the whole hole again.
+    if (changeVersion <= queuedVersion) return savingChain;
+    const version = changeVersion;
     const write = save();
-    savingChain = savingChain.catch(() => {}).then(write);
+    queuedVersion = version;
+    savingChain = savingChain.catch(() => {}).then(write).then((result) => {
+      persistedVersion = Math.max(persistedVersion, version);
+      return result;
+    }, (error) => {
+      // Retry a failed latest write on the next flush. A newer queued write
+      // already contains this state, so an older failure must not dirty it.
+      if (queuedVersion === version) queuedVersion = persistedVersion;
+      throw error;
+    });
     return savingChain;
   }
 
   function schedule() {
+    markDirty();
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, debounceMs);
     onTimerChange(timer);
@@ -37,7 +59,7 @@ export function createSaveChain({ save, debounceMs, onTimerChange = () => {} }) 
     onTimerChange(null);
   }
 
-  return { schedule, flush, cancel };
+  return { markDirty, schedule, flush, cancel };
 }
 
 /**

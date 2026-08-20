@@ -1,9 +1,9 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { getAssetContentType, MAX_ASSET_BYTES, validateImageAssetName } from "../../core/assets.js";
-import { defaultFsStore } from "../fs-store.js";
-import { resolveAsset } from "../fs-store.js";
+import { defaultFsStore, resolveAsset, resolveAssetInfo } from "../fs-store.js";
 import { slugifyTitle } from "../../core/utils.js";
 import { toPersistedHole } from "../../core/schema.js";
 import { parseRequestBody } from "./http.js";
@@ -13,6 +13,7 @@ import { log } from "../logger.js";
 
 const require = createRequire(import.meta.url);
 const pdfPackageRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+const pdfRuntimeAssetCache = new Map();
 
 /**
  * @param {import("./session.js").RabbitHoleSession} session
@@ -34,8 +35,8 @@ export async function handleSessionRequest(session, req, res) {
     return;
   }
 
-  if (req.method === "GET" && assetRequestName !== undefined) {
-    await serveSessionAsset(session, assetRequestName, res);
+  if ((req.method === "GET" || req.method === "HEAD") && assetRequestName !== undefined) {
+    await serveSessionAsset(session, assetRequestName, req, res);
     return;
   }
 
@@ -59,7 +60,7 @@ export async function handleSessionRequest(session, req, res) {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store, no-cache, must-revalidate",
     });
-    res.end(JSON.stringify(toPersistedHole(session.toHole())));
+    res.end(JSON.stringify(toPersistedHole(session.toHole(), { cloneExtensions: false })));
     return;
   }
 
@@ -135,8 +136,17 @@ async function servePdfRuntimeAsset(pathname, res) {
     res.writeHead(404, { ...headers, "Content-Type": "text/plain" }); res.end("Not Found"); return;
   }
   try {
-    const bytes = await fs.readFile(path.join(pdfPackageRoot, match[1], match[2]));
-    res.writeHead(200, { ...headers, "Content-Type": "application/octet-stream" }); res.end(bytes);
+    const key = `${match[1]}/${match[2]}`;
+    let pending = pdfRuntimeAssetCache.get(key);
+    if (!pending) {
+      pending = fs.readFile(path.join(pdfPackageRoot, key)).catch((error) => {
+        pdfRuntimeAssetCache.delete(key);
+        throw error;
+      });
+      pdfRuntimeAssetCache.set(key, pending);
+    }
+    const bytes = await pending;
+    res.writeHead(200, { ...headers, "Content-Type": "application/octet-stream", "Content-Length": bytes.byteLength }); res.end(bytes);
   } catch {
     res.writeHead(404, { ...headers, "Content-Type": "text/plain" }); res.end("Not Found");
   }
@@ -145,11 +155,12 @@ async function servePdfRuntimeAsset(pathname, res) {
 /**
  * @param {import("./session.js").RabbitHoleSession} session
  * @param {string | null} name
+ * @param {import("node:http").IncomingMessage} req
  * @param {import("node:http").ServerResponse} res
  */
-async function serveSessionAsset(session, name, res) {
+async function serveSessionAsset(session, name, req, res) {
   const headers = {
-    "Cache-Control": "no-store",
+    "Cache-Control": "private, max-age=0, must-revalidate",
     "X-Content-Type-Options": "nosniff",
   };
   if (!name) {
@@ -158,26 +169,119 @@ async function serveSessionAsset(session, name, res) {
     return;
   }
 
-  let filePath = null;
+  let asset = null;
   try {
-    filePath = await resolveAsset(session.holeId, name);
+    asset = await resolveAssetInfo(session.holeId, name);
   } catch {
-    filePath = null;
+    asset = null;
   }
-  if (!filePath) {
+  if (!asset) {
     res.writeHead(404, { ...headers, "Content-Type": "text/plain" });
     res.end("Not Found");
     return;
   }
 
   try {
-    const bytes = await fs.readFile(filePath);
-    res.writeHead(200, { ...headers, "Content-Type": getAssetContentType(name) });
-    res.end(bytes);
+    const { filePath, stat } = asset;
+    const etag = assetEtag(stat);
+    const responseHeaders = {
+      ...headers,
+      ETag: etag,
+      "Last-Modified": stat.mtime.toUTCString(),
+    };
+    const requestedRange = req.headers["if-range"] && req.headers["if-range"] !== etag
+      ? undefined
+      : req.headers.range;
+    const range = parseByteRange(requestedRange, stat.size);
+    if (range === false) {
+      res.writeHead(416, {
+        ...responseHeaders,
+        "Content-Type": "text/plain",
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes */${stat.size}`,
+      });
+      res.end("Range Not Satisfiable");
+      return;
+    }
+    if (!range && req.headers["if-none-match"] === etag) {
+      res.writeHead(304, responseHeaders);
+      res.end();
+      return;
+    }
+    const start = range ? range.start : 0;
+    const end = range ? range.end : stat.size - 1;
+    res.writeHead(range ? 206 : 200, {
+      ...responseHeaders,
+      "Content-Type": getAssetContentType(name),
+      "Accept-Ranges": "bytes",
+      "Content-Length": Math.max(0, end - start + 1),
+      ...(range ? { "Content-Range": `bytes ${start}-${end}/${stat.size}` } : {}),
+    });
+    if (req.method === "HEAD" || stat.size === 0) {
+      res.end();
+      return;
+    }
+    await pipeFileRange(filePath, res, start, end);
   } catch {
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(404, { ...headers, "Content-Type": "text/plain" });
     res.end("Not Found");
   }
+}
+
+/** @param {import("node:fs").Stats} stat */
+function assetEtag(stat) {
+  return `"${Number(stat.ino).toString(16)}-${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
+}
+
+/** @param {string | string[] | undefined} header @param {number} size */
+function parseByteRange(header, size) {
+  if (!header) return null;
+  if (typeof header !== "string" || size <= 0) return false;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return false;
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return false;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= size || end < start) return false;
+    end = Math.min(end, size - 1);
+  }
+  return { start, end };
+}
+
+/** @param {string} filePath @param {import("node:http").ServerResponse} res @param {number} start @param {number} end */
+function pipeFileRange(filePath, res, start, end) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const stream = fsSync.createReadStream(filePath, { start, end });
+    stream.on("error", (error) => {
+      if (!res.destroyed) res.destroy(error);
+      finish();
+    });
+    res.on("finish", finish);
+    res.on("close", () => {
+      // A range consumer may cancel as soon as PDF.js has enough bytes. Stop
+      // the file descriptor too instead of continuing a now-unobserved read.
+      if (!stream.destroyed) stream.destroy();
+      finish();
+    });
+    stream.pipe(res);
+  });
 }
 
 async function putSessionAsset(session, req, res, rawName) {

@@ -13,17 +13,12 @@ import { getGenerationSetupStatus, invalidateGenerationSetup } from "./settings/
 import { installTestSeam } from "./test-seam.js";
 import { IdbStore } from "./store/idb-store.js";
 import { DirectRabbitholeHost, createHoleFromMarkdown, createPendingHoleFromQuestion } from "./transport/direct-host.js";
-import { startRabbithole } from "../ui/entry.js";
-import { syncPdfTranscriptionControls } from "../ui/pdf-view.js";
 import { openDialog } from "../ui/primitives/dialog.js";
 import { openPopover } from "../ui/primitives/popover.js";
 import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
 import { BUNNY_MARK_SVG, iconSvg } from "../core/html/icons.js";
 import { escapeHtml } from "../core/utils.js";
 import { wireNotice } from "../ui/primitives/notice.js";
-import { setSnapshotHooks, buildSnapshotProjection, buildSnapshotHtml } from "../ui/snapshot.js";
-import { flushPendingSaves } from "../ui/transport-status.js";
-import { registerRendererAssetName } from "../ui/renderer.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
 import { initSettingsSheet, registerSettingsSection } from "../ui/settings-sheet.js";
 import { applyTheme, toggleTheme } from "../ui/preferences.js";
@@ -32,6 +27,14 @@ import { describePdfImportFailure, ingestPdfToStoredHole } from "./ingest/pdf.js
 import { buildRabbitholeExport, downloadRabbitholeExport, importRabbitholeFile, importSnapshotFile, rabbitholeFilename } from "./portable.js";
 import { createWhimsicalHoleId, holeIdFromPathname, pathnameForHole } from "./hole-id.js";
 import { getMermaidSource, loadMermaidRuntime } from "./mermaid-runtime.js";
+import {
+  getDompurifySource,
+  getFrozenClientSource,
+  getFrozenPdfJsSource,
+  getFrozenPdfWorkerSource,
+  getFrozenStylesheet,
+} from "./snapshot-runtime.js";
+import { currentCanvasRuntime, loadCanvasRuntime, warmCanvasRuntime } from "./canvas-runtime-loader.js";
 
 const LAST_HOLE_KEY = "rh-last-hole";
 const GITHUB_REPO_API_URL = "https://api.github.com/repos/shlokkhemani/rabbithole";
@@ -87,21 +90,32 @@ async function boot() {
   initComposer();
   initGlobalDrops();
 
-  const initial = await chooseInitialHole();
-  await renderRail({ refresh: railSummaries == null });
+  const summariesPromise = store.listHoles().then((summaries) => {
+    railSummaries = summaries;
+    lastHoleCount = summaries.length;
+    return summaries;
+  });
+  const initial = await chooseInitialHole(summariesPromise);
+  if (initial) void loadCanvasRuntime();
+  await summariesPromise;
+  await renderRail({ refresh: false });
   if (initial) {
     await startHole(initial, { replace: true });
   } else {
     showBlankCanvas();
+    warmCanvasRuntime();
   }
   if (initialBridgePairing) beginBridgePairingSetup();
   installTestSeam({
     store,
     currentHoleId: () => currentHoleId,
     createDocument: createFromComposerDocument,
-    exportSnapshot: async () => buildSnapshotHtml(await buildSnapshotProjection()),
+    exportSnapshot: async () => {
+      const runtime = await loadCanvasRuntime();
+      return runtime.buildSnapshotHtml(await runtime.buildSnapshotProjection());
+    },
     exportPortable: async () => {
-      await flushPendingSaves();
+      await (await loadCanvasRuntime()).flushPendingSaves();
       await currentHost?.flushSave();
       return buildRabbitholeExport(store, currentHoleId);
     },
@@ -192,7 +206,7 @@ function renderShell() {
   requestAnimationFrame(syncRailPosition);
 }
 
-async function chooseInitialHole() {
+async function chooseInitialHole(summariesPromise = store.listHoles()) {
   const pathHole = holeIdFromPathname(location.pathname);
   if (pathHole) {
     return store.loadHole(pathHole);
@@ -202,7 +216,7 @@ async function chooseInitialHole() {
     const stored = await store.loadHole(storedId);
     if (stored) return stored;
   }
-  const holes = await store.listHoles();
+  const holes = await summariesPromise;
   railSummaries = holes;
   lastHoleCount = holes.length;
   if (!holes.length) return null;
@@ -820,6 +834,7 @@ function startHole(hole, options = {}) {
 }
 
 async function mountHole(hole, { replace = false } = {}) {
+  const canvasRuntime = await loadCanvasRuntime();
   await disposeCurrentHole();
   resetHoleSurface();
   currentHoleId = hole.hole_id;
@@ -831,18 +846,18 @@ async function mountHole(hole, { replace = false } = {}) {
   if (replace) history.replaceState(null, "", holePath);
   else history.pushState(null, "", holePath);
 
-  setSnapshotHooks({
+  canvasRuntime.setSnapshotHooks({
     fetchAssetBinary: async (name) => store.getAsset(currentHoleId, name),
     getSnapshotHole: async () => {
       await currentHost.flushSave();
       return store.loadHole(currentHoleId);
     },
-    getFrozenClientSource: () => window.__RABBITHOLE_FROZEN_CLIENT__ || "",
-    getDompurifySource: () => window.__RABBITHOLE_DOMPURIFY_SOURCE__ || "",
-    getPdfWorkerSource: () => window.__RABBITHOLE_FROZEN_PDF_WORKER_SOURCE__ || "",
-    getPdfJsSource: () => window.__RABBITHOLE_FROZEN_PDFJS_SOURCE__ || "",
+    getFrozenClientSource,
+    getDompurifySource,
+    getPdfWorkerSource: getFrozenPdfWorkerSource,
+    getPdfJsSource: getFrozenPdfJsSource,
     getMermaidSource,
-    getStylesheetText: () => window.__RABBITHOLE_FROZEN_STYLES__ || "",
+    getStylesheetText: getFrozenStylesheet,
   });
 
   if (hole.nodes?.some((node) => node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted)) {
@@ -875,7 +890,7 @@ async function mountHole(hole, { replace = false } = {}) {
     const hydration = host.hydration();
     currentAssetLease = await createLiveAssetData(hole.hole_id);
     hydration.asset_data = currentAssetLease.data;
-    currentUi = startRabbithole(hydration, {
+    currentUi = canvasRuntime.startRabbithole(hydration, {
       transport: host.adapter(),
       exportPortable: exportCurrentRabbithole,
       loadMermaid: loadMermaidRuntime,
@@ -948,7 +963,7 @@ function showBlankCanvas() {
 }
 
 async function exportCurrentRabbithole() {
-  await flushPendingSaves();
+  await (await loadCanvasRuntime()).flushPendingSaves();
   await currentHost?.flushSave();
   if (!currentHoleId) throw new Error("No open Rabbithole to export.");
   const payload = await downloadRabbitholeExport(store, currentHoleId);
@@ -1108,6 +1123,7 @@ function currentHoleNeedsPdfTranscription() {
 async function refreshPdfTranscriptionCapability(settings = loadSettings()) {
   const token = ++pdfTranscriptionCheckToken;
   currentPdfTranscriptionCapability = pdfTranscriptionCapability(settings);
+  const { syncPdfTranscriptionControls } = await loadCanvasRuntime();
   syncPdfTranscriptionControls(document, currentPdfTranscriptionCapability);
   let detected = await detectPdfTranscriptionCapability(settings);
   if (token !== pdfTranscriptionCheckToken) return currentPdfTranscriptionCapability;
@@ -1213,19 +1229,17 @@ async function createLiveAssetData(holeId) {
   const data = {};
   const urls = [];
   try {
-    const names = await store.listAssets(holeId);
-    let next = 0;
-    await Promise.all(Array.from({ length: Math.min(4, names.length) }, async () => {
-      while (next < names.length) {
-        const name = names[next++];
-        const blob = await store.getAsset(holeId, name);
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          data[name] = url;
-          urls.push(url);
-        }
-      }
-    }));
+    // One IndexedDB transaction returns Blob handles for the complete lease.
+    // Opening an asset-heavy hole should not pay one transaction per image.
+    const assets = typeof store.getAssets === "function"
+      ? await store.getAssets(holeId)
+      : await Promise.all((await store.listAssets(holeId)).map(async (name) => ({ name, blob: await store.getAsset(holeId, name) })));
+    for (const { name, blob } of assets) {
+      if (!blob) continue;
+      const url = URL.createObjectURL(blob);
+      data[name] = url;
+      urls.push(url);
+    }
   } catch (error) {
     urls.forEach((url) => URL.revokeObjectURL(url));
     throw error;
@@ -1237,7 +1251,7 @@ async function createLiveAssetData(holeId) {
       if (disposed) return;
       if (data[name]) URL.revokeObjectURL(data[name]);
       const url = URL.createObjectURL(blob); data[name] = url; urls.push(url);
-      registerRendererAssetName(name);
+      currentCanvasRuntime()?.registerRendererAssetName(name);
     },
     revoke(name) {
       if (disposed || !data[name]) return;

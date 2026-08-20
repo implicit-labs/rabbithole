@@ -22,9 +22,8 @@ await copyContents(webDist, publishDir);
 await fs.mkdir(path.join(publishDir, "about"), { recursive: true });
 await copyContents(aboutSourceDir, path.join(publishDir, "about"));
 await injectAboutIcons(path.join(publishDir, "about", "index.html"));
-for (const asset of ["demo-ask.mp4", "demo-ask-poster.jpg", "demo-map.mp4", "demo-map-poster.jpg"]) {
-  await fs.copyFile(path.join(websitePublicDir, asset), path.join(publishDir, "about", asset));
-}
+await Promise.all(["demo-ask.mp4", "demo-ask-poster.jpg", "demo-map.mp4", "demo-map-poster.jpg"].map((asset) =>
+  fs.copyFile(path.join(websitePublicDir, asset), path.join(publishDir, "about", asset))));
 await versionAboutAssets(path.join(publishDir, "about"));
 await fs.copyFile(path.join(websitePublicDir, "og.jpg"), path.join(publishDir, "og.jpg"));
 await fs.copyFile(path.join(websitePublicDir, "robots.txt"), path.join(publishDir, "robots.txt"));
@@ -60,22 +59,22 @@ function run(command, args, options = {}) {
 
 async function copyContents(sourceDir, targetDir) {
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    await fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
+  await Promise.all(entries.map((entry) => fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
       recursive: true,
       force: true,
       errorOnExist: false,
-    });
-  }
+    })));
 }
 
 async function versionAboutAssets(aboutDir) {
   const names = ["styles.css", "about.js", "demo-ask.mp4", "demo-ask-poster.jpg", "demo-map.mp4", "demo-map-poster.jpg"];
   const hash = createHash("sha256");
-  for (const name of names) {
+  const contents = await Promise.all(names.map((name) => fs.readFile(path.join(aboutDir, name))));
+  for (let index = 0; index < names.length; index += 1) {
+    const name = names[index];
     hash.update(name);
     hash.update("\0");
-    hash.update(await fs.readFile(path.join(aboutDir, name)));
+    hash.update(contents[index]);
     hash.update("\0");
   }
   const version = hash.digest("hex").slice(0, 12);
@@ -119,13 +118,19 @@ function headersText() {
     "/styles.css",
     "  Cache-Control: public, max-age=0, must-revalidate",
     "",
+    "/katex.css",
+    "  Cache-Control: public, max-age=0, must-revalidate",
+    "",
     "/dompurify.js",
     "  Cache-Control: public, max-age=0, must-revalidate",
     "",
     "/mermaid.js",
     "  Cache-Control: public, max-age=0, must-revalidate",
     "",
-    "/frozen-source.js",
+    "/frozen-client.js",
+    "  Cache-Control: public, max-age=0, must-revalidate",
+    "",
+    "/frozen-styles.css",
     "  Cache-Control: public, max-age=0, must-revalidate",
     "",
     "/pdf.mjs",
@@ -133,6 +138,9 @@ function headersText() {
     "",
     "/pdf.worker.mjs",
     "  Cache-Control: public, max-age=0, must-revalidate",
+    "",
+    "/chunks/*",
+    "  Cache-Control: public, max-age=31536000, immutable",
     "",
     "/cmaps/*",
     "  Cache-Control: public, max-age=0, must-revalidate",

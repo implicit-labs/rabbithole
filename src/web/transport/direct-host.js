@@ -38,7 +38,7 @@ export class DirectRabbitholeHost {
     this.mintGenerationRunId = mintGenerationRunId;
     this.registerAssetUrl = registerAssetUrl;
     this.revokeAssetUrl = revokeAssetUrl;
-    this.state = createHoleState(hole);
+    this.state = createHoleState(hole, { cloneExtensions: false });
     this.holeId = this.state.hole_id;
     this.title = this.state.title;
     this.saveTimer = 0;
@@ -338,6 +338,7 @@ export class DirectRabbitholeHost {
   dispatch(event, options) {
     const reduced = reduceHoleEvent(this.state, event, { ...options, mutate: true });
     this.state = reduced.state;
+    this.saveChain.markDirty();
     return reduced.effects || {};
   }
 

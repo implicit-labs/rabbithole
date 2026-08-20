@@ -4,8 +4,8 @@ import {
   mode,
   nodes,
 } from "./core.js";
-import { focusedMark, jumpToOrigin, openNode, stepMark } from "./reader.js";
-import { setMode, tidy } from "./canvas-view.js";
+import { focusedMark, jumpToOrigin, openNode, returnToCanvas, stepMark } from "./reader.js";
+import { tidy } from "./canvas-view.js";
 import { togglePalette } from "./palette.js";
 import { hydrateInitialState } from "./hydrate.js";
 import { createCleanupScope } from "./lifecycle.js";
@@ -53,7 +53,7 @@ function onGlobalKeydown(e){
     }
     // Esc always collapses the focused state back onto the canvas — the same
     // muscle memory as leaving full screen. Popovers get first claim on it.
-    if (e.key === "Escape" && mode === "reader" && !overlayOpen()){ setMode("canvas"); return; }
+    if (e.key === "Escape" && mode === "reader" && !overlayOpen()){ returnToCanvas(); return; }
     if ((e.key === "t" || e.key === "T") && mode === "canvas"){ tidy("keyboard"); return; }
     // Quick Look: space expands the current card into the reader.
     if (e.key === " " && mode === "canvas"){
@@ -75,7 +75,7 @@ function onGlobalKeydown(e){
     else if (e.key === "Backspace"){
       var cur = nodes[currentNodeId];
       if (cur && cur.parent_id && nodes[cur.parent_id]){ e.preventDefault(); jumpToOrigin(cur, "keyboard"); }
-      else { e.preventDefault(); setMode("canvas"); }
+      else { e.preventDefault(); returnToCanvas(); }
     }
 }
 

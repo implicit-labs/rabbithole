@@ -29,46 +29,36 @@ const KATEX_FONT_SRC =
 await fs.rm(absOutdir, { recursive: true, force: true });
 await fs.mkdir(absOutdir, { recursive: true });
 
-await esbuild.build({
-  entryPoints: [path.join(rootDir, "src/ui/entry.js")],
-  outfile: path.join(absOutdir, "client.js"),
-  bundle: true,
-  format: "iife",
-  globalName: "RabbitholeClient",
-  target: "es2018",
-  minify: true,
-  sourcemap: false,
-  tsconfigRaw: {},
-  legalComments: "none",
-  external: ["pdfjs-dist/build/pdf.mjs"],
-  logLevel: "silent"
-});
-
 const pdfPackageRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
-await fs.copyFile(path.join(pdfPackageRoot, "build/pdf.worker.min.mjs"), path.join(absOutdir, "pdf.worker.mjs"));
-await fs.copyFile(path.join(pdfPackageRoot, "build/pdf.min.mjs"), path.join(absOutdir, "pdf.mjs"));
-
-await esbuild.build({
-  entryPoints: [path.join(rootDir, "src/ui/frozen-entry.js")],
-  outfile: path.join(absOutdir, "frozen-client.js"),
-  bundle: true,
-  format: "iife",
-  globalName: "RabbitholeFrozenClient",
-  target: "es2018",
-  minify: true,
-  sourcemap: false,
-  tsconfigRaw: {},
-  legalComments: "none",
-  external: ["pdfjs-dist/build/pdf.mjs"],
-  logLevel: "silent"
-});
-
-await fs.writeFile(path.join(absOutdir, "katex.css"), await buildKatexCss(), "utf8");
-await fs.writeFile(path.join(absOutdir, "dompurify.js"), await buildDompurifyScript(), "utf8");
-await fs.writeFile(path.join(absOutdir, "mermaid.js"), await buildMermaidScript(), "utf8");
+await Promise.all([
+  buildUiBundle("src/ui/entry.js", "client.js", "RabbitholeClient"),
+  buildUiBundle("src/ui/frozen-entry.js", "frozen-client.js", "RabbitholeFrozenClient"),
+  fs.copyFile(path.join(pdfPackageRoot, "build/pdf.worker.min.mjs"), path.join(absOutdir, "pdf.worker.mjs")),
+  fs.copyFile(path.join(pdfPackageRoot, "build/pdf.min.mjs"), path.join(absOutdir, "pdf.mjs")),
+  buildKatexCss().then((source) => fs.writeFile(path.join(absOutdir, "katex.css"), source, "utf8")),
+  buildDompurifyScript().then((source) => fs.writeFile(path.join(absOutdir, "dompurify.js"), source, "utf8")),
+  buildMermaidScript().then((source) => fs.writeFile(path.join(absOutdir, "mermaid.js"), source, "utf8")),
+]);
 
 if (!parsed.explicit) {
   await buildWebApp(absOutdir);
+}
+
+function buildUiBundle(entry, outfile, globalName) {
+  return esbuild.build({
+    entryPoints: [path.join(rootDir, entry)],
+    outfile: path.join(absOutdir, outfile),
+    bundle: true,
+    format: "iife",
+    globalName,
+    target: "es2018",
+    minify: true,
+    sourcemap: false,
+    tsconfigRaw: {},
+    legalComments: "none",
+    external: ["pdfjs-dist/build/pdf.mjs"],
+    logLevel: "silent",
+  });
 }
 
 async function buildKatexCss() {
@@ -98,11 +88,14 @@ async function buildMermaidScript() {
 }
 
 async function replaceAsync(source, regex, replacer) {
+  const matches = [...source.matchAll(regex)];
+  const replacements = await Promise.all(matches.map((match) => replacer(...match)));
   const parts = [];
   let lastIndex = 0;
-  for (const match of source.matchAll(regex)) {
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
     parts.push(source.slice(lastIndex, match.index));
-    parts.push(await replacer(...match));
+    parts.push(replacements[index]);
     lastIndex = match.index + match[0].length;
   }
   parts.push(source.slice(lastIndex));
@@ -114,7 +107,7 @@ async function buildWebApp(assetDir) {
   await fs.rm(webDist, { recursive: true, force: true });
   await fs.mkdir(webDist, { recursive: true });
 
-  await esbuild.build({
+  const appBuild = esbuild.build({
     entryPoints: { app: path.join(rootDir, "src/web/app.js") },
     outdir: webDist,
     bundle: true,
@@ -140,41 +133,41 @@ async function buildWebApp(assetDir) {
     logLevel: "silent"
   });
 
-  const [katexCss, dompurify, mermaid, frozenClient, webCss, pdfWorker, pdfJs] = await Promise.all([
+  const sources = Promise.all([
     fs.readFile(path.join(assetDir, "katex.css"), "utf8"),
     fs.readFile(path.join(assetDir, "dompurify.js"), "utf8"),
     fs.readFile(path.join(assetDir, "mermaid.js"), "utf8"),
     fs.readFile(path.join(assetDir, "frozen-client.js"), "utf8"),
     fs.readFile(path.join(rootDir, "src/web/styles.css"), "utf8"),
-    fs.readFile(path.join(assetDir, "pdf.worker.mjs"), "utf8"),
-    fs.readFile(path.join(assetDir, "pdf.mjs"), "utf8"),
+  ]);
+  const [, [katexCss, dompurify, mermaid, frozenClient, webCss]] = await Promise.all([
+    Promise.all([appBuild, copyPdfAssets(webDist)]),
+    sources,
   ]);
   const frozenStyles = `${CANVAS_STYLES}\n${katexCss}`;
 
-  await fs.writeFile(path.join(webDist, "styles.css"), `${frozenStyles}\n${webCss}`, "utf8");
-  await fs.writeFile(path.join(webDist, "dompurify.js"), dompurify, "utf8");
-  await fs.writeFile(path.join(webDist, "mermaid.js"), mermaid, "utf8");
-  await fs.writeFile(path.join(webDist, "favicon.svg"), faviconSvg(), "utf8");
-  await copyPdfAssets(webDist);
-  await fs.writeFile(
-    path.join(webDist, "frozen-source.js"),
-    `window.__RABBITHOLE_FROZEN_CLIENT__=${safeJsString(frozenClient)};\n` +
-      `window.__RABBITHOLE_DOMPURIFY_SOURCE__=${safeJsString(dompurify)};\n` +
-      `window.__RABBITHOLE_FROZEN_PDF_WORKER_SOURCE__=${safeJsString(pdfWorker)};\n` +
-      `window.__RABBITHOLE_FROZEN_PDFJS_SOURCE__=${safeJsString(pdfJs)};\n` +
-      `window.__RABBITHOLE_FROZEN_STYLES__=${safeJsString(frozenStyles)};\n`,
-    "utf8"
-  );
+  await Promise.all([
+    fs.writeFile(path.join(webDist, "styles.css"), `${CANVAS_STYLES}\n${webCss}`, "utf8"),
+    fs.writeFile(path.join(webDist, "katex.css"), katexCss, "utf8"),
+    fs.writeFile(path.join(webDist, "dompurify.js"), dompurify, "utf8"),
+    fs.writeFile(path.join(webDist, "mermaid.js"), mermaid, "utf8"),
+    fs.writeFile(path.join(webDist, "frozen-client.js"), frozenClient, "utf8"),
+    fs.writeFile(path.join(webDist, "frozen-styles.css"), frozenStyles, "utf8"),
+    fs.writeFile(path.join(webDist, "favicon.svg"), faviconSvg(), "utf8"),
+  ]);
   const assetVersion = await hashWebEntryAssets(webDist);
   await fs.writeFile(path.join(webDist, "index.html"), buildWebIndexHtml(proxyConfig, assetVersion), "utf8");
 }
 
 async function hashWebEntryAssets(webDist) {
   const hash = createHash("sha256");
-  for (const name of ["app.js", "styles.css", "dompurify.js", "frozen-source.js", "favicon.svg"]) {
+  const names = ["app.js", "styles.css", "dompurify.js", "katex.css", "frozen-client.js", "frozen-styles.css", "pdf.mjs", "pdf.worker.mjs", "favicon.svg"];
+  const contents = await Promise.all(names.map((name) => fs.readFile(path.join(webDist, name))));
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index];
     hash.update(name);
     hash.update("\0");
-    hash.update(await fs.readFile(path.join(webDist, name)));
+    hash.update(contents[index]);
     hash.update("\0");
   }
   return hash.digest("hex").slice(0, 12);
@@ -182,19 +175,27 @@ async function hashWebEntryAssets(webDist) {
 
 async function copyPdfAssets(webDist) {
   const packageRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
-  await fs.copyFile(path.join(packageRoot, "build/pdf.min.mjs"), path.join(webDist, "pdf.mjs"));
-  await fs.copyFile(path.join(packageRoot, "build/pdf.worker.min.mjs"), path.join(webDist, "pdf.worker.mjs"));
-  await fs.cp(path.join(packageRoot, "standard_fonts"), path.join(webDist, "standard_fonts"), { recursive: true });
-  await copyPackedCMaps(path.join(packageRoot, "cmaps"), path.join(webDist, "cmaps"));
+  await Promise.all([
+    fs.copyFile(path.join(packageRoot, "build/pdf.min.mjs"), path.join(webDist, "pdf.mjs")),
+    fs.copyFile(path.join(packageRoot, "build/pdf.worker.min.mjs"), path.join(webDist, "pdf.worker.mjs")),
+    fs.cp(path.join(packageRoot, "standard_fonts"), path.join(webDist, "standard_fonts"), { recursive: true }),
+    copyPackedCMaps(path.join(packageRoot, "cmaps"), path.join(webDist, "cmaps")),
+  ]);
 }
 
 async function copyPackedCMaps(sourceDir, targetDir) {
   await fs.mkdir(targetDir, { recursive: true });
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".bcmap")) continue;
-    await fs.copyFile(path.join(sourceDir, entry.name), path.join(targetDir, entry.name));
+  const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".bcmap"));
+  await mapConcurrent(files, 32, (entry) => fs.copyFile(path.join(sourceDir, entry.name), path.join(targetDir, entry.name)));
+}
+
+async function mapConcurrent(values, concurrency, fn) {
+  let next = 0;
+  async function worker() {
+    while (next < values.length) await fn(values[next++]);
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
 }
 
 function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
@@ -263,20 +264,9 @@ function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
 <link rel="stylesheet" href="./styles.css${assetQuery}">
 </head>
 <body>
-<script src="./dompurify.js${assetQuery}"></script>
-<script src="./frozen-source.js${assetQuery}"></script>
 <script type="module" src="./app.js${assetQuery}"></script>
 </body>
 </html>`;
-}
-
-function safeJsString(value) {
-  return JSON.stringify(String(value ?? ""))
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
 }
 
 function readProxyConfig(raw) {

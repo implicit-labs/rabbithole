@@ -19,6 +19,7 @@ import {
   mode,
   motionSourceFromEvent,
   nextOrder,
+  nextStack,
   nodes,
   playLandingCue,
   postBrowserEvent,
@@ -88,6 +89,15 @@ function isFollowup(node) {
   return branchTypeOfNode(node) === BRANCH_FOLLOWUP;
 }
 
+export function raiseCard(el) {
+  el.style.zIndex = String(nextStack());
+}
+
+function raiseEventCard(e) {
+  var el = e.target.closest && e.target.closest(".node");
+  if (el) raiseCard(el);
+}
+
 function clipboardImageFiles(event) {
   var files = [];
   for (const item of Array.from(event.clipboardData?.items || [])) {
@@ -155,7 +165,13 @@ export function registerCanvasHooks(hooks) {
 export function initCanvasView(){
   cleanupCanvasView(false);
   var canvasScope = canvasLifecycle.beginInit();
-  if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(scheduleEdges);
+  if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(function(entries){
+    for (var i = 0; i < entries.length; i++) {
+      var id = entries[i].target && entries[i].target.dataset && entries[i].target.dataset.nodeId;
+      if (id && nodes[id]) scheduleNodeEdges(nodes[id]);
+      else scheduleEdges();
+    }
+  });
   var cardMenu = document.getElementById("cardmenu");
   cardMenuController = createAnchoredMenu({ surface: cardMenu, placement: "bottom-end",
     onClose: function(){ cardMenuNode = null; } });
@@ -173,6 +189,8 @@ export function initCanvasView(){
   });
   canvasScope.listen(world, "mouseover", onWorldMouseOver);
   canvasScope.listen(world, "mouseout", onWorldMouseOut);
+  canvasScope.listen(world, "pointerdown", raiseEventCard, { capture: true });
+  canvasScope.listen(world, "focusin", raiseEventCard);
   initViewportPan();
   canvasScope.listen(viewport, "wheel", onViewportWheel, { passive: false });
   canvasScope.listen(viewport, "dblclick", onViewportDblClick);
@@ -206,6 +224,9 @@ function cleanupCanvasView(resetHooks){
   collapseMenuNode = null;
   cancelViewAnimation();
   if (edgeRaf){ cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
+  edgeRedrawAll = false;
+  edgeRedrawIds = {};
+  edgePositionNodeIds = {};
   if (filmCameraHandle && window.__rhFilmCamera === filmCameraHandle) {
     try { delete window.__rhFilmCamera; } catch(_e){}
   }
@@ -417,6 +438,7 @@ export function createNodeEl(node, enter){
     if (node.id === currentNodeId) el.className += " current";
     if (enter && !document.hidden && !shouldReduceMotion()) el.className += " node-enter";
     el.dataset.id = node.id;
+    raiseCard(el);
 
     var head = document.createElement("div");
     head.className = "node-head";
@@ -479,7 +501,7 @@ export function createNodeEl(node, enter){
       e.preventDefault(); e.stopPropagation();
     });
     // Scrolling a card moves the inline marks its children's edges start from.
-    body.addEventListener("scroll", scheduleEdges, { passive: true });
+    body.addEventListener("scroll", function(){ scheduleNodeEdges(node); }, { passive: true });
     if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
       var dc = e.target.closest && e.target.closest(".doc-content");
       if (!dc || !body.contains(dc)) return;
@@ -1469,7 +1491,7 @@ function layoutNode(node){
     function place(){
       var w = screenToWorld(lastX, lastY);
       opts.apply(node, w.x - grabX, w.y - grabY);
-      layoutNode(node); scheduleEdges();
+      layoutNode(node); scheduleNodeEdges(node);
     }
     onPointerGesture(handle,
       function(e){
@@ -1551,24 +1573,64 @@ function applyCollapsedRun(targets, collapsed){
   }
 export function renderVisibility(){
     var cache = Object.create(null);
-    for (var id in nodes){ var n = nodes[id]; if (!n.el) continue; if (n.id === rootId){ n.el.style.display = ""; cache[n.id] = true; continue; } n.el.style.display = isVisible(n, cache) ? "" : "none"; }
+    for (var id in nodes){
+      var n = nodes[id]; if (!n.el) continue;
+      var display;
+      if (n.id === rootId){ display = ""; cache[n.id] = true; }
+      else display = isVisible(n, cache) ? "" : "none";
+      if (n.el.style.display !== display) n.el.style.display = display;
+    }
   }
 var edgeRaf = 0;           // coalesces edge redraws during drag/resize/scroll
-export function scheduleEdges(){
+var edgeRedrawAll = false;
+var edgeRedrawIds = {};
+var edgePositionNodeIds = {};
+function requestEdgeFrame(){
     if (edgeRaf) return;
-    edgeRaf = requestAnimationFrame(function(){ edgeRaf = 0; drawEdges(); });
+    edgeRaf = requestAnimationFrame(function(){
+      edgeRaf = 0;
+      var redrawAll = edgeRedrawAll;
+      var ids = edgeRedrawIds;
+      var positionNodeIds = edgePositionNodeIds;
+      edgeRedrawAll = false;
+      edgeRedrawIds = {};
+      edgePositionNodeIds = {};
+      if (redrawAll) drawEdges(); else drawEdgeSubset(ids, positionNodeIds);
+    });
+  }
+export function scheduleEdges(){
+    edgeRedrawAll = true;
+    edgeRedrawIds = {};
+    edgePositionNodeIds = {};
+    requestEdgeFrame();
+  }
+function scheduleNodeEdges(node){
+    if (!node || edgeRedrawAll) return requestEdgeFrame();
+    edgePositionNodeIds[node.id] = true;
+    if (node.parent_id) edgeRedrawIds[node.id] = true;
+    var kids = childrenOf(node.id);
+    for (var i = 0; i < kids.length; i++) edgeRedrawIds[kids[i].id] = true;
+    requestEdgeFrame();
   }
 
   // Effective on-canvas height follows the rendered card: collapsed cards are
   // head-only and short branches may be smaller than their saved height cap.
 export function effH(n){ return n.el ? (n.el.offsetHeight || (n.collapsed ? 36 : n.h)) : n.h; }
+function edgeMeasure(n, cache){
+    var measured = cache[n.id];
+    if (!measured){
+      measured = { h: effH(n), elRect: null, bodyRect: null };
+      cache[n.id] = measured;
+    }
+    return measured;
+  }
 function clamp(lo, hi, v){ return Math.max(lo, Math.min(hi, v)); }
 
   // Which side the edge leaves the parent from and enters the child on — chosen
   // by where the child actually sits, so a card dragged left of (or above) its
   // parent gets a sensibly routed arrow instead of one that always exits right.
-  function edgeSides(p, n){
-    var ph = effH(p), nh = effH(n);
+  function edgeSides(p, n, measureCache){
+    var ph = edgeMeasure(p, measureCache).h, nh = edgeMeasure(n, measureCache).h;
     var dx = (n.x + n.w / 2) - (p.x + p.w / 2);
     var dy = (n.y + nh / 2) - (p.y + ph / 2);
     var fx = dx / ((p.w + n.w) / 2 + 1);
@@ -1581,15 +1643,16 @@ function clamp(lo, hi, v){ return Math.max(lo, Math.min(hi, v)); }
   // branch was asked from (clamped to the card's visible body while scrolled) —
   // the mark's y for side exits, its x for top/bottom exits — at the composer
   // for follow-ups, or at the side's midpoint as a fallback.
-  function edgeStart(p, child, side){
-    var ph = effH(p), ax = null, ay = null, anchored = false;
+  function edgeStart(p, child, side, measureCache){
+    var measured = edgeMeasure(p, measureCache);
+    var ph = measured.h, ax = null, ay = null, anchored = false;
     if (!p.collapsed && p.el && p.bodyEl){
       var mark = p.bodyEl.querySelector('mark[data-child="' + child.id + '"]');
       if (mark){
         var mr = mark.getBoundingClientRect();
         if (mr.height > 0){
-          var er = p.el.getBoundingClientRect();
-          var br = p.bodyEl.getBoundingClientRect();
+          var er = measured.elRect || (measured.elRect = p.el.getBoundingClientRect());
+          var br = measured.bodyRect || (measured.bodyRect = p.bodyEl.getBoundingClientRect());
           ay = p.y + clamp((br.top - er.top) / view.scale + 10, (br.bottom - er.top) / view.scale - 10,
                            (mr.top + mr.height / 2 - er.top) / view.scale);
           ax = p.x + clamp((br.left - er.left) / view.scale + 10, (br.right - er.left) / view.scale - 10,
@@ -1605,8 +1668,8 @@ function clamp(lo, hi, v){ return Math.max(lo, Math.min(hi, v)); }
     if (side === "bottom") return { x: ax != null ? ax : p.x + p.w / 2, y: p.y + ph, anchored: anchored };
     return { x: ax != null ? ax : p.x + p.w / 2, y: p.y, anchored: anchored };
   }
-  function edgeEnd(n, side){
-    var nh = effH(n);
+  function edgeEnd(n, side, measureCache){
+    var nh = edgeMeasure(n, measureCache).h;
     if (side === "left")  return { x: n.x,           y: n.y + nh / 2 };
     if (side === "right") return { x: n.x + n.w,     y: n.y + nh / 2 };
     if (side === "top")   return { x: n.x + n.w / 2, y: n.y };
@@ -1657,37 +1720,55 @@ function rebuildEdges(){
 export function drawEdges(){
     var live = {};
     var visCache = Object.create(null);
+    var measureCache = Object.create(null);
     function vis(node){ return isVisible(node, visCache); }
     for (var id in nodes){
       var n = nodes[id]; if (!n.parent_id || !n.el) continue; var p = nodes[n.parent_id]; if (!p || !p.el) continue;
       if (!vis(n) || !vis(p)) continue;
       live[n.id] = true;
-      var sides = edgeSides(p, n);
-      var start = edgeStart(p, n, sides[0]);
-      var end = edgeEnd(n, sides[1]);
-      var horiz = sides[0] === "left" || sides[0] === "right";
-      var reach = Math.max(40, (horiz ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y)) / 2);
-      var d = "M " + start.x + " " + start.y + " C " + ctrlPt(start, sides[0], reach) + " " + ctrlPt(end, sides[1], reach) + " " + end.x + " " + end.y;
-      var geom = {
-        d: d,
-        cx: String(start.x),
-        cy: String(start.y),
-        anchored: !!start.anchored
-      };
-      var els = ensureEdgeEls(n.id);
-      var path = els[0], dot = els[1], prev = edgeGeometry[n.id];
-      if (!prev || prev.d !== geom.d) path.setAttribute("d", geom.d);
-      if (!prev || prev.cx !== geom.cx) dot.setAttribute("cx", geom.cx);
-      if (!prev || prev.cy !== geom.cy) dot.setAttribute("cy", geom.cy);
-      if (!prev || prev.anchored !== geom.anchored) applyEdgeClasses(n.id, path, dot, geom.anchored);
-      else if (!!edgeHl[n.id] !== path.classList.contains("edge-hl")) applyEdgeClasses(n.id, path, dot, geom.anchored);
-      edgeGeometry[n.id] = geom;
+      renderEdge(p, n, measureCache);
     }
     for (var childId in edgeEls){
       if (!live[childId]) removeEdge(childId);
     }
     // Whatever moved the edges moved the marks: the margin dots ride along.
     canvasLifecycle.hooks.positionDockedNotes();
+  }
+function drawEdgeSubset(ids, positionNodeIds){
+    var visCache = Object.create(null);
+    var measureCache = Object.create(null);
+    function vis(node){ return isVisible(node, visCache); }
+    for (var childId in ids){
+      var child = nodes[childId];
+      var parent = child && child.parent_id ? nodes[child.parent_id] : null;
+      if (!child || !child.el || !parent || !parent.el || !vis(child) || !vis(parent)) {
+        removeEdge(childId);
+        continue;
+      }
+      renderEdge(parent, child, measureCache);
+    }
+    for (var nodeId in positionNodeIds) {
+      var node = nodes[nodeId];
+      if (node && node.bodyEl) canvasLifecycle.hooks.positionDockedNotes(node.bodyEl);
+      if (node && mode === "reader" && currentNodeId === node.id) canvasLifecycle.hooks.positionDockedNotes(readerMain);
+    }
+  }
+function renderEdge(parent, child, measureCache){
+    var sides = edgeSides(parent, child, measureCache);
+    var start = edgeStart(parent, child, sides[0], measureCache);
+    var end = edgeEnd(child, sides[1], measureCache);
+    var horiz = sides[0] === "left" || sides[0] === "right";
+    var reach = Math.max(40, (horiz ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y)) / 2);
+    var d = "M " + start.x + " " + start.y + " C " + ctrlPt(start, sides[0], reach) + " " + ctrlPt(end, sides[1], reach) + " " + end.x + " " + end.y;
+    var geom = { d: d, cx: String(start.x), cy: String(start.y), anchored: !!start.anchored };
+    var els = ensureEdgeEls(child.id);
+    var path = els[0], dot = els[1], prev = edgeGeometry[child.id];
+    if (!prev || prev.d !== geom.d) path.setAttribute("d", geom.d);
+    if (!prev || prev.cx !== geom.cx) dot.setAttribute("cx", geom.cx);
+    if (!prev || prev.cy !== geom.cy) dot.setAttribute("cy", geom.cy);
+    if (!prev || prev.anchored !== geom.anchored) applyEdgeClasses(child.id, path, dot, geom.anchored);
+    else if (!!edgeHl[child.id] !== path.classList.contains("edge-hl")) applyEdgeClasses(child.id, path, dot, geom.anchored);
+    edgeGeometry[child.id] = geom;
   }
   // Highlight state lives here, not just on the elements — edges can be removed
   // and recreated when visibility changes, so hover state needs a stable source.

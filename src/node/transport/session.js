@@ -90,7 +90,7 @@ export class RabbitHoleSession {
       created_at: this.createdAt,
       view_state: viewState ?? null,
       nodes,
-    });
+    }, { cloneExtensions: false });
     this.nodes = this.state.nodes;
     this.viewState = this.state.view_state;
 
@@ -138,6 +138,7 @@ export class RabbitHoleSession {
     this.contextBroadcastTimer = null;
 
     this.timeoutHandle = null;
+    this.timeoutAt = 0;
     this.saveChain = createSaveChain({
       debounceMs: SAVE_DEBOUNCE_MS,
       save: () => {
@@ -196,11 +197,22 @@ export class RabbitHoleSession {
 
   touch() {
     if (this.closed) return;
-    if (this.timeoutHandle) clearTimeout(this.timeoutHandle);
-    this.timeoutHandle = setTimeout(() => {
+    this.timeoutAt = Date.now() + SESSION_TIMEOUT_MS;
+    if (this.timeoutHandle) return;
+    const check = () => {
+      this.timeoutHandle = null;
+      if (this.closed) return;
+      const remaining = this.timeoutAt - Date.now();
+      if (remaining > 0) {
+        this.timeoutHandle = setTimeout(check, remaining);
+        this.timeoutHandle.unref?.();
+        return;
+      }
       log(`Session ${this.id} timed out`);
       this.close("timeout");
-    }, SESSION_TIMEOUT_MS);
+    };
+    this.timeoutHandle = setTimeout(check, SESSION_TIMEOUT_MS);
+    this.timeoutHandle.unref?.();
   }
 
   close(reason = "session_closed") {
@@ -222,6 +234,7 @@ export class RabbitHoleSession {
       clearTimeout(this.timeoutHandle);
       this.timeoutHandle = null;
     }
+    this.timeoutAt = 0;
     this.clearAnswerWatchdog();
     this.closePromise = this.flushSave();
 
@@ -413,17 +426,17 @@ export class RabbitHoleSession {
     // A streaming answer emits many node_progress events, but each one carries
     // the full accumulated content — only the latest matters for replay. Drop
     // the superseded one so chunks never crowd real events out of the buffer.
-    if (data.type === "node_progress") {
-      const stale = this.outboundEvents.findIndex(
-        (e) => e.data.type === "node_progress" && e.data.node_id === data.node_id
-      );
-      if (stale !== -1) this.outboundEvents.splice(stale, 1);
+    if (data.type === "node_progress" || data.type === "pdf_convert_progress") {
+      this.dropLatestReplayEvent((event) => event.data.type === data.type && event.data.node_id === data.node_id);
+    }
+    if (data.type === "node_answered") {
+      this.dropLatestReplayEvent((event) => (event.data.type === "node_progress" || event.data.type === "pdf_convert_progress")
+        && event.data.node_id === data.node_id);
     }
     // Context usage is transient latest-state, just like streaming progress:
     // reconnect replay needs one current reading, never a history of counters.
     if (data.type === "context_usage") {
-      const stale = this.outboundEvents.findIndex((e) => e.data.type === "context_usage");
-      if (stale !== -1) this.outboundEvents.splice(stale, 1);
+      this.dropLatestReplayEvent((event) => event.data.type === "context_usage");
     }
     const event = { id: ++this.lastOutboundEventId, data };
     this.outboundEvents.push(event);
@@ -433,6 +446,14 @@ export class RabbitHoleSession {
     for (const client of this.sseClients) writeSseEvent(client, event);
   }
 
+  dropLatestReplayEvent(predicate) {
+    for (let index = this.outboundEvents.length - 1; index >= 0; index -= 1) {
+      if (!predicate(this.outboundEvents[index])) continue;
+      this.outboundEvents.splice(index, 1);
+      return;
+    }
+  }
+
   // ---- node tree ----------------------------------------------------------
 
   dispatchHoleEvent(event, options = {}) {
@@ -440,6 +461,7 @@ export class RabbitHoleSession {
     this.state = reduced.state;
     this.nodes = this.state.nodes;
     this.viewState = this.state.view_state;
+    this.saveChain.markDirty();
     return reduced.effects || {};
   }
 
@@ -458,7 +480,9 @@ export class RabbitHoleSession {
       agent_attached: this.agentAttached,
       context_usage: this.projectContextUsage(),
       view_state: this.viewState,
-      nodes: holeStateToHydrationNodes(this.state),
+      // The MCP page immediately serializes this projection into its isolated
+      // HTML response, so its extension bags are already crossing by value.
+      nodes: holeStateToHydrationNodes(this.state, { cloneExtensions: false }),
     };
   }
 

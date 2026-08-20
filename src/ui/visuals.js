@@ -14,6 +14,7 @@ var mermaidRenderId = 0;
 var mermaidControllers = [];
 var mermaidThemeObserver = null;
 var mermaidGeneration = 0;
+var utf8Decoder = typeof TextDecoder === "function" ? new TextDecoder("utf-8") : null;
 
 function loadEmbeddedMermaidRuntime(){
   if (window.mermaid) return window.mermaid;
@@ -126,10 +127,10 @@ function sanitizeVisualSource(source){
   }
 function decodeVisualSource(encoded){
     var bin = atob(String(encoded || ""));
-    if (typeof TextDecoder === "function"){
+    if (utf8Decoder){
       var bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return new TextDecoder("utf-8").decode(bytes);
+      return utf8Decoder.decode(bytes);
     }
     try {
       return decodeURIComponent(escape(bin));

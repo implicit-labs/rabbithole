@@ -389,8 +389,8 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
     ];
   }
 
-  /** @param {RenderContext} context @returns {import("marked").RendererObject} */
-  function buildRenderer(context) {
+  /** @param {() => RenderContext} currentContext @returns {import("marked").RendererObject} */
+  function buildRenderer(currentContext) {
     return {
       code(token) {
         return renderCodeFence(token);
@@ -399,6 +399,7 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
         return escapeHtml(text);
       },
       link({ href, title, tokens }) {
+        const context = currentContext();
         const text = this.parser.parseInline(tokens);
         const resolved = resolveMarkdownUrl(href, { baseUrl: context.baseUrl });
         const safe = sanitizeUrl(resolved, SAFE_URL);
@@ -410,6 +411,7 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
         return `<a href="${escapeHtml(safe)}"${titleAttr}${target} rel="noopener noreferrer">${text}</a>`;
       },
       image({ href, title, text }) {
+        const context = currentContext();
         const resolved = resolveMarkdownUrl(href, {
           baseUrl: context.baseUrl,
           image: true,
@@ -438,18 +440,33 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
     };
   }
 
+  /** @type {RenderContext} */
+  let activeContext = { baseUrl: null, assetNames: null, resolveAssetUrl };
+  // A renderer instance is immutable after configuration. Reusing it avoids
+  // rebuilding Marked's extension registry and parser options on every stream
+  // frame; the per-call URL/asset context remains scoped to the synchronous
+  // parse below.
+  const marked = new Marked({ gfm: true, breaks: false });
+  marked.use({
+    extensions: buildExtensions(),
+    renderer: buildRenderer(() => activeContext),
+    tokenizer: buildTokenizer(),
+  });
+
   /** @param {unknown} markdown @param {{ baseUrl?: string | null, assetNames?: Set<string> | null, resolveAssetUrl?: ((name: string) => string | null) | null }} [options] */
   function renderMarkdownToHtml(markdown, { baseUrl = null, assetNames = null, resolveAssetUrl: perCallResolver = null } = {}) {
-    const context = {
+    const previousContext = activeContext;
+    activeContext = {
       baseUrl,
       assetNames,
       resolveAssetUrl: perCallResolver || resolveAssetUrl,
     };
-    /** @type {any} */
-    const marked = new Marked({ gfm: true, breaks: false });
-    marked.use({ extensions: buildExtensions(), renderer: buildRenderer(context), tokenizer: buildTokenizer() });
-    const html = marked.parse(String(markdown ?? ""));
-    return html.replace(/>\n+</g, "><").replace(/\n<\/code>/g, "</code>");
+    try {
+      const html = /** @type {string} */ (marked.parse(String(markdown ?? "")));
+      return html.replace(/>\n+</g, "><").replace(/\n<\/code>/g, "</code>");
+    } finally {
+      activeContext = previousContext;
+    }
   }
 
   return {

@@ -52,6 +52,7 @@ function defaultReaderHooks(){
     updateComposerState: function(){},
     scheduleViewSave: function(){},
     setMode: function(){},
+    raiseCard: function(){},
     mountDocImages: null,
     animateScroll: function(){},
     // Docked notes belong to the document on screen; the reader gives them its
@@ -68,6 +69,14 @@ export function registerReaderHooks(hooks) {
 
 var breadcrumbNodes = {};
 var noteNodes = {};
+
+export function returnToCanvas(){
+    if (mode === "canvas") return null;
+    var card = nodes[currentNodeId] && nodes[currentNodeId].el;
+    if (card) readerLifecycle.hooks.raiseCard(card);
+    readerLifecycle.hooks.setMode("canvas");
+    return card;
+  }
 
 function marginNotesLayer(){ return document.getElementById("margin-notes"); }
 
@@ -166,7 +175,7 @@ export function initReader(){
     readerScope.listen(breadcrumbEl, "click", function(e){
       var c = e.target.closest(".crumb");
       if (!c || c.classList.contains("current")) return;
-      if (c.classList.contains("crumb-canvas")) return readerLifecycle.hooks.setMode("canvas");
+      if (c.classList.contains("crumb-canvas")) return returnToCanvas();
       openNode(c.dataset.id);
     });
     readerScope.listen(breadcrumbEl, "keydown", function(e){
@@ -174,7 +183,7 @@ export function initReader(){
       var c = e.target.closest && e.target.closest('.crumb[role="link"]');
       if (!c) return;
       e.preventDefault();
-      if (c.classList.contains("crumb-canvas")) return readerLifecycle.hooks.setMode("canvas");
+      if (c.classList.contains("crumb-canvas")) return returnToCanvas();
       openNode(c.dataset.id);
     });
     readerScope.listen(readerMain, "scroll", onReaderScroll, { passive: true });
@@ -199,9 +208,7 @@ export function initReader(){
     // reader back into its card and hands focus to the card's expand button,
     // so keyboard travel round-trips cleanly.
     readerScope.listen(document.getElementById("reader-restore"), "click", function(){
-      if (mode === "canvas") return;
-      readerLifecycle.hooks.setMode("canvas");
-      var card = nodes[currentNodeId] && nodes[currentNodeId].el;
+      var card = returnToCanvas();
       var expand = card && card.querySelector('[aria-label="Expand document"]');
       if (expand){ try { expand.focus({ preventScroll: true }); } catch(e){ expand.focus(); } }
     });

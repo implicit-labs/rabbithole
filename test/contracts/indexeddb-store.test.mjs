@@ -99,6 +99,8 @@ await runStoreContract(store, {
   const pastedBlob = new Blob([Uint8Array.of(1, 2, 3)], { type: "image/png" });
   assert.deepEqual(await host.adapter().putAsset("paste-web.png", pastedBlob), { ok: true, name: "paste-web.png" });
   assert.equal(registeredAssets[0].name, "paste-web.png", "the BYOK upload seam registers an immediately renderable URL");
+  assert.deepEqual((await store.getAssets("web-note-create")).map(({ name, blob }) => [name, blob.size]),
+    [["paste-web.png", pastedBlob.size]], "the browser store can lease all Blob handles in one transaction");
   await assert.rejects(() => host.adapter().putAsset("figure.png", pastedBlob), /start with paste-/);
   await assert.rejects(() => host.adapter().putAsset("paste-source.pdf", pastedBlob), /image extension/);
   await assert.rejects(() => host.adapter().putAsset("paste-web.png", pastedBlob), /already exists/);

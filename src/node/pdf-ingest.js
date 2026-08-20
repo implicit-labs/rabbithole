@@ -15,9 +15,10 @@ import {
 } from "../core/pdf-shared.js";
 
 const require = createRequire(import.meta.url);
+let dependenciesPromise = null;
 
-async function loadDependencies() {
-  try {
+function loadDependencies() {
+  if (!dependenciesPromise) dependenciesPromise = (async () => {
     const canvas = await import("@napi-rs/canvas").catch(() => null);
     if (canvas) for (const name of ["DOMMatrix", "DOMPoint", "DOMRect", "Path2D", "ImageData"]) if (!globalThis[name] && canvas[name]) globalThis[name] = canvas[name];
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -25,9 +26,11 @@ async function loadDependencies() {
       pdfjs,
       standardFontDataUrl: path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + path.sep,
     };
-  } catch (error) {
+  })().catch((error) => {
+    dependenciesPromise = null;
     throw new Error(`Native PDF support could not initialize pdf.js. ${error.message}`);
-  }
+  });
+  return dependenciesPromise;
 }
 
 export async function isPdfFile(filePath) {
@@ -65,15 +68,17 @@ export async function ingestPdfDocument({ filePath, store, title = "", pages } =
     const notes = [];
     const metadata = await doc.getMetadata().catch(() => null);
     const processedPages = resolvePagesToProcess(doc.numPages, pages, notes);
-    const pageMetadata = [];
-    const pageLines = [];
-    for (const pageNumber of processedPages) {
+    const pageResults = await mapConcurrent(processedPages, 4, async (pageNumber) => {
       const page = await doc.getPage(pageNumber);
       try {
-        pageMetadata.push(pdfPageMetadata(page, pageNumber));
-        pageLines.push({ page: pageNumber, lines: await extractPdfPageLines(page) });
+        return {
+          metadata: pdfPageMetadata(page, pageNumber),
+          lines: { page: pageNumber, lines: await extractPdfPageLines(page) },
+        };
       } finally { page.cleanup?.(); }
-    }
+    });
+    const pageMetadata = pageResults.map((result) => result.metadata);
+    const pageLines = pageResults.map((result) => result.lines);
     const resolvedTitle = title || normalizePdfTitle(metadata) || path.basename(absolute, path.extname(absolute));
     const source = { asset: sourceAsset, sha256, byte_length: sourceBytes.byteLength };
     const built = buildPdfDocument({ title: resolvedTitle, pageCount: doc.numPages, processedPages, pageMetadata, pageLines, notes, source });
@@ -91,4 +96,17 @@ export async function ingestPdfDocument({ filePath, store, title = "", pages } =
     doc?.cleanup?.();
     await loadingTask.destroy().catch(() => {});
   }
+}
+
+async function mapConcurrent(values, concurrency, fn) {
+  const results = new Array(values.length);
+  let next = 0;
+  async function worker() {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await fn(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return results;
 }

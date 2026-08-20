@@ -150,7 +150,10 @@ export class FsStore {
       if (err?.code === "ENOENT") return null;
       throw err;
     }
-    return parsePersistedHole(JSON.parse(raw));
+    // JSON.parse already returns a fresh object owned by this load. Avoid a
+    // second stringify/parse clone while keeping parsePersistedHole's public
+    // defensive-copy default intact.
+    return parsePersistedHole(JSON.parse(raw), { clone: false });
   }
 
   async saveHole(hole) {
@@ -181,26 +184,19 @@ export class FsStore {
     const destination = path.join(dir, safeName);
     const temporary = path.join(dir, `.${safeName}.${randomUUID()}.tmp`);
     try {
-      try {
-        await fs.stat(destination);
-        const error = new Error(`Asset ${safeName} already exists`);
-        error.code = "EEXIST";
-        error.statusCode = 409;
-        throw error;
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
       await fs.writeFile(temporary, buffer, { flag: "wx" });
       try {
-        await fs.stat(destination);
-        const error = new Error(`Asset ${safeName} already exists`);
-        error.code = "EEXIST";
-        error.statusCode = 409;
-        throw error;
+        // Publishing a same-directory hard link is atomic and refuses an
+        // existing name. It replaces two stat syscalls and closes the race in
+        // which another upload could appear between the final check and rename.
+        await fs.link(temporary, destination);
       } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
+        if (error?.code !== "EEXIST") throw error;
+        const conflict = new Error(`Asset ${safeName} already exists`);
+        conflict.code = "EEXIST";
+        conflict.statusCode = 409;
+        throw conflict;
       }
-      await fs.rename(temporary, destination);
     } finally {
       await fs.rm(temporary, { force: true });
     }
@@ -239,15 +235,13 @@ export async function addAssetsToHole(holeId, assets) {
   const entries = await validateAssetEntries(assets);
   if (!entries.length) return [];
   const dir = await ensureAssetDir(holeId);
-  const added = [];
-  for (const entry of entries) {
+  return mapConcurrent(entries, 4, async (entry) => {
     const dest = path.join(dir, entry.name);
     if (path.resolve(entry.file_path) !== path.resolve(dest)) {
       await fs.copyFile(entry.file_path, dest);
     }
-    added.push({ name: entry.name, path: dest });
-  }
-  return added;
+    return { name: entry.name, path: dest };
+  });
 }
 
 async function moveFile(source, dest) {
@@ -311,15 +305,14 @@ async function adoptStagedAssets(holeId, ingestId) {
   }
   const destDir = await ensureAssetDir(holeId);
   const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  const moved = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
+  const files = entries.filter((entry) => entry.isFile());
+  const moved = await mapConcurrent(files, 4, async (entry) => {
     const name = validateAssetName(entry.name, "staged asset name");
     const source = path.join(sourceDir, name);
     const dest = path.join(destDir, name);
     await moveFile(source, dest);
-    moved.push({ name, path: dest });
-  }
+    return { name, path: dest };
+  });
   await fs.rm(sourceDir, { recursive: true, force: true });
   return moved;
 }
@@ -344,11 +337,16 @@ async function listAssets(holeId) {
 }
 
 export async function resolveAsset(holeId, name) {
+  const info = await resolveAssetInfo(holeId, name);
+  return info?.filePath ?? null;
+}
+
+export async function resolveAssetInfo(holeId, name) {
   const safeName = validateAssetName(name);
   const filePath = path.join(assetDir(holeId), safeName);
   try {
     const stat = await fs.stat(filePath);
-    return stat.isFile() ? filePath : null;
+    return stat.isFile() ? { filePath, stat } : null;
   } catch {
     return null;
   }
@@ -384,10 +382,15 @@ function persistHole(hole) {
   const summaryPath = holeSummaryPath(holeId);
   const summaryTmp = `${summaryPath}.${randomUUID()}.tmp`;
   try {
+    // Both independent payloads can reach durable temp files together. The
+    // hole rename still precedes the summary rename so listHoles never exposes
+    // metadata newer than its canonical document.
+    await Promise.all([
+      fs.writeFile(tmp, serialized, "utf-8"),
+      fs.writeFile(summaryTmp, serializedSummary, "utf-8"),
+    ]);
     await fs.rm(summaryPath, { force: true });
-    await fs.writeFile(tmp, serialized, "utf-8");
     await fs.rename(tmp, finalPath);
-    await fs.writeFile(summaryTmp, serializedSummary, "utf-8");
     await fs.rename(summaryTmp, summaryPath);
   } catch (err) {
     await Promise.all([

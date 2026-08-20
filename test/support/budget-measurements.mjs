@@ -16,7 +16,8 @@ const STREAM_CHUNKS = Array.from({ length: 40 }, (_, i) => `${i ? " " : "# Budge
 export const budgetDefinitions = [
   ["bundle_client_bytes", "Built live client bundle size", "bytes", 0.05, "Exact file size after a deterministic build."],
   ["bundle_frozen_client_bytes", "Built frozen client bundle size", "bytes", 0.05, "Exact file size after a deterministic build."],
-  ["web_initial_js_bytes", "Statically loaded web application JavaScript", "bytes", 0.05, "Exact transitive size of app.js and its static chunks; the large PDF.js runtime and worker are excluded."],
+  ["web_initial_js_bytes", "JavaScript loaded before the hosted app becomes interactive", "bytes", 0.05, "Exact size of every initial script and the app module's static closure; export-only and PDF runtimes are excluded."],
+  ["web_initial_css_bytes", "CSS loaded before the hosted app becomes interactive", "bytes", 0.05, "Exact size of every initial stylesheet; math fonts and rules remain lazy with the canvas runtime."],
   ["pdf_runtime_distribution_bytes", "Production PDF.js runtime plus worker", "bytes", 0.05, "Exact size of the lazily loaded production PDF.js module and worker."],
   ["snapshot_math_bytes", "Frozen HTML size for the math-heavy reference corpus", "bytes", 0.05, "Exact UTF-8 snapshot size."],
   ["snapshot_assets_bytes", "Frozen HTML size for the PNG/SVG reference corpus", "bytes", 0.05, "Exact UTF-8 snapshot size including assets."],
@@ -38,7 +39,8 @@ export async function measureBudgets({ samples = 3, onSample = () => {} } = {}) 
   const exact = {
     bundle_client_bytes: (await fs.stat(path.join(ROOT, "dist/client.js"))).size,
     bundle_frozen_client_bytes: (await fs.stat(path.join(ROOT, "dist/frozen-client.js"))).size,
-    web_initial_js_bytes: await staticModuleClosureBytes(path.join(WEB_DIST, "app.js")),
+    web_initial_js_bytes: await initialScriptBytes(WEB_DIST),
+    web_initial_css_bytes: await initialStylesheetBytes(WEB_DIST),
     pdf_runtime_distribution_bytes: (await fs.stat(path.join(WEB_DIST, "pdf.mjs"))).size + (await fs.stat(path.join(WEB_DIST, "pdf.worker.mjs"))).size,
   };
   const pdfHole = representativePdfHole();
@@ -103,6 +105,35 @@ async function staticModuleClosureBytes(entry) {
     return total;
   }
   return visit(entry);
+}
+
+async function initialScriptBytes(webDist) {
+  const html = await fs.readFile(path.join(webDist, "index.html"), "utf8");
+  const scripts = [...html.matchAll(/<script\b([^>]*)\bsrc=["']([^"']+)["'][^>]*>/gi)];
+  let total = 0;
+  for (const match of scripts) {
+    const name = match[2].replace(/^\.\//, "").split("?", 1)[0];
+    const file = path.join(webDist, name);
+    total += /\btype=["']module["']/i.test(match[1])
+      ? await staticModuleClosureBytes(file)
+      : (await fs.stat(file)).size;
+  }
+  return total;
+}
+
+async function initialStylesheetBytes(webDist) {
+  const html = await fs.readFile(path.join(webDist, "index.html"), "utf8");
+  const links = [...html.matchAll(/<link\b([^>]*)>/gi)]
+    .map((match) => match[1])
+    .filter((attributes) => /\brel=["']stylesheet["']/i.test(attributes));
+  let total = 0;
+  for (const attributes of links) {
+    const href = attributes.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    assert(href, "initial stylesheet link must have an href");
+    const name = href.replace(/^\.\//, "").split("?", 1)[0];
+    total += (await fs.stat(path.join(webDist, name))).size;
+  }
+  return total;
 }
 
 function representativePdfHole() {

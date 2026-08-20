@@ -29,19 +29,27 @@ import {
 /** @typedef {import("./contracts/engine.js").NodeExtensionsPatchEvent} NodeExtensionsPatchEvent */
 /** @typedef {import("./contracts/engine.js").BlockStateEvent} BlockStateEvent */
 
-/** @param {Parameters<import("./contracts/engine.js").createHoleState>[0]} [input] @returns {HoleState} */
-export function createHoleState({ hole_id, title, root_id, created_at = null, view_state = null, nodes = [] } = {}) {
-  const entries = nodes instanceof Map ? nodes : new Map((nodes || []).map((node) => [node.id, node]));
+/** @param {Parameters<import("./contracts/engine.js").createHoleState>[0]} [input] @param {{ cloneExtensions?: boolean }} [options] @returns {HoleState} */
+export function createHoleState({ hole_id, title, root_id, created_at = null, view_state = null, nodes = [] } = {}, { cloneExtensions = true } = {}) {
+  const entries = /** @type {Iterable<[string, HoleNode]>} */ (nodes instanceof Map
+    ? nodes
+    : (nodes || []).map((node) => [node.id, node]));
+  const stateNodes = new Map();
+  for (const [id, node] of entries) {
+    stateNodes.set(id, {
+      ...node,
+      ...(Object.prototype.hasOwnProperty.call(node, "extensions")
+        ? { extensions: cloneExtensions ? cloneJson(node.extensions) : node.extensions }
+        : {}),
+    });
+  }
   return {
     hole_id: hole_id || "",
     title: title || "Untitled",
     root_id: root_id || null,
     created_at,
     view_state,
-    nodes: new Map([...entries].map(([id, node]) => [id, {
-      ...node,
-      ...(Object.prototype.hasOwnProperty.call(node, "extensions") ? { extensions: cloneJson(node.extensions) } : {}),
-    }])),
+    nodes: stateNodes,
     progressRuns: new Map(),
   };
 }
@@ -63,25 +71,30 @@ export function holeStateToHole(state) {
  * The web host deliberately suppresses root origin metadata; the MCP host
  * preserves it.
  * @param {HoleState} state
- * @param {{ suppressRootOrigin?: boolean }} [options]
+ * @param {{ suppressRootOrigin?: boolean, cloneExtensions?: boolean }} [options]
  */
-export function holeStateToHydrationNodes(state, { suppressRootOrigin = false } = {}) {
-  return [...state.nodes.values()].map((node) => ({
-    id: node.id,
-    parent_id: node.parent_id ?? null,
-    title: node.title ?? "",
-    markdown: node.markdown ?? "",
-    base_url: node.base_url ?? null,
-    base_url_source: node.base_url_source ?? null,
-    origin: suppressRootOrigin && node.id === state.root_id ? null : (node.origin ?? null),
-    position: node.position ?? { x: 0, y: 0 },
-    size: node.size ?? null,
-    font_scale: node.font_scale ?? 1,
-    collapsed: !!node.collapsed,
-    status: node.status ?? "answered",
-    read: !!node.read,
-    extensions: cloneJson(node.extensions ?? {}),
-  }));
+export function holeStateToHydrationNodes(state, { suppressRootOrigin = false, cloneExtensions = true } = {}) {
+  const result = new Array(state.nodes.size);
+  let index = 0;
+  for (const node of state.nodes.values()) {
+    result[index++] = {
+      id: node.id,
+      parent_id: node.parent_id ?? null,
+      title: node.title ?? "",
+      markdown: node.markdown ?? "",
+      base_url: node.base_url ?? null,
+      base_url_source: node.base_url_source ?? null,
+      origin: suppressRootOrigin && node.id === state.root_id ? null : (node.origin ?? null),
+      position: node.position ?? { x: 0, y: 0 },
+      size: node.size ?? null,
+      font_scale: node.font_scale ?? 1,
+      collapsed: !!node.collapsed,
+      status: node.status ?? "answered",
+      read: !!node.read,
+      extensions: cloneExtensions ? cloneJson(node.extensions ?? {}) : (node.extensions ?? {}),
+    };
+  }
+  return result;
 }
 
 /** @param {HoleState} state @param {DocEvent} event @param {ReduceOptions} [options] @returns {ReduceResult} */
@@ -124,8 +137,11 @@ function reduceNodeExtensionsPatch(state, event, options) {
   const namespace = String(event.namespace || "");
   const node = state.nodes.get(nodeId);
   if (!node || !/^[a-z][a-z0-9_-]*$/.test(namespace)) return withState(state);
-  const extensions = cloneJson(node.extensions ?? {});
-  extensions[namespace] = cloneJson(event.value);
+  // Extension namespaces are independent JSON subtrees. Preserve untouched
+  // namespaces by reference and clone only the value crossing the event
+  // boundary; cloning a multi-thousand-line PDF extension for a tiny learn
+  // state or note flag is pure overhead.
+  const extensions = { ...(node.extensions ?? {}), [namespace]: cloneJson(event.value) };
   const nodes = cloneNodes(state, options);
   nodes.set(nodeId, { ...node, extensions });
   return withState({ ...state, nodes }, { node_id: nodeId });
@@ -137,7 +153,7 @@ function reduceBlockState(state, event, options) {
   const blockId = String(event.block_id || "");
   const node = state.nodes.get(nodeId);
   if (!node || !blockId || !event.state || typeof event.state !== "object" || Array.isArray(event.state)) return withState(state);
-  const extensions = cloneJson(node.extensions ?? {});
+  const extensions = { ...(node.extensions ?? {}) };
   const learn = /** @type {Record<string, any>} */ (extensions.learn && typeof extensions.learn === "object" && !Array.isArray(extensions.learn)
     ? extensions.learn : {});
   const previous = learn[blockId] && typeof learn[blockId] === "object" && !Array.isArray(learn[blockId])
@@ -156,6 +172,11 @@ function withState(state, effects = {}) {
 /** @param {HoleState} state @param {ReduceOptions} options */
 function cloneNodes(state, options) {
   return options?.mutate === true ? state.nodes : new Map(state.nodes);
+}
+
+/** @param {HoleState} state @param {ReduceOptions} options */
+function cloneProgressRuns(state, options) {
+  return options?.mutate === true ? state.progressRuns : new Map(state.progressRuns);
 }
 
 /** @param {HoleState} state @param {BranchRequestEvent} event @param {ReduceOptions} options */
@@ -238,12 +259,13 @@ function reduceNodeProgress(state, event, options) {
     base_url_source: event.base_url_source ?? node.base_url_source ?? null,
   };
   nodes.set(nodeId, /** @type {HoleNode} */ (next));
-  const superseded = recorded && recorded.id !== /** @type {import("./contracts/engine.js").ProgressRun} */ (run).id
-    ? new Set([...(recorded.superseded || []), recorded.id])
-    : recorded?.superseded;
-  const progressRuns = tagged
-    ? new Map(state.progressRuns).set(nodeId, { id: /** @type {import("./contracts/engine.js").ProgressRun} */ (run).id, seq: /** @type {import("./contracts/engine.js").ProgressRun} */ (run).seq, ...(superseded ? { superseded } : {}) })
-    : state.progressRuns;
+  let superseded = recorded?.superseded;
+  if (recorded && recorded.id !== /** @type {import("./contracts/engine.js").ProgressRun} */ (run).id) {
+    superseded = new Set(recorded.superseded || []);
+    superseded.add(recorded.id);
+  }
+  const progressRuns = tagged ? cloneProgressRuns(state, options) : state.progressRuns;
+  if (tagged) progressRuns.set(nodeId, { id: /** @type {import("./contracts/engine.js").ProgressRun} */ (run).id, seq: /** @type {import("./contracts/engine.js").ProgressRun} */ (run).seq, ...(superseded ? { superseded } : {}) });
   return withState({ ...state, nodes, progressRuns }, { node_id: nodeId });
 }
 
@@ -290,7 +312,7 @@ function reduceNodeAnswered(state, event, options) {
   nodes.set(nodeId, next);
   let progressRuns = state.progressRuns;
   if (progressRuns.has(nodeId)) {
-    progressRuns = new Map(progressRuns);
+    progressRuns = cloneProgressRuns(state, options);
     progressRuns.delete(nodeId);
   }
   return withState({ ...state, nodes, progressRuns }, { answeredNode: next });
@@ -312,7 +334,7 @@ function reduceNodeDeleted(state, event, options) {
   }
   let progressRuns = state.progressRuns;
   if (ids.some((id) => progressRuns.has(id))) {
-    progressRuns = new Map(progressRuns);
+    progressRuns = cloneProgressRuns(state, options);
     for (const id of ids) progressRuns.delete(id);
   }
   return withState({ ...state, nodes, progressRuns }, { deletedNodeIds: ids, deletedNodes });

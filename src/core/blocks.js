@@ -64,6 +64,10 @@ function defaultBlockIdFactory() {
  */
 export function normalizeBlockIds(markdown, { idFactory = defaultBlockIdFactory } = {}) {
   const source = String(markdown ?? "");
+  // The overwhelming majority of generated documents contain no fenced
+  // visual at all. Avoid allocating an array and one string per line unless a
+  // fence marker can actually be present.
+  if (!source.includes("```") && !source.includes("~~~")) return { markdown: source, changed: false };
   const lines = source.match(/[^\r\n]*(?:\r\n|\n|\r|$)/g) || [];
   let active = null;
   let changed = false;
@@ -114,7 +118,11 @@ export function normalizeBlockIds(markdown, { idFactory = defaultBlockIdFactory 
 export function markdownContainsBlockType(markdown, targetType) {
   const target = normalizedType(targetType);
   if (!target || !getBlockType(target)) return false;
-  const lines = String(markdown ?? "").split(/\r\n|\n|\r/);
+  const source = String(markdown ?? "");
+  // Snapshot capability checks touch every node. Most holes have no Mermaid
+  // token anywhere, so skip line tokenization for that common case.
+  if (!source.toLowerCase().includes(target)) return false;
+  const lines = source.split(/\r\n|\n|\r/);
   let active = null;
   for (const line of lines) {
     if (active) {

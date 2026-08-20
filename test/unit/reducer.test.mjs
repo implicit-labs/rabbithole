@@ -348,6 +348,20 @@ assert.strictEqual(staleTagged.state.progressRuns, priorRuns);
 assert.equal(Object.hasOwn(holeStateToHole(acceptedTagged.state), "progressRuns"), false);
 assert.equal(JSON.stringify(holeStateToHole(acceptedTagged.state)).includes("progressRuns"), false);
 
+const heavyExtensionState = createHoleState({ root_id: "heavy", nodes: [{
+  id: "heavy",
+  markdown: "```check id=q1\n{}\n```",
+  extensions: { pdf: { lines: Array.from({ length: 2000 }, (_, index) => ({ p: 1, s: index, e: index + 1 })) }, learn: { old: { selected: 0 } } },
+}] });
+const priorHeavyNode = heavyExtensionState.nodes.get("heavy");
+const learnedHeavy = reduceHoleEvent(heavyExtensionState, {
+  type: "block_state", node_id: "heavy", block_id: "q1", state: { selected: 1 },
+}).state.nodes.get("heavy");
+assert.strictEqual(learnedHeavy.extensions.pdf, priorHeavyNode.extensions.pdf,
+  "updating one extension namespace should structurally share an untouched heavy PDF namespace");
+assert.notStrictEqual(learnedHeavy.extensions.learn, priorHeavyNode.extensions.learn);
+assert.equal(priorHeavyNode.extensions.learn.q1, undefined, "structural sharing must not mutate the previous learn namespace");
+
 // Production hosts exclusively own their state and opt into map reuse so a
 // long stream does not clone every node for every chunk. The public/default
 // path above remains copy-on-write for embedders.

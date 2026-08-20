@@ -223,9 +223,30 @@ async function runSessionFixtures(source, source2) {
     const asset = await fetch(`${session.url}/assets/diagram-1.png`);
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get("content-type"), "image/png");
-    assert.equal(asset.headers.get("cache-control"), "no-store");
+    assert.equal(asset.headers.get("cache-control"), "private, max-age=0, must-revalidate");
     assert.equal(asset.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(asset.headers.get("accept-ranges"), "bytes");
+    assert.equal(Number(asset.headers.get("content-length")), PNG_BYTES.length);
+    const assetEtag = asset.headers.get("etag");
+    assert(assetEtag, "served assets should expose a stable validator");
     assert.deepEqual(Buffer.from(await asset.arrayBuffer()), PNG_BYTES);
+
+    const unchanged = await fetch(`${session.url}/assets/diagram-1.png`, { headers: { "If-None-Match": assetEtag } });
+    assert.equal(unchanged.status, 304, "unchanged assets should reuse the browser's cached body");
+    assert.equal((await unchanged.arrayBuffer()).byteLength, 0);
+
+    const assetRange = await fetch(`${session.url}/assets/diagram-1.png`, { headers: { Range: "bytes=2-5", "If-Range": assetEtag } });
+    assert.equal(assetRange.status, 206);
+    assert.equal(assetRange.headers.get("content-range"), `bytes 2-5/${PNG_BYTES.length}`);
+    assert.equal(Number(assetRange.headers.get("content-length")), 4);
+    assert.deepEqual(Buffer.from(await assetRange.arrayBuffer()), PNG_BYTES.subarray(2, 6));
+    const staleRange = await fetch(`${session.url}/assets/diagram-1.png`, { headers: { Range: "bytes=2-5", "If-Range": '"stale"' } });
+    assert.equal(staleRange.status, 200, "a stale range validator should fall back to the complete current asset");
+    assert.deepEqual(Buffer.from(await staleRange.arrayBuffer()), PNG_BYTES);
+    const assetHead = await fetch(`${session.url}/assets/diagram-1.png`, { method: "HEAD" });
+    assert.equal(assetHead.status, 200);
+    assert.equal(Number(assetHead.headers.get("content-length")), PNG_BYTES.length);
+    assert.equal((await assetHead.arrayBuffer()).byteLength, 0);
 
     const uploaded = await fetch(`${session.url}/assets/paste-contract.png`, {
       method: "PUT", headers: { "Content-Type": "image/png" }, body: PNG_BYTES_2,
