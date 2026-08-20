@@ -1,18 +1,11 @@
 import { CANVAS_SHELL } from "../core/html/shell.js";
-import { createBrain } from "./brain/openai-compatible.js";
 import { providerFor, settingsForProvider } from "./brain/provider-registry.js";
-import { detectPdfTranscriptionCapability, pdfTranscriptionCapability } from "./brain/pdf-transcription.js";
-import { isHttpUrl } from "./brain/model-endpoint.js";
 import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings/preferences-store.js";
 import { getApiKey } from "./settings/credential-store.js";
-import { createModelSettings } from "./settings/model-settings.js";
-import { createOllamaRecoveryDialog } from "./settings/ollama-recovery.js";
 import { takeBridgeTokenFromFragment } from "./settings/bridge-pairing.js";
-import { BRIDGE_AGENT_LABELS, bridgeAgentOf } from "./brain/bridge-catalog.js";
 import { getGenerationSetupStatus, invalidateGenerationSetup } from "./settings/setup-readiness.js";
 import { installTestSeam } from "./test-seam.js";
 import { IdbStore } from "./store/idb-store.js";
-import { DirectRabbitholeHost, createHoleFromMarkdown, createPendingHoleFromQuestion } from "./transport/direct-host.js";
 import { openDialog } from "../ui/primitives/dialog.js";
 import { openPopover } from "../ui/primitives/popover.js";
 import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
@@ -22,9 +15,6 @@ import { wireNotice } from "../ui/primitives/notice.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
 import { initSettingsSheet, registerSettingsSection } from "../ui/settings-sheet.js";
 import { applyTheme, toggleTheme } from "../ui/preferences.js";
-import { openUrlToStoredHole } from "./ingest/url.js";
-import { describePdfImportFailure, ingestPdfToStoredHole } from "./ingest/pdf.js";
-import { buildRabbitholeExport, downloadRabbitholeExport, importRabbitholeFile, importSnapshotFile, rabbitholeFilename } from "./portable.js";
 import { createWhimsicalHoleId, holeIdFromPathname, pathnameForHole } from "./hole-id.js";
 import { getMermaidSource, loadMermaidRuntime } from "./mermaid-runtime.js";
 import {
@@ -53,6 +43,11 @@ let blankZoom = 1;
 let composerDialog = null;
 let settingsController = null;
 let ollamaRecoveryController = null;
+let settingsRuntimePromise = null;
+let settingsWarmScheduled = false;
+let workspaceRuntimePromise = null;
+let loadedWorkspaceRuntime = null;
+let workspaceWarmScheduled = false;
 let projectMenuPopover = null;
 let githubStarsPromise = null;
 let composerPath = "";
@@ -61,7 +56,7 @@ let railSummaries = null;
 let toastNotice = null;
 let initialBridgePairing = false;
 consumeInitialBridgePairing();
-let currentPdfTranscriptionCapability = pdfTranscriptionCapability(loadSettings());
+let currentPdfTranscriptionCapability = { available: false, status: "checking", model: "", reason: "Checking PDF transcription support…" };
 let pdfTranscriptionCheckToken = 0;
 const subscriptionModelUnknownRetries = new Set();
 
@@ -96,7 +91,7 @@ async function boot() {
     return summaries;
   });
   const initial = await chooseInitialHole(summariesPromise);
-  if (initial) void loadCanvasRuntime();
+  if (initial) void Promise.all([loadCanvasRuntime(), loadWorkspaceRuntime()]);
   await summariesPromise;
   await renderRail({ refresh: false });
   if (initial) {
@@ -104,8 +99,10 @@ async function boot() {
   } else {
     showBlankCanvas();
     warmCanvasRuntime();
+    warmWorkspaceRuntime();
   }
   if (initialBridgePairing) beginBridgePairingSetup();
+  warmSettingsRuntime();
   installTestSeam({
     store,
     currentHoleId: () => currentHoleId,
@@ -117,7 +114,7 @@ async function boot() {
     exportPortable: async () => {
       await (await loadCanvasRuntime()).flushPendingSaves();
       await currentHost?.flushSave();
-      return buildRabbitholeExport(store, currentHoleId);
+      return (await loadWorkspaceRuntime()).buildRabbitholeExport(store, currentHoleId);
     },
   });
 }
@@ -262,32 +259,13 @@ function initAppChrome() {
   });
   projectMenu?.addEventListener("keydown", moveProjectMenuFocus);
   const settingsTrigger = document.getElementById("t-settings");
-  ollamaRecoveryController = createOllamaRecoveryDialog({
-    onResolved: async ({ model, transcribeModel }) => {
-      const current = loadSettings();
-      saveSettings({ ...current, model, transcribe_model: transcribeModel, api_key: getApiKey(current) });
-      settingsController?.completeLocalSetup?.();
-      refreshCurrentBrain();
-      syncGenerationSetupUi();
-      if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
-    },
-  });
-  settingsController = createModelSettings({
-    trigger: settingsTrigger,
-    onSettingsChange: () => {
-      refreshCurrentBrain();
-      syncGenerationSetupUi();
-      if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
-      else currentPdfTranscriptionCapability = pdfTranscriptionCapability(loadSettings());
-    },
-    openOllamaRecovery: ({ settings, trigger }) => ollamaRecoveryController.open({ settings, trigger }),
-  });
-  settingsController.syncSubscriptionStream();
   /* BYOK is a property of this host, not of the product: the shared sheet ships
      Appearance everywhere and the web app registers Model on top of it. The
      gear itself is wired by the sheet, in both hosts. */
-  registerSettingsSection({ id: "model", label: "Model", order: 10, mount: (host) => settingsController.mountPane(host) });
+  registerSettingsSection({ id: "model", label: "Model", order: 10, mount: mountModelSettings });
   initSettingsSheet({ hostLabel: "Web" });
+  settingsTrigger?.addEventListener("pointerenter", warmSettingsRuntime, { passive: true });
+  settingsTrigger?.addEventListener("focus", warmSettingsRuntime, { passive: true });
   document.getElementById("blank-start-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: event.currentTarget }));
   document.getElementById("blank-start-setup")?.addEventListener("click", (event) => openModelSetup({ trigger: event.currentTarget }));
   syncGenerationSetupUi();
@@ -521,19 +499,21 @@ function requestNewRabbithole({ source = "button", value = "", trigger } = {}) {
   openComposer({ source, value, trigger });
 }
 
-function openModelSetup({ trigger, status = "", onReady = null } = {}) {
+async function openModelSetup({ trigger, status = "", onReady = null } = {}) {
   const blankSetup = document.getElementById("blank-start-setup");
   const safeTrigger = trigger?.disabled ? (blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings")) : trigger;
-  settingsController.open({ trigger: safeTrigger || document.getElementById("t-settings"), purpose: status ? "recovery" : "setup", status, onReady });
+  const controller = await loadSettingsController();
+  controller.open({ trigger: safeTrigger || document.getElementById("t-settings"), purpose: status ? "recovery" : "setup", status, onReady });
 }
 
 /* The user clicked the pairing link the bridge printed. Landing silently on a
    blank canvas would throw the one moment this flow earns away — open the
    panel on the live bridge state and confirm out loud once answers can flow. */
-function beginBridgePairingSetup() {
+async function beginBridgePairingSetup() {
   const blankSetup = document.getElementById("blank-start-setup");
   const trigger = blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings");
-  settingsController.beginPairingSetup({
+  const controller = await loadSettingsController();
+  controller.beginPairingSetup({
     trigger,
     onComplete: ({ agentLabel, plan }) => {
       showToast({ message: `Connected — answers come from ${agentLabel}${plan ? ` (${plan})` : ""}.` });
@@ -682,7 +662,7 @@ async function createFromAsk(question) {
 
   try {
     setIngestStatus("Starting Rabbithole...", "busy");
-    const hole = createPendingHoleFromQuestion(question);
+    const hole = (await loadWorkspaceRuntime()).createPendingHoleFromQuestion(question);
     await store.saveHole(hole);
     setIngestStatus("Opening Rabbithole...", "busy");
     await startHole(await store.loadHole(hole.hole_id) || hole);
@@ -691,7 +671,8 @@ async function createFromAsk(question) {
     if (isAuthLikeError(err)) {
       invalidateGenerationSetup();
       syncGenerationSetupUi();
-      settingsController.open({ trigger: document.getElementById("t-settings"), purpose: "recovery", status: message, onReady: action, focusKey: true });
+      const controller = await loadSettingsController();
+      controller.open({ trigger: document.getElementById("t-settings"), purpose: "recovery", status: message, onReady: action, focusKey: true });
     } else {
       setIngestStatus(`Ask failed. ${message}`, "error");
     }
@@ -706,7 +687,7 @@ async function createFromUrl(rawUrl) {
   try {
     const settings = loadSettings();
     setIngestStatus("Fetching URL...", "busy");
-    const { hole } = await openUrlToStoredHole({
+    const { hole } = await (await loadWorkspaceRuntime()).openUrlToStoredHole({
       rawUrl,
       store,
       title: "",
@@ -754,7 +735,7 @@ async function createFromFile(file) {
 async function createFromSnapshotFile(file) {
   try {
     setIngestStatus("Importing Rabbithole snapshot...", "busy");
-    const imported = await importSnapshotFile(store, file, { mintHoleId: createWhimsicalHoleId });
+    const imported = await (await loadWorkspaceRuntime()).importSnapshotFile(store, file, { mintHoleId: createWhimsicalHoleId });
     setIngestStatus("");
     const hole = await store.loadHole(imported.hole_id);
     if (!hole) throw new Error("Imported snapshot could not be loaded.");
@@ -767,7 +748,7 @@ async function createFromSnapshotFile(file) {
 async function createFromRabbitholeFile(file) {
   try {
     setIngestStatus("Importing Rabbithole file...", "busy");
-    const imported = await importRabbitholeFile(store, file, { mintHoleId: createWhimsicalHoleId });
+    const imported = await (await loadWorkspaceRuntime()).importRabbitholeFile(store, file, { mintHoleId: createWhimsicalHoleId });
     setIngestStatus("");
     const hole = await store.loadHole(imported.hole_id);
     if (!hole) throw new Error("Imported file could not be loaded.");
@@ -780,7 +761,8 @@ async function createFromRabbitholeFile(file) {
 async function createFromPdfFile(file) {
   try {
     setIngestStatus("Preparing PDF...", "busy");
-    const { hole } = await ingestPdfToStoredHole({
+    const runtime = await loadWorkspaceRuntime();
+    const { hole } = await runtime.ingestPdfToStoredHole({
       source: file,
       store,
       title: "",
@@ -791,7 +773,8 @@ async function createFromPdfFile(file) {
     setIngestStatus("");
     await startHole(await store.loadHole(hole.hole_id) || hole);
   } catch (err) {
-    setIngestStatus(describePdfImportFailure(err), "error");
+    const runtime = await loadWorkspaceRuntime().catch(() => null);
+    setIngestStatus(runtime ? runtime.describePdfImportFailure(err) : (err?.message || String(err)), "error");
   }
 }
 
@@ -803,7 +786,8 @@ async function maybeAuthorDocument({
   baseUrl = "",
   improveStructure = false,
 } = {}) {
-  const hole = createHoleFromMarkdown({ title, markdown, baseUrl });
+  const runtime = await loadWorkspaceRuntime();
+  const hole = runtime.createHoleFromMarkdown({ title, markdown, baseUrl });
   if (!improveStructure) {
     await store.saveHole(hole);
     return hole;
@@ -811,11 +795,11 @@ async function maybeAuthorDocument({
   const settings = loadSettings();
   const key = getApiKey(settings);
   setIngestStatus("Improving structure with the model...", "busy");
-  const brain = createBrain(settings, key);
+  const brain = runtime.createBrain(settings, key);
   const root = hole.nodes[0];
   root.status = "pending";
   root.markdown = "";
-  const host = new DirectRabbitholeHost({ store, hole, brain });
+  const host = new runtime.DirectRabbitholeHost({ store, hole, brain });
   return host.authorDocument({
     title,
     markdown,
@@ -834,7 +818,7 @@ function startHole(hole, options = {}) {
 }
 
 async function mountHole(hole, { replace = false } = {}) {
-  const canvasRuntime = await loadCanvasRuntime();
+  const [canvasRuntime, workspaceRuntime] = await Promise.all([loadCanvasRuntime(), loadWorkspaceRuntime()]);
   await disposeCurrentHole();
   resetHoleSurface();
   currentHoleId = hole.hole_id;
@@ -862,10 +846,12 @@ async function mountHole(hole, { replace = false } = {}) {
 
   if (hole.nodes?.some((node) => node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted)) {
     await refreshPdfTranscriptionCapability();
+  } else {
+    currentPdfTranscriptionCapability = workspaceRuntime.pdfTranscriptionCapability(loadSettings());
   }
   const settings = loadSettings();
   const brain = brainForSettings(settings);
-  const host = new DirectRabbitholeHost({
+  const host = new workspaceRuntime.DirectRabbitholeHost({
     store,
     hole,
     brain,
@@ -966,8 +952,9 @@ async function exportCurrentRabbithole() {
   await (await loadCanvasRuntime()).flushPendingSaves();
   await currentHost?.flushSave();
   if (!currentHoleId) throw new Error("No open Rabbithole to export.");
-  const payload = await downloadRabbitholeExport(store, currentHoleId);
-  return { filename: rabbitholeFilename(payload.hole?.title), payload };
+  const runtime = await loadWorkspaceRuntime();
+  const payload = await runtime.downloadRabbitholeExport(store, currentHoleId);
+  return { filename: runtime.rabbitholeFilename(payload.hole?.title), payload };
 }
 
 async function renderRail({ refresh = true, firstHoleId = null } = {}) {
@@ -995,7 +982,7 @@ async function renderRail({ refresh = true, firstHoleId = null } = {}) {
     const empty = list.querySelector(".rail-empty") || document.createElement("div");
     empty.className = "rail-empty"; empty.textContent = "No Rabbitholes yet."; next.push(empty);
   }
-  list.replaceChildren(...next);
+  reconcileChildren(list, next);
   if (firstHoleId) list.scrollTop = 0;
   applyRailState();
 }
@@ -1020,11 +1007,31 @@ function createRailRow(holeId) {
 
 function patchRailRow(row, summary) {
   const title = summary.title || "Untitled";
-  const updated = formatRelativeDate(summary.updated_at);
   row.classList.toggle("current", summary.hole_id === currentHoleId);
-  row.querySelector(".rail-title").textContent = title;
-  const open = row.querySelector(".rail-open"); open.setAttribute("aria-label", title); open.title = updated;
-  row.querySelector(".rail-delete").setAttribute("aria-label", `Delete ${title}`);
+  const titleNode = row.querySelector(".rail-title");
+  if (titleNode.textContent !== title) titleNode.textContent = title;
+  const open = row.querySelector(".rail-open");
+  if (open.getAttribute("aria-label") !== title) open.setAttribute("aria-label", title);
+  const updated = formatRelativeDate(summary.updated_at);
+  if (open.title !== updated) open.title = updated;
+  const remove = row.querySelector(".rail-delete");
+  const removeLabel = `Delete ${title}`;
+  if (remove.getAttribute("aria-label") !== removeLabel) remove.setAttribute("aria-label", removeLabel);
+}
+
+function reconcileChildren(parent, next) {
+  const retained = new Set(next);
+  for (const child of Array.from(parent.children)) {
+    if (!retained.has(child)) child.remove();
+  }
+  let cursor = parent.firstChild;
+  for (const child of next) {
+    if (child === cursor) {
+      cursor = cursor.nextSibling;
+    } else {
+      parent.insertBefore(child, cursor);
+    }
+  }
 }
 
 async function deleteHoleFromRail(holeId) {
@@ -1036,10 +1043,9 @@ async function deleteHoleFromRail(holeId) {
   }
   const hole = await store.loadHole(holeId);
   if (!hole) return;
-  const assets = [];
-  for (const name of await store.listAssets(holeId)) {
-    assets.push({ name, blob: await store.getAsset(holeId, name) });
-  }
+  const assets = typeof store.getAssets === "function"
+    ? await store.getAssets(holeId)
+    : await Promise.all((await store.listAssets(holeId)).map(async (name) => ({ name, blob: await store.getAsset(holeId, name) })));
   await store.deleteHole(holeId);
   if (safeLocalStorageGet(LAST_HOLE_KEY) === holeId) localStorage.removeItem(LAST_HOLE_KEY);
   await renderRail();
@@ -1049,14 +1055,14 @@ async function deleteHoleFromRail(holeId) {
     timeoutMs: 10000,
     onAction: async () => {
       await store.saveHole(hole);
-      for (const asset of assets) {
-        if (asset.blob) await store.putAsset(holeId, asset.name, asset.blob);
-      }
+      const restorableAssets = assets.filter((asset) => asset.blob);
+      if (typeof store.putAssets === "function") await store.putAssets(holeId, restorableAssets);
+      else await Promise.all(restorableAssets.map((asset) => store.putAsset(holeId, asset.name, asset.blob)));
       await renderRail();
     },
   });
   if (deletingCurrent) {
-    const next = (await store.listHoles())[0];
+    const next = railSummaries?.[0];
     if (next) {
       const nextHole = await store.loadHole(next.hole_id);
       if (nextHole) await startHole(nextHole, { replace: true });
@@ -1101,13 +1107,15 @@ function refreshCurrentBrain(settings = loadSettings()) {
 }
 
 function brainForSettings(settings) {
+  const runtime = loadedWorkspaceRuntime;
+  if (!runtime) return null;
   const preset = providerFor(settings.preset);
   const key = preset.id === "subscriptions" ? String(settings.token || "").trim() : getApiKey(settings);
   if (preset.requires_key && !key) return null;
   if (preset.id === "subscriptions" && !key) return null;
-  if (preset.requires_base_url && !isHttpUrl(settings.base_url)) return null;
+  if (preset.requires_base_url && !runtime.isHttpUrl(settings.base_url)) return null;
   if (!String(settings.model || preset.model || "").trim()) return null;
-  return createBrain(settings, key);
+  return runtime.createBrain(settings, key);
 }
 
 function brainRequiredErrorForSettings(settings) {
@@ -1117,21 +1125,26 @@ function brainRequiredErrorForSettings(settings) {
 }
 
 function currentHoleNeedsPdfTranscription() {
-  return !!currentHost && [...currentHost.state.nodes.values()].some((node) => node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted);
+  if (!currentHost) return false;
+  for (const node of currentHost.state.nodes.values()) {
+    if (node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted) return true;
+  }
+  return false;
 }
 
 async function refreshPdfTranscriptionCapability(settings = loadSettings()) {
+  const runtime = await loadWorkspaceRuntime();
   const token = ++pdfTranscriptionCheckToken;
-  currentPdfTranscriptionCapability = pdfTranscriptionCapability(settings);
+  currentPdfTranscriptionCapability = runtime.pdfTranscriptionCapability(settings);
   const { syncPdfTranscriptionControls } = await loadCanvasRuntime();
   syncPdfTranscriptionControls(document, currentPdfTranscriptionCapability);
-  let detected = await detectPdfTranscriptionCapability(settings);
+  let detected = await runtime.detectPdfTranscriptionCapability(settings);
   if (token !== pdfTranscriptionCheckToken) return currentPdfTranscriptionCapability;
   if (detected.recommendedModel) {
     const next = { ...settings, transcribe_model: detected.recommendedModel };
     saveSettings({ ...next, api_key: getApiKey(settings) });
     refreshCurrentBrain(next);
-    detected = await detectPdfTranscriptionCapability(next);
+    detected = await runtime.detectPdfTranscriptionCapability(next);
     if (token !== pdfTranscriptionCheckToken) return currentPdfTranscriptionCapability;
   }
   currentPdfTranscriptionCapability = detected;
@@ -1139,20 +1152,21 @@ async function refreshPdfTranscriptionCapability(settings = loadSettings()) {
   return detected;
 }
 
-function handleBranchAuthRequired({ node, error, retry }) {
+async function handleBranchAuthRequired({ node, error, retry }) {
   const settings = loadSettings();
+  const controller = await loadSettingsController();
   if (providerFor(settings.preset).id === "subscriptions") {
-    settingsController.open({
+    controller.open({
       trigger: document.getElementById("t-settings"),
       purpose: "recovery",
       onReady: () => retryBranch(node, retry),
     });
-    settingsController.showBridgeUnauthorized({ onReady: () => retryBranch(node, retry) });
+    controller.showBridgeUnauthorized({ onReady: () => retryBranch(node, retry) });
     return;
   }
   invalidateGenerationSetup();
   syncGenerationSetupUi();
-  settingsController.open({
+  controller.open({
     trigger: document.getElementById("t-settings"),
     purpose: "recovery",
     status: error?.message || "Reconnect your model to continue.",
@@ -1161,15 +1175,17 @@ function handleBranchAuthRequired({ node, error, retry }) {
   });
 }
 
-function handleBranchProviderFailure({ node, error, retry }) {
+async function handleBranchProviderFailure({ node, error, retry }) {
   const settings = loadSettings();
   if (providerFor(settings.preset).id === "subscriptions") {
+    const controller = await loadSettingsController();
+    const runtime = await loadWorkspaceRuntime();
     const agentId = settings.agent === "claude" || settings.agent === "codex"
       ? settings.agent
-      : bridgeAgentOf(settings.model) || "claude";
-    const label = BRIDGE_AGENT_LABELS[agentId];
+      : runtime.bridgeAgentOf(settings.model) || "claude";
+    const label = runtime.BRIDGE_AGENT_LABELS[agentId];
     if (error?.code === "model_unknown") {
-      if (!subscriptionModelUnknownRetries.has(node.id) && settingsController.recoverUnknownModel(agentId)) {
+      if (!subscriptionModelUnknownRetries.has(node.id) && controller.recoverUnknownModel(agentId)) {
         subscriptionModelUnknownRetries.add(node.id);
         retryBranch(node, retry);
       }
@@ -1195,7 +1211,7 @@ function handleBranchProviderFailure({ node, error, retry }) {
     }
     if (error?.code === "payload_too_large") return;
     if (error?.code === "agent_signed_out" || error?.code === "agent_missing") {
-      settingsController.recoverBridgeAgent(agentId, {
+      controller.recoverBridgeAgent(agentId, {
         trigger: document.getElementById("t-settings"),
         onReady: () => retryBranch(node, retry),
       });
@@ -1209,14 +1225,109 @@ function handleBranchProviderFailure({ node, error, retry }) {
     message: error?.message || "Couldn't reach the local model.",
     actionLabel: "Troubleshoot",
     timeoutMs: 10000,
-    onAction: () => {
-      ollamaRecoveryController.open({
+    onAction: async () => {
+      const recovery = await loadOllamaRecoveryController();
+      recovery.open({
         settings: loadSettings(),
         trigger: document.getElementById("t-settings"),
         onResolved: () => retryBranch(node, retry),
       });
     },
   });
+}
+
+function mountModelSettings(host) {
+  let active = true;
+  let dispose = null;
+  void loadSettingsController().then((controller) => {
+    if (!active) return;
+    dispose = controller.mountPane(host) || null;
+  }).catch((error) => {
+    if (active) host.textContent = error?.message || "Model settings are unavailable.";
+  });
+  return () => {
+    active = false;
+    dispose?.();
+  };
+}
+
+function loadSettingsRuntime() {
+  if (!settingsRuntimePromise) {
+    settingsRuntimePromise = import("./settings/settings-runtime.js").then(({ createWebSettingsRuntime }) => {
+      const runtime = createWebSettingsRuntime({
+        onOllamaResolved: async ({ model, transcribeModel }) => {
+          const current = loadSettings();
+          saveSettings({ ...current, model, transcribe_model: transcribeModel, api_key: getApiKey(current) });
+          settingsController?.completeLocalSetup?.();
+          refreshCurrentBrain();
+          syncGenerationSetupUi();
+          if (currentHoleNeedsPdfTranscription()) await refreshPdfTranscriptionCapability();
+        },
+        onSettingsChange: () => {
+          refreshCurrentBrain();
+          syncGenerationSetupUi();
+          if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
+          else void loadWorkspaceRuntime().then((runtime) => {
+            currentPdfTranscriptionCapability = runtime.pdfTranscriptionCapability(loadSettings());
+          }).catch(() => {});
+        },
+      });
+      settingsController = runtime.controller;
+      ollamaRecoveryController = runtime.recovery;
+      settingsController.syncSubscriptionStream();
+      return runtime;
+    }).catch((error) => {
+      settingsRuntimePromise = null;
+      settingsController = null;
+      ollamaRecoveryController = null;
+      throw error;
+    });
+  }
+  return settingsRuntimePromise;
+}
+
+async function loadSettingsController() {
+  return (await loadSettingsRuntime()).controller;
+}
+
+async function loadOllamaRecoveryController() {
+  return (await loadSettingsRuntime()).recovery;
+}
+
+function warmSettingsRuntime() {
+  if (settingsController || settingsRuntimePromise || settingsWarmScheduled) return;
+  settingsWarmScheduled = true;
+  const warm = () => {
+    settingsWarmScheduled = false;
+    void loadSettingsRuntime().catch(() => {});
+  };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(warm, { timeout: 1200 });
+  else setTimeout(warm, 0);
+}
+
+function loadWorkspaceRuntime() {
+  if (!workspaceRuntimePromise) {
+    workspaceRuntimePromise = import("./workspace-runtime.js").then((runtime) => {
+      loadedWorkspaceRuntime = runtime;
+      return runtime;
+    }).catch((error) => {
+      workspaceRuntimePromise = null;
+      loadedWorkspaceRuntime = null;
+      throw error;
+    });
+  }
+  return workspaceRuntimePromise;
+}
+
+function warmWorkspaceRuntime() {
+  if (loadedWorkspaceRuntime || workspaceRuntimePromise || workspaceWarmScheduled) return;
+  workspaceWarmScheduled = true;
+  const warm = () => {
+    workspaceWarmScheduled = false;
+    void loadWorkspaceRuntime().catch(() => {});
+  };
+  if (typeof requestIdleCallback === "function") requestIdleCallback(warm, { timeout: 1200 });
+  else setTimeout(warm, 0);
 }
 
 function retryBranch(node, retry) {

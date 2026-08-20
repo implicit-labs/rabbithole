@@ -28,10 +28,10 @@
       "description": "Statically loaded web application JavaScript",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact transitive size of app.js and its static chunks; canvas, export, math, and PDF runtimes stay outside the landing-page critical path.",
-      "baseline": 295169,
-      "ceiling": 309927.45,
-      "measured_at_commit": "f542661"
+      "rationale": "Exact transitive size of app.js and its static chunks; canvas, workspace, model setup, export, math, and PDF runtimes stay outside the landing-page critical path.",
+      "baseline": 156855,
+      "ceiling": 164697.75,
+      "measured_at_commit": "89f87c0+lazy-runtimes"
     },
     {
       "id": "web_initial_css_bytes",

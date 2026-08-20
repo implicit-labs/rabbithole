@@ -16,6 +16,8 @@ import { randomUuidOrFallback } from "./utils.js";
  * - putStagedAsset(ingestId, name, bytes): Promise<void>
  * - adoptStagedAssets(holeId, ingestId): Promise<string[]>
  * - discardStaging(ingestId): Promise<void>
+ * Implementations may additionally provide getAssets()/putAssets() batch fast
+ * paths; consumers retain the portable single-asset fallback.
  */
 
 export const RABBITHOLE_STORE_METHODS = Object.freeze([

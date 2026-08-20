@@ -191,7 +191,9 @@ export class DirectRabbitholeHost {
   handleConvertPdf(payload) {
     const nodeId = String(payload.node_id || ""), node = this.state.nodes.get(nodeId), pdf = normalizePdfExtension(node);
     if (!pdf) throw new Error("This node is not a native PDF.");
-    if ([...this.state.nodes.values()].some((candidate) => candidate.parent_id === nodeId && !isNoteNode(candidate))) throw new Error("Create a text version before asking follow-ups.");
+    for (const candidate of this.state.nodes.values()) {
+      if (candidate.parent_id === nodeId && !isNoteNode(candidate)) throw new Error("Create a text version before asking follow-ups.");
+    }
     if (pdf.converting || this.abortByNode.has(nodeId)) throw new Error("Conversion is already running.");
     const capability = this.getPdfTranscriptionCapability?.();
     if (capability?.available === false) throw new Error(capability.reason || "Set up a vision-capable PDF transcription model before converting.");

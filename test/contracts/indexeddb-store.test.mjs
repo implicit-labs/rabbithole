@@ -101,6 +101,17 @@ await runStoreContract(store, {
   assert.equal(registeredAssets[0].name, "paste-web.png", "the BYOK upload seam registers an immediately renderable URL");
   assert.deepEqual((await store.getAssets("web-note-create")).map(({ name, blob }) => [name, blob.size]),
     [["paste-web.png", pastedBlob.size]], "the browser store can lease all Blob handles in one transaction");
+  await store.putAssets("web-note-create", [
+    { name: "paste-batch-a.png", blob: pastedBlob },
+    { name: "paste-batch-b.png", bytes: Uint8Array.of(4, 5) },
+  ]);
+  assert.deepEqual(
+    (await store.getAssets("web-note-create"))
+      .filter(({ name }) => name.startsWith("paste-batch-"))
+      .map(({ name, blob }) => [name, blob.size]),
+    [["paste-batch-a.png", 3], ["paste-batch-b.png", 2]],
+    "the browser store can persist multiple assets in one transaction",
+  );
   await assert.rejects(() => host.adapter().putAsset("figure.png", pastedBlob), /start with paste-/);
   await assert.rejects(() => host.adapter().putAsset("paste-source.pdf", pastedBlob), /image extension/);
   await assert.rejects(() => host.adapter().putAsset("paste-web.png", pastedBlob), /already exists/);

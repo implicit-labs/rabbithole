@@ -156,6 +156,28 @@ export class IdbStore {
     await done;
   }
 
+  async putAssets(holeId, assets) {
+    const safeHoleId = assertSafeHoleId(holeId);
+    if (!Array.isArray(assets)) throw new Error("assets must be an array");
+    const rows = assets.map((asset, index) => {
+      const safeName = validateAssetName(asset?.name, `assets[${index}].name`);
+      return {
+        hole_id: safeHoleId,
+        name: safeName,
+        blob: bytesToBlob(asset?.blob ?? asset?.bytes, `assets[${index}].bytes`, safeName),
+      };
+    });
+    if (!rows.length) return;
+    this.requestPersistenceOnce();
+    const db = await this.open();
+    const tx = db.transaction(ASSETS, "readwrite");
+    const done = txDone(tx);
+    const store = tx.objectStore(ASSETS);
+    const updated_at = new Date().toISOString();
+    for (const row of rows) store.put({ ...row, updated_at });
+    await done;
+  }
+
   async deleteAsset(holeId, name) {
     const safeHoleId = assertSafeHoleId(holeId);
     const safeName = validateAssetName(name);

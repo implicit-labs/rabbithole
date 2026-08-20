@@ -19,11 +19,14 @@ export async function buildRabbitholeExport(store, holeId) {
   const hole = await store.loadHole(holeId);
   if (!hole) throw new Error("That Rabbithole no longer exists.");
   const persisted = hole;
+  const rows = typeof store.getAssets === "function"
+    ? await store.getAssets(persisted.hole_id)
+    : await Promise.all((await store.listAssets(persisted.hole_id)).map(async (name) => ({ name, blob: await store.getAsset(persisted.hole_id, name) })));
+  const encoded = await Promise.all(rows.map(async ({ name, blob }) => [name, blob ? await binaryToBase64(blob) : ""]));
   const assets = {};
-  for (const name of await store.listAssets(persisted.hole_id)) {
+  for (const [name, value] of encoded) {
     validateAssetName(name);
-    const blob = await store.getAsset(persisted.hole_id, name);
-    if (blob) assets[name] = await binaryToBase64(blob);
+    if (value) assets[name] = value;
   }
   return createPortableProjection(persisted, assets);
 }
@@ -75,9 +78,8 @@ async function persistPortableImport(store, parsed, { mintHoleId = null } = {}) 
 
   await store.saveHole(hole, { updatedAt: hole.updated_at || new Date().toISOString() });
   try {
-    for (const asset of assets) {
-      await store.putAsset(hole.hole_id, asset.name, asset.blob);
-    }
+    if (typeof store.putAssets === "function") await store.putAssets(hole.hole_id, assets);
+    else for (const asset of assets) await store.putAsset(hole.hole_id, asset.name, asset.blob);
   } catch (error) {
     try { await store.deleteHole(hole.hole_id); } catch {}
     throw error;

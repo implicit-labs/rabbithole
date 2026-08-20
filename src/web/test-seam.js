@@ -11,9 +11,17 @@ export function installTestSeam({ store, currentHoleId, createDocument, exportSn
     readStoredHole: async (id = currentHoleId()) => id ? readRawRecord(store, id) : null,
     // Asset-ingest tests need binary asset names and byte sizes, which rendered product content cannot reveal.
     inspectAssets: async (id = currentHoleId()) => {
-      const names = id ? await store.listAssets(id) : [];
+      const assets = !id
+        ? []
+        : typeof store.getAssets === "function"
+          ? await store.getAssets(id)
+          : await Promise.all((await store.listAssets(id)).map(async (name) => ({ name, blob: await store.getAsset(id, name) })));
+      const names = [];
       const sizes = {};
-      for (const name of names) sizes[name] = (await store.getAsset(id, name))?.size || 0;
+      for (const { name, blob } of assets) {
+        names.push(name);
+        sizes[name] = blob?.size || 0;
+      }
       return { names, sizes };
     },
     // Asset tests need binary Blob types, which live rendering hides.
@@ -42,5 +50,6 @@ async function readRawRecord(store, id) {
     tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
     tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed"));
   });
-  return value == null ? null : structuredClone(value);
+  // IndexedDB already returns a structured clone owned by this request.
+  return value;
 }

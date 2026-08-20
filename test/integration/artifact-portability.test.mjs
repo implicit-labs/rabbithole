@@ -260,6 +260,8 @@ async function verifyPublishOutput() {
   assert(headers.includes("/chunks/*\n  Cache-Control: public, max-age=31536000, immutable"), "content-hashed deferred chunks should stay immutable between deployments");
   const chunks = await fs.readdir(path.join(publishDir, "chunks"));
   assert(chunks.some((name) => /^canvas-runtime-[A-Z0-9]+\.js$/.test(name)), "the hosted canvas runtime should remain outside the landing-page entry chunk");
+  assert(chunks.some((name) => /^workspace-runtime-[A-Z0-9]+\.js$/.test(name)), "document creation, ingestion, and export should remain outside the landing-page entry chunk");
+  assert(chunks.some((name) => /^settings-runtime-[A-Z0-9]+\.js$/.test(name)), "model setup and recovery should remain outside the landing-page entry chunk");
   const html = await fs.readFile(path.join(publishDir, "index.html"), "utf8");
   assert(html.includes("Rabbithole — an infinite canvas for learning"));
   assert(html.includes("connect-src 'self' blob: https: http: https://openrouter.ai https://api.github.com"), "web CSP should allow source-PDF blobs, any custom endpoint including one on the local network, and the public GitHub star-count request");

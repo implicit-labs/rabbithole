@@ -54,6 +54,9 @@ export async function ensureAssetDir(holeId) {
 
 const STAGING_DIR_NAME = ".staging";
 const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
+const STAGING_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+let stagingCleanupPromise = null;
+let nextStagingCleanupAt = 0;
 
 function stagingRootDir() {
   return path.join(assetsDir(), STAGING_DIR_NAME);
@@ -255,6 +258,16 @@ async function moveFile(source, dest) {
 }
 
 async function cleanupStagedAssets() {
+  if (Date.now() < nextStagingCleanupAt) return;
+  if (stagingCleanupPromise) return stagingCleanupPromise;
+  stagingCleanupPromise = cleanupStagedAssetsNow().finally(() => {
+    nextStagingCleanupAt = Date.now() + STAGING_CLEANUP_INTERVAL_MS;
+    stagingCleanupPromise = null;
+  });
+  return stagingCleanupPromise;
+}
+
+async function cleanupStagedAssetsNow() {
   let entries;
   try {
     entries = await fs.readdir(stagingRootDir(), { withFileTypes: true });
@@ -262,14 +275,13 @@ async function cleanupStagedAssets() {
     return;
   }
   const cutoff = Date.now() - STAGING_TTL_MS;
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+  await mapConcurrent(entries.filter((entry) => entry.isDirectory()), 8, async (entry) => {
     const full = path.join(stagingRootDir(), entry.name);
     try {
       const stat = await fs.stat(full);
       if (stat.mtimeMs < cutoff) await fs.rm(full, { recursive: true, force: true });
     } catch {}
-  }
+  });
 }
 
 async function createStagedAssetDir() {

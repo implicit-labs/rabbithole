@@ -720,7 +720,9 @@ export class RabbitHoleSession {
   async handleConvertPdf(payload, { saved = false } = {}) {
     const nodeId = String(payload.node_id || ""), node = this.nodes.get(nodeId), pdf = normalizePdfExtension(node);
     if (!pdf) throw buildJsonError("This node is not a native PDF", 400);
-    if ([...this.nodes.values()].some((candidate) => candidate.parent_id === nodeId && !isNoteNode(candidate))) throw buildJsonError("Create a text version before asking follow-ups", 409);
+    for (const candidate of this.nodes.values()) {
+      if (candidate.parent_id === nodeId && !isNoteNode(candidate)) throw buildJsonError("Create a text version before asking follow-ups", 409);
+    }
     if (pdf.converting && !saved) throw buildJsonError("Conversion is already running", 409);
     const requestId = randomUUID();
     if (!pdf.converting) this.patchNodePdf(nodeId, { ...pdf, converting: true, converted: false, original_markdown: node.markdown, convert_request: true });
