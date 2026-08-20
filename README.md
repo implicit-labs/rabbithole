@@ -120,14 +120,15 @@ codex mcp add rabbithole -- npx -y github:shlokkhemani/rabbithole
 ```
 
 Then raise the tool timeout in `~/.codex/config.toml` — Codex's 60-second
-default is shorter than Rabbithole's blocking wait, and `codex mcp add`
-cannot set this field:
+default is shorter than Rabbithole's intentionally suspended listener, and
+`codex mcp add` cannot set this field. The value below matches Claude Code's
+roughly 28-hour MCP tool budget; it does not cause polling or model turns:
 
 ```toml
 [mcp_servers.rabbithole]
 command = "npx"
 args = ["-y", "github:shlokkhemani/rabbithole"]
-tool_timeout_sec = 600
+tool_timeout_sec = 100000
 ```
 
 **Any other MCP client** — most accept this shape in their MCP config:
@@ -175,7 +176,7 @@ Follow these steps exactly:
    for Codex, or write the JSON block into the client's MCP config file).
    The `npx -y github:shlokkhemani/rabbithole` form needs no clone and no
    install step — npx fetches this repo and runs `bin/mcp-server.js` over stdio.
-   For Codex, also add `tool_timeout_sec = 600` under
+   For Codex, also add `tool_timeout_sec = 100000` under
    `[mcp_servers.rabbithole]` in `~/.codex/config.toml`; `codex mcp add` cannot
    set that field.
 3. **Verify**: after the client reconnects, three tools should be available —
@@ -201,7 +202,7 @@ are cached. If the browser must not auto-open (headless), set
 
 | Tool | What it does |
 |------|--------------|
-| `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). Use `{ hole_id, focus: true }` only when the human explicitly asks to reopen/show an already-live canvas. A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
+| `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). Agent reconnection uses `{ hole_id }` without focus. Use `{ hole_id, focus: true }` only when the human explicitly asks to see the canvas; an attached tab is reused and a tab opens only when none is connected. A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
 | `answer_branch` | Answer a pending branch request → a child document. Stream with `partial: true` chunks, then finish with a normal call carrying the node title; use `base_url` for fetched markdown and `assets` for local images referenced as `asset:name.png`. A `branch_request` from a PDF may include `region.image_path` — read that image before answering. Also streams "Convert to document" transcriptions when a `convert_request` arrives. |
 | `list_rabbitholes` | List saved holes to resume by id. |
 

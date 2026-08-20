@@ -208,6 +208,15 @@ export class RabbitHoleSession {
         this.timeoutHandle.unref?.();
         return;
       }
+      // An open canvas is active even when the human is only reading. Keep its
+      // local URL and agent delivery lease stable instead of expiring the
+      // session and forcing a later resume into a second browser tab.
+      if (this.sseClients.size > 0) {
+        this.timeoutAt = Date.now() + SESSION_TIMEOUT_MS;
+        this.timeoutHandle = setTimeout(check, SESSION_TIMEOUT_MS);
+        this.timeoutHandle.unref?.();
+        return;
+      }
       log(`Session ${this.id} timed out`);
       this.close("timeout");
     };
@@ -410,7 +419,16 @@ export class RabbitHoleSession {
   }
 
   focusBrowser() {
-    if (this.url && !this.closed) openBrowser(this.url);
+    if (!this.url || this.closed) return false;
+    // Opening an already-connected loopback URL creates another browser tab on
+    // common desktop browsers. The existing tab is already wired to this
+    // session and will receive every replay/live event, so reuse it silently.
+    if (this.sseClients.size > 0) {
+      log(`Session ${this.id} already has a live browser tab; not opening another`);
+      return false;
+    }
+    openBrowser(this.url);
+    return true;
   }
 
   setAgentAttached(attached, reason = null) {

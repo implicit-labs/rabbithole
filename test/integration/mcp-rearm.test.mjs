@@ -108,6 +108,46 @@ class FakeSseResponse {
   end() {}
 }
 
+async function runConnectedCanvasLifetimeFixture() {
+  const fakeTimeouts = useFakeTimeouts();
+  let session;
+  let request;
+  try {
+    session = new RabbitHoleSession({
+      holeId: "connected-canvas-lifetime",
+      title: "Connected Canvas Lifetime",
+      rootId: "root",
+      nodes: [rootNode()],
+      isResume: false,
+      renderPage: () => "",
+    });
+    session.url = "http://127.0.0.1:61234";
+    session.touch();
+
+    request = new FakeSseRequest();
+    await session.handleRequest(request, new FakeSseResponse());
+    assert.equal(session.sseClients.size, 1);
+    assert.equal(session.focusBrowser(), false, "focus must reuse a connected canvas instead of opening a duplicate tab");
+
+    session.timeoutAt = Date.now() - 1;
+    fakeTimeouts.advance(2 * 60 * 60 * 1000 + 1);
+    await Promise.resolve();
+    assert.equal(session.closed, false, "an open canvas must keep its local session alive while the human is reading");
+
+    request.emit("close");
+    session.timeoutAt = Date.now() - 1;
+    fakeTimeouts.advance(2 * 60 * 60 * 1000 + 1);
+    await Promise.resolve();
+    assert.equal(session.closed, true, "a canvas with no browser client still expires after the inactivity window");
+  } finally {
+    request?.emit("close");
+    fakeTimeouts.restore();
+    await session?.close("connected_canvas_lifetime_test_complete");
+  }
+
+  console.log("ok canvas lifetime: connected tab survives inactivity and focus never duplicates it");
+}
+
 async function runTransientSseReconnectFixture() {
   const fakeTimeouts = useFakeTimeouts();
   let session;
@@ -592,6 +632,7 @@ async function runDoneNotesDeliveryFixture() {
 }
 
 try {
+  await runConnectedCanvasLifetimeFixture();
   await runTransientSseReconnectFixture();
   await runZeroIdleTurnsAndSingleListenerFixture();
   await runOrphanedWaiterRecoveryFixture();

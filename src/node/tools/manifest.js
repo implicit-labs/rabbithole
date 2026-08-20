@@ -93,8 +93,9 @@ export const toolDefinitions = [
       "Long waits remain blocked and should be left running in the background; never poll the canvas. " +
       "If the host truly cancels or times out the tool call, re-call open_rabbithole { hole_id } once; " +
       "nothing is lost and asks are saved. A status='already_listening' result means another live " +
-      "background call owns delivery; do not call again. When the human explicitly asks to reopen or " +
-      "show the canvas, resume with { hole_id, focus: true }. " +
+      "background call owns delivery; do not call again. Reconnecting the agent never requires focus. " +
+      "Only when the human explicitly asks to see the canvas, resume with { hole_id, focus: true }; " +
+      "a live browser tab is reused and a tab is opened only when none is connected. " +
       "It returns status='session_closed' with a reason when the human clicks Done or the session otherwise ends.",
     input: obj({
       title: str("Document title (required for a new hole)", { optional: true, maxLength: 2000 }),
@@ -113,7 +114,7 @@ export const toolDefinitions = [
       hole_id: str("Resume a saved hole instead of starting a new one", { optional: true, maxLength: 200 }),
       focus: {
         kind: "boolean",
-        description: "Bring an already-live canvas to the browser when the human explicitly asks to reopen or show it",
+        description: "Show the canvas only when explicitly requested; reuses a connected tab and opens one only when no tab is connected. Never needed merely to reconnect the agent",
         optional: true,
       },
     }),
