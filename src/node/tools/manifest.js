@@ -43,6 +43,14 @@ function looksLikePdf(filePath) {
 }
 
 function validateAnswer(params) {
+  if (typeof params.delegated === "boolean") {
+    const contentFields = ["title", "content", "base_url", "assets", "partial"];
+    if (contentFields.some((field) => params[field] !== undefined)) {
+      throw new Error("delegated is a state-only update; omit title, content, base_url, assets, and partial");
+    }
+    return;
+  }
+  if (params.content === undefined) throw new Error("content is required when answering a branch");
   normalizeBaseUrl(params.base_url);
   validateAssetEntriesSync(params.assets);
 }
@@ -149,12 +157,14 @@ export const toolDefinitions = [
       AUTHORING_VOCABULARY_V1,
       "",
       "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. Do not post a host-chat final answer or end the agent turn while this listener should remain active; the pending MCP call is the listener. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
+      "",
+      "SUB-AGENT COORDINATION: sub-agents never call Rabbithole directly. After you assign this request to a sub-agent, immediately make a state-only answer_branch call with delegated=true and retain this session_id/request_id in your own conversation state. That call returns immediately, marks the window 'Working in sub-agent…', and prevents it from blocking later canvas requests. Resume the sole listener with open_rabbithole { hole_id } when appropriate. When the sub-agent returns, you—the main coordinator—stream or finish the original request_id normally, omitting delegated; its final completion returns immediately instead of taking the listener. If delegation is cancelled or you reclaim the work, make a state-only call with delegated=false.",
     ].join("\n"),
     input: obj({
       session_id: str("Active session ID from open_rabbithole", { maxLength: 200 }),
       request_id: str("The request_id of the branch_request being answered", { maxLength: 200 }),
       title: str("Short label for the new node (a few words; required on the final call)", { optional: true, maxLength: 2000 }),
-      content: str("Markdown chunk (partial) or the remaining markdown (final call)", { maxLength: 10485760 }),
+      content: str("Markdown chunk (partial) or the remaining markdown (final call); omit for a delegated state update", { optional: true, maxLength: 10485760 }),
       base_url: str("Document URL used to resolve relative markdown links/images; absolute http(s) only", {
         optional: true,
         maxLength: 2000,
@@ -172,9 +182,16 @@ export const toolDefinitions = [
           "omit/false = finish the answer and block for the next event",
         optional: true,
       },
+      delegated: {
+        kind: "boolean",
+        description:
+          "State-only sub-agent coordination flag. true marks this pending request delegated and returns immediately; " +
+          "false returns it to ordinary Thinking state. When present, omit all content fields.",
+        optional: true,
+      },
     }),
     validateInput: validateAnswer,
-    run: ({ session_id, request_id, title, content, base_url, assets, partial }, extra) =>
+    run: ({ session_id, request_id, title, content, base_url, assets, partial, delegated }, extra) =>
       withProgressKeepalive(() => answerBranch({
         sessionId: session_id,
         requestId: request_id,
@@ -183,6 +200,7 @@ export const toolDefinitions = [
         baseUrl: base_url,
         assets,
         partial,
+        delegated,
         signal: extra?.signal,
       }), extra),
   },

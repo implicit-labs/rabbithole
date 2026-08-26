@@ -710,10 +710,100 @@ async function runDoneNotesDeliveryFixture() {
       noteEntry(session, "done-anchored-note", "Tighten this paragraph.", { on_node_id: session.rootId, on_selected_text: "feedback target" }),
     ],
   }, "Done resolves the blocked agent call with every note in the hole");
-  assert.equal(session.watchdogTimer, null, "session_closed delivery must not arm the answer watchdog");
+  assert.equal(session.answerWatchdogs.size, 0, "session_closed delivery must not arm the answer watchdog");
   assert.equal(session.inFlightBranchRequests.size, 0, "session_closed delivery must not enter branch request tracking");
 
   console.log("ok rearm notes: Done delivers all notes without arming branch lifecycle state");
+}
+
+async function runDelegatedConcurrencyFixture() {
+  const answerTool = toolDefinitions.find((tool) => tool.name === "answer_branch");
+  assert(answerTool);
+  assert.doesNotThrow(() => answerTool.validateInput({ session_id: "s", request_id: "r", delegated: true }));
+  assert.throws(
+    () => answerTool.validateInput({ session_id: "s", request_id: "r", delegated: true, content: "No" }),
+    /state-only update/
+  );
+  assert.throws(
+    () => answerTool.validateInput({ session_id: "s", request_id: "r" }),
+    /content is required/
+  );
+
+  const opened = await openRabbithole({ title: "Delegated concurrency", content: "Root", signal: abortAfter() });
+  const session = getSession(opened.session_id);
+  assert(session);
+
+  const listenForA = session.waitForEvent();
+  await session.handleBrowserEvent({
+    type: "branch_request", request_id: "req-a", node_id: "node-a", parent_id: session.rootId,
+    selected_text: "Root", question: "Delegate A",
+  });
+  const requestA = await listenForA;
+  assert.equal(requestA.hole_id, session.holeId, "every delivered request carries the stable hole id needed to resume its listener");
+
+  assert.deepEqual(await answerBranch({ sessionId: session.id, requestId: "req-a", delegated: true }), {
+    ok: true, node_id: "node-a", request_id: "req-a", delegated: true,
+  });
+  assert.equal(session.answerWatchdogs.has("req-a"), false, "delegated work is owned by the coordinator, not the answer watchdog");
+  assert.equal(session.buildHydration().nodes.find((node) => node.id === "node-a")?.delegated, true,
+    "a live-page reload rehydrates transient delegation state");
+
+  const listenForB = session.waitForEvent();
+  const stillWaiting = await Promise.race([listenForB.then(() => false), sleep(20).then(() => true)]);
+  assert.equal(stillWaiting, true, "a delegated request must not redeliver and monopolize the listener");
+  await session.handleBrowserEvent({
+    type: "branch_request", request_id: "req-b", node_id: "node-b", parent_id: session.rootId,
+    selected_text: "Root", question: "Delegate B",
+  });
+  assert.equal((await listenForB).request_id, "req-b");
+  await answerBranch({ sessionId: session.id, requestId: "req-b", delegated: true });
+
+  const reclaimedListener = session.waitForEvent();
+  assert(session.waiter, "the listener can remain attached while the coordinator reclaims work");
+  assert.deepEqual(await answerBranch({ sessionId: session.id, requestId: "req-b", delegated: false }), {
+    ok: true, node_id: "node-b", request_id: "req-b", delegated: false,
+  });
+  assert.equal((await reclaimedListener).request_id, "req-b", "reclaimed work immediately wakes the attached listener");
+  await answerBranch({ sessionId: session.id, requestId: "req-b", delegated: true });
+
+  const listenForC = session.waitForEvent();
+  const completedB = await answerBranch({
+    sessionId: session.id, requestId: "req-b", title: "B", content: "B finished first.",
+  });
+  assert.deepEqual(completedB, {
+    ok: true, node_id: "node-b", request_id: "req-b", completed: true, delegated: true,
+  }, "a delegated completion returns immediately instead of taking the listener lease");
+  assert(session.waiter, "the independent listener remains available after out-of-order delegated completion");
+
+  await session.handleBrowserEvent({
+    type: "branch_request", request_id: "req-c", node_id: "node-c", parent_id: session.rootId,
+    selected_text: "Root", question: "Ordinary C",
+  });
+  assert.equal((await listenForC).request_id, "req-c");
+  assert.equal(session.answerWatchdogs.has("req-c"), true);
+
+  const completedA = await answerBranch({
+    sessionId: session.id, requestId: "req-a", title: "A", content: "A finished later.",
+  });
+  assert.equal(completedA.completed, true);
+  assert.equal(completedA.delegated, true);
+  assert.equal(session.answerWatchdogs.has("req-c"), true,
+    "finishing one request cannot clear another request's watchdog");
+  assert.equal(session.buildHydration().nodes.some((node) => node.delegated), false,
+    "completed delegated work leaves no transient marker behind");
+
+  const ordinary = await answerBranch({
+    sessionId: session.id, requestId: "req-c", title: "C", content: "C stays backward compatible.", signal: abortAfter(),
+  });
+  assert.equal(ordinary.status, "cancelled", "ordinary final answers retain the legacy blocking listener contract");
+  assert.equal(session.answerWatchdogs.size, 0);
+  assert.deepEqual(
+    session.outboundEvents.filter((event) => event.data.type === "node_work_state").map((event) => [event.data.node_id, event.data.state]),
+    [["node-a", "delegated"], ["node-b", "delegated"], ["node-b", "thinking"], ["node-b", "delegated"], ["node-b", "thinking"], ["node-a", "thinking"]],
+    "work-state events make every lifecycle transition explicit to the UI"
+  );
+
+  console.log("ok sub-agent lifecycle: parallel delegation, reclaim, reload, out-of-order completion, and listener isolation");
 }
 
 try {
@@ -726,6 +816,7 @@ try {
   await runSavedAskRequeueFixture();
   await runNotesContextFixture();
   await runDoneNotesDeliveryFixture();
+  await runDelegatedConcurrencyFixture();
 } finally {
   await closeAllSessions("mcp_rearm_test_complete");
 }

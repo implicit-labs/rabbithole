@@ -50,6 +50,7 @@ function abortAfter(ms = 25) {
 
 function assertBranchRequestShape(result, session, requestId, nodeId) {
   assert.deepEqual(Object.keys(result).sort(), [
+    "hole_id",
     "lens",
     "lineage",
     "node_id",
@@ -63,6 +64,7 @@ function assertBranchRequestShape(result, session, requestId, nodeId) {
   ]);
   assert.equal(result.status, "branch_request");
   assert.equal(result.session_id, session.id);
+  assert.equal(result.hole_id, session.holeId);
   assert.equal(result.request_id, requestId);
   assert.equal(result.node_id, nodeId);
   assert.equal(result.parent_node_id, session.rootId);

@@ -63,7 +63,14 @@ async function modernJourney() {
     const branch = await openPromise;
     assert.equal(branch.status, "branch_request", `modern MCP open result: ${JSON.stringify(branch)}`);
     assert.equal(branch.selected_text, "Select this exact phrase");
-    await streamAnswer(mcp.client, branch, "Modern branch");
+    assert.equal(typeof branch.hole_id, "string", "the coordinator receives the stable hole id needed to resume after delegation");
+    const delegated = await callTool(mcp.client, "answer_branch", {
+      session_id: branch.session_id, request_id: branch.request_id, delegated: true,
+    });
+    assert.equal(delegated.delegated, true);
+    const pendingSurface = page.locator(`.doc-content[data-node-id="${branch.node_id}"]`).first();
+    await pendingSurface.locator(".ll-live", { hasText: "Working in sub-agent…" }).waitFor();
+    await streamDelegatedAnswer(mcp.client, branch, "Modern branch");
     await page.locator(".doc-content", { hasText: "Second final paragraph" }).waitFor();
 
     // Docked notes are a pure client feature: the MCP host takes the same
@@ -273,6 +280,22 @@ async function streamAnswer(client, request, title) {
   await new Promise((resolve) => setTimeout(resolve, 100));
   controller.abort();
   await assert.rejects(final, /abort/i, "the host should be able to cancel an otherwise indefinite listener after the answer commits");
+}
+
+async function streamDelegatedAnswer(client, request, title) {
+  const split = BRANCH_MARKDOWN.indexOf("\n\n") + 2;
+  const partial = await callTool(client, "answer_branch", {
+    session_id: request.session_id, request_id: request.request_id,
+    content: BRANCH_MARKDOWN.slice(0, split), partial: true,
+  });
+  assert.equal(partial.partial, true);
+  const final = await callTool(client, "answer_branch", {
+    session_id: request.session_id, request_id: request.request_id,
+    title, content: BRANCH_MARKDOWN.slice(split),
+  });
+  assert.deepEqual(final, {
+    ok: true, node_id: request.node_id, request_id: request.request_id, completed: true, delegated: true,
+  }, "a delegated answer completes without capturing the session listener");
 }
 
 async function downloadShare(page, selector, filename) {

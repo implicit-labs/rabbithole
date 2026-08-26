@@ -77,9 +77,11 @@ files, snapshots, MCP hydration, and stored holes.
 
 ## MCP surface
 
-The server exposes `open_rabbithole`, `answer_branch`, and
-`list_rabbitholes`. Tool inputs are validated and capped before filesystem or
-session mutation. The browser transport uses the event vocabulary in
+The server exposes `open_rabbithole`, `answer_branch`, `send_to_rabbithole`,
+and `list_rabbitholes`. Tool inputs are validated and capped before filesystem
+or session mutation. Sub-agent delegation markers are transient session state:
+they can be rehydrated into a connected live page but never enter persisted
+holes, portable files, or snapshots. The browser transport uses the event vocabulary in
 `src/core/contracts/engine.d.ts`; the agent loop receives branch requests,
 conversion requests, rehydration, and terminal session status.
 

@@ -31,6 +31,7 @@ export function hydrateInitialState({ connectSse = null, refreshStatus = null } 
       x: (raw.position && raw.position.x) || 0, y: (raw.position && raw.position.y) || 0,
       w: size.w, h: size.h, font_scale: raw.font_scale || 1, collapsed: !!raw.collapsed,
       status: raw.status || "answered", _order: 0,
+      delegated: !!raw.delegated,
       extensions: raw.extensions || {},
       _startTs: (raw.status === "pending") ? Date.now() : 0
     });

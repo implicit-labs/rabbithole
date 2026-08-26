@@ -117,8 +117,17 @@ export class RabbitHoleSession {
     // must never receive the same branch request.
     this.waiter = null; // {resolve, cleanup} for the blocked waitForEvent() call
     this.agentAttached = true; // false once the agent cancels/stalls; browser is told
-    this.watchdogTimer = null;
+    // Request-scoped watchdogs are essential once several branches may be in
+    // flight. Progress on one branch must never clear another branch's stall
+    // protection.
+    this.answerWatchdogs = new Map();
     this.inFlightBranchRequests = new Map(); // request_id -> last delivered branch_request not yet answered
+    // Delegation is live coordination state, never document state. A delegated
+    // request remains pending and answerable, but no longer monopolizes
+    // redelivery. Its eventual completion also returns immediately so it cannot
+    // steal the main coordinator's listener lease.
+    this.delegatedRequests = new Set();
+    this.nonBlockingRequests = new Set();
     this.convertRequests = new Map();
     // Legacy/failure-fallback transient region JPEGs (request_id -> path).
     // Successful region asks use branch-owned crop-* assets instead.
@@ -254,6 +263,8 @@ export class RabbitHoleSession {
     this.queue.length = 0;
     this.inFlightBranchRequests.clear();
     this.generationByRequest.clear();
+    this.delegatedRequests.clear();
+    this.nonBlockingRequests.clear();
     const waiter = this.waiter;
     this.waiter = null;
     if (waiter) {
@@ -352,6 +363,10 @@ export class RabbitHoleSession {
   // Every branch_request handed to the agent arms the watchdog; any subsequent
   // agent activity (answer_branch, another waitForEvent) clears or re-arms it.
   deliverToAgent(event) {
+    // Branch work carries both identities: session_id routes answers to this
+    // live process, while hole_id lets a coordinator restore the listener after
+    // a delegated call returns. Terminal response shapes stay unchanged.
+    if (event?.status === "branch_request" || event?.status === "convert_request") event.hole_id = this.holeId;
     if (event?.status === "branch_request") {
       const notes = collectRelevantNotes(this.nodes, event.parent_node_id, { includeLineage: true });
       if (notes.length) event.notes = notes;
@@ -363,7 +378,7 @@ export class RabbitHoleSession {
     }
     if (event && (event.status === "branch_request" || event.status === "convert_request")) {
       this.inFlightBranchRequests.set(event.request_id, event);
-      this.startAnswerWatchdog();
+      this.startAnswerWatchdog(event.request_id);
     }
     if (event && (event.status === "branch_request" || event.status === "convert_request")) {
       this.setContextBusy(true);
@@ -373,6 +388,7 @@ export class RabbitHoleSession {
 
   nextInFlightBranchRequest() {
     for (const [requestId, event] of this.inFlightBranchRequests) {
+      if (this.delegatedRequests.has(requestId)) continue;
       // A conversion has no pending node — it stays redeliverable for as long
       // as its run is live, so a real host cancellation/retry cannot drop it.
       if (event.status === "convert_request") {
@@ -399,19 +415,24 @@ export class RabbitHoleSession {
     };
   }
 
-  startAnswerWatchdog() {
-    this.clearAnswerWatchdog();
-    this.watchdogTimer = setTimeout(() => {
-      this.watchdogTimer = null;
+  startAnswerWatchdog(requestId) {
+    this.clearAnswerWatchdog(requestId);
+    const timer = setTimeout(() => {
+      this.answerWatchdogs.delete(requestId);
       if (!this.closed) this.setAgentAttached(false, "stalled");
     }, ANSWER_WATCHDOG_MS);
+    this.answerWatchdogs.set(requestId, timer);
   }
 
-  clearAnswerWatchdog() {
-    if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
-      this.watchdogTimer = null;
+  clearAnswerWatchdog(requestId) {
+    if (requestId !== undefined) {
+      const timer = this.answerWatchdogs.get(requestId);
+      if (timer) clearTimeout(timer);
+      this.answerWatchdogs.delete(requestId);
+      return;
     }
+    for (const timer of this.answerWatchdogs.values()) clearTimeout(timer);
+    this.answerWatchdogs.clear();
   }
 
   markAgentAttached() {
@@ -488,6 +509,9 @@ export class RabbitHoleSession {
   }
 
   buildHydration() {
+    const delegatedNodeIds = new Set([...this.delegatedRequests]
+      .map((requestId) => this.pendingByRequest.get(requestId))
+      .filter(Boolean));
     return {
       title: this.title,
       root_id: this.rootId,
@@ -500,7 +524,8 @@ export class RabbitHoleSession {
       view_state: this.viewState,
       // The MCP page immediately serializes this projection into its isolated
       // HTML response, so its extension bags are already crossing by value.
-      nodes: holeStateToHydrationNodes(this.state, { cloneExtensions: false }),
+      nodes: holeStateToHydrationNodes(this.state, { cloneExtensions: false })
+        .map((node) => delegatedNodeIds.has(node.id) ? { ...node, delegated: true } : node),
     };
   }
 
@@ -592,11 +617,36 @@ export class RabbitHoleSession {
     });
   }
 
-  async answerBranch({ requestId, title, content, partial, baseUrl, assets, signal }) {
+  setRequestDelegated(requestId, delegated) {
+    if (this.convertRequests.has(requestId)) throw buildJsonError("PDF conversion requests cannot be delegated", 409);
+    const nodeId = this.pendingByRequest.get(requestId);
+    if (!nodeId) throw buildJsonError(`No pending branch request ${requestId}`, 404);
+    const node = this.nodes.get(nodeId);
+    if (!node || node.status !== "pending") throw buildJsonError(`Node ${nodeId} is not pending`, 409);
+
+    if (delegated) {
+      this.delegatedRequests.add(requestId);
+      this.nonBlockingRequests.add(requestId);
+      this.clearAnswerWatchdog(requestId);
+      this.setContextBusy(false);
+    } else {
+      this.delegatedRequests.delete(requestId);
+      this.nonBlockingRequests.delete(requestId);
+    }
+    this.broadcast({ type: "node_work_state", node_id: nodeId, state: delegated ? "delegated" : "thinking" });
+    // Reclaiming work must wake an already-attached listener; otherwise the
+    // request is eligible for redelivery but can remain stranded until some
+    // unrelated browser event happens to arrive.
+    if (!delegated && this.waiter) {
+      const event = this.inFlightBranchRequests.get(requestId);
+      if (event) this.pushEvent(event);
+    }
+    return { ok: true, node_id: nodeId, request_id: requestId, delegated };
+  }
+
+  async answerBranch({ requestId, title, content, partial, delegated, baseUrl, assets, signal }) {
     this.touch();
     if (this.closed) throw new Error("Rabbithole session is already closed");
-    this.setContextBusy(false);
-    this.clearAnswerWatchdog();
     this.markAgentAttached();
     const completedNodeId = this.completedRequests.get(requestId);
     if (completedNodeId !== undefined) {
@@ -608,6 +658,15 @@ export class RabbitHoleSession {
         completed: true,
       };
     }
+    if (typeof delegated === "boolean") return this.setRequestDelegated(requestId, delegated);
+
+    const nonBlocking = this.nonBlockingRequests.has(requestId);
+    if (this.delegatedRequests.delete(requestId)) {
+      const delegatedNodeId = this.pendingByRequest.get(requestId);
+      if (delegatedNodeId) this.broadcast({ type: "node_work_state", node_id: delegatedNodeId, state: "thinking" });
+    }
+    this.setContextBusy(false);
+    this.clearAnswerWatchdog(requestId);
     this.inFlightBranchRequests.delete(requestId);
     if (!partial) this.discardRegionFile(requestId);
     if (this.convertRequests.has(requestId)) return this.answerConversion({ requestId, content, partial, signal });
@@ -617,6 +676,8 @@ export class RabbitHoleSession {
     if (this.cancelledRequests.has(requestId)) {
       if (partial) return { ok: true, node_id: null, request_id: requestId, partial: true, cancelled: true };
       this.cancelledRequests.delete(requestId);
+      this.nonBlockingRequests.delete(requestId);
+      if (nonBlocking) return { ok: true, node_id: null, request_id: requestId, cancelled: true, completed: true, delegated: true };
       return this.waitForEvent(signal);
     }
 
@@ -645,7 +706,7 @@ export class RabbitHoleSession {
       const progress = ingress.acceptChunk(content, { progressFields: baseUrlFields });
       this.dispatchHoleEvent(progress);
       const updated = this.nodes.get(node.id);
-      this.startAnswerWatchdog();
+      this.startAnswerWatchdog(requestId);
       // Deliberately untagged outbound projection: `progress` already passed
       // through the reducer with its GenerationRun tag; the SSE payload mirrors
       // canonical node state and is never reducer input.
@@ -665,6 +726,7 @@ export class RabbitHoleSession {
     // both rendering and double-broadcasting the node.
     this.pendingByRequest.delete(requestId);
     this.generationByRequest.delete(requestId);
+    this.nonBlockingRequests.delete(requestId);
 
     // GenerationIngress accepts both final tails and repeated full answers;
     // the session remains responsible only for node metadata and lifecycle.
@@ -688,6 +750,9 @@ export class RabbitHoleSession {
     this.broadcast(buildNodeAnsweredEvent(finalNode));
     this.flushSave();
 
+    if (nonBlocking) {
+      return { ok: true, node_id: finalNode.id, request_id: requestId, completed: true, delegated: true };
+    }
     return this.waitForEvent(signal);
   }
 
@@ -700,7 +765,7 @@ export class RabbitHoleSession {
     const pdf = request.pdf;
     this.dispatchHoleEvent({ type: "node_progress", node_id: node.id, markdown: request.markdown });
     this.broadcast({ type: "pdf_convert_progress", node_id: node.id, markdown: request.markdown, page_done: pdf.pages.at(-1)?.n || 0, page_total: pdf.pages.length });
-    if (partial) { this.startAnswerWatchdog(); this.scheduleSave(); this.setContextBusy(true); return { ok: true, node_id: node.id, request_id: requestId, partial: true }; }
+    if (partial) { this.startAnswerWatchdog(requestId); this.scheduleSave(); this.setContextBusy(true); return { ok: true, node_id: node.id, request_id: requestId, partial: true }; }
     const materialized = await this.materializeNodeFigures(request.markdown, pdf);
     this.dispatchHoleEvent({ ...buildNodeAnsweredEvent(this.nodes.get(node.id)), markdown: materialized });
     this.patchNodePdf(node.id, { ...pdf, converting: false, converted: true, convert_request: false });
@@ -963,6 +1028,8 @@ export class RabbitHoleSession {
         this.generationByRequest.delete(reqId);
         this.cancelledRequests.add(reqId);
         this.inFlightBranchRequests.delete(reqId);
+        this.delegatedRequests.delete(reqId);
+        this.clearAnswerWatchdog(reqId);
         this.discardRegionFile(reqId);
       }
     }

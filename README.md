@@ -195,6 +195,10 @@ Follow these steps exactly:
    titled final call) and keep looping until `status='session_closed'`. Leave
    the blocked call running in the background: a passive canvas does not poll
    the model. Re-attach once only if the host truly cancels or times it out.
+   When coordinating a sub-agent, mark that request with the state-only call
+   `{ session_id, request_id, delegated: true }`, retain its IDs, and resume the
+   listener with the returned `hole_id`. The main agent later answers that
+   original request normally; delegated answers may finish in any order.
 
 Notes for you: the tool call blocks by design (long-poll) — that is normal, not
 a hang. The first `npx` run fetches this repo, so allow it time; later runs
@@ -206,7 +210,7 @@ are cached. If the browser must not auto-open (headless), set
 | Tool | What it does |
 |------|--------------|
 | `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). Agent reconnection uses `{ hole_id }` without focus. Use `{ hole_id, focus: true }` only when the human explicitly asks to see the canvas; an attached tab is reused and a tab opens only when none is connected. A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
-| `answer_branch` | Answer a pending branch request → a child document. Stream with `partial: true` chunks, then finish with a normal call carrying the node title; use `base_url` for fetched markdown and `assets` for local images referenced as `asset:name.png`. A `branch_request` from a PDF may include `region.image_path` — read that image before answering. Also streams "Convert to document" transcriptions when a `convert_request` arrives. |
+| `answer_branch` | Answer a pending branch request → a child document. Stream with `partial: true` chunks, then finish with a normal call carrying the node title; use `base_url` for fetched markdown and `assets` for local images referenced as `asset:name.png`. For main-agent coordination, a state-only `{ session_id, request_id, delegated: true }` call marks a branch “Working in sub-agent…” and lets later requests arrive; answer the retained request normally when its sub-agent returns. Use `delegated: false` to reclaim it. Delegated answers can finish in any order. A `branch_request` from a PDF may include `region.image_path` — read that image before answering. Also streams "Convert to document" transcriptions when a `convert_request` arrives. |
 | `send_to_rabbithole` | Add a durable note only when the human explicitly asks to send or save it. With `parent_node_id` it becomes a placed child note; without one it is a standalone canvas note. It never opens or focuses the browser, and a stable `operation_id` makes retries exactly-once. |
 | `list_rabbitholes` | List saved holes to resume by id. |
 
@@ -215,6 +219,10 @@ Long waits remain blocked and consume no model turns. If the host truly cancels
 or times out a call, resume once with the same `hole_id` — questions are saved.
 An `already_listening` result means the existing background call still owns
 delivery; do not attach another listener.
+
+Delegation is live coordination state, not document content. It survives a
+reload of the connected canvas, but intentionally does not persist across an
+MCP server restart; pending questions remain saved and resume as ordinary work.
 
 For research PDFs, page renders are the dependable figure source. For arXiv
 links, prefer fetching the HTML version and opening that content with

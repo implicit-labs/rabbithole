@@ -73,6 +73,10 @@ security decision; updating an assertion is not by itself sufficient.
   and progress events, MCP tool response shapes, streaming accumulation, canonical
   export, web import, future-schema refusal,
   and the isolation of learner block state from agent context and snapshots.
+- `mcp-rearm.test.mjs` protects the single listener lease, recoverable request
+  delivery, and sub-agent coordination: multiple delegated requests, explicit
+  reclaim, transient reload hydration, request-scoped watchdogs, and
+  out-of-order completion without listener capture.
 - `fetch-proxy-worker.test.mjs` protects the relay boundary: GET-only access,
   hostname allowlisting, credential stripping, CORS/content preservation, and the
   streaming response-size cap.
@@ -185,7 +189,7 @@ The following surfaces are deliberately tested across versions and hosts:
 | Persisted holes | Current records round-trip canonically; other schema versions are refused before lossy reconstruction. | Store contracts, data boundaries, cross-host journey |
 | Portable `.rabbithole` files | Valid files round-trip canonically; malformed, oversized, or newer formats fail clearly; import collisions receive fresh identity. | Data boundaries, artifact round-trip, artifact portability |
 | Snapshot HTML | Exports are inert, self-contained, escaped against script breakout, offline-capable, and include only referenced assets and shareable state. | MCP wire, compatibility/security, web app, artifact round-trip |
-| MCP tools and events | Tool inputs, responses, progress events, reattachment, and hydration remain compatible with supported clients. | Assets, MCP wire, MCP rearm, reducer |
+| MCP tools and events | Tool inputs, responses, progress events, reattachment, transient delegation, out-of-order completion, and hydration remain compatible with supported clients. | Assets, MCP wire, MCP rearm, reducer, cross-host journey |
 | Browser storage | IndexedDB data round-trips without drift; credentials remain device-local and never enter holes or exports. | IndexedDB contract, compatibility/security, web app |
 | Renderer and blocks | Markdown source remains authoritative; unsafe markup and URLs are rejected consistently on live and frozen paths; durable block IDs survive import and edits. | Renderer, content blocks, MCP wire, compatibility/security |
 | Cross-host documents | Content, referenced asset bytes, durable asks, and supported metadata survive movement between MCP, web, snapshots, and portable files. | Artifact round-trip, cross-host journey |

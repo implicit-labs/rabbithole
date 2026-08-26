@@ -361,6 +361,7 @@ function handleServer(msg){
       }
       cancelQueuedStreamRender(node.id);
       delete node._noteConversionRollback;
+      node.delegated = false;
       node.error = null;
       node.status = "answered"; node.title = msg.title || node.title;
       node.md = msg.markdown || node.md || "";
@@ -395,11 +396,21 @@ function handleServer(msg){
       var sn = nodes[msg.node_id];
       if (sn && sn.status === "pending"){
         var firstChunk = !sn.md;
+        sn.delegated = false;
         sn.error = null;
         sn.md = msg.markdown || "";
         sn.base_url = msg.base_url || sn.base_url || null;
         sn.base_url_source = msg.base_url_source || sn.base_url_source || null;
         scheduleStreamRender(sn, firstChunk);
+      }
+    } else if (msg.type === "node_work_state"){
+      var wn = nodes[msg.node_id];
+      if (wn && wn.status === "pending"){
+        wn.delegated = msg.state === "delegated";
+        cancelQueuedStreamRender(wn.id);
+        renderStreamSurfaces(wn, true);
+        updateCardComposer(wn);
+        refreshOpenStandaloneComposers();
       }
     } else if (msg.type === "node_extensions_patch"){
       var pn = nodes[msg.node_id];

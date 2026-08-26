@@ -378,7 +378,7 @@ export function buildLoading(node){
     var st = document.createElement("div");
     st.className = "loading-status";
     st.innerHTML = LOADING_BUNNY_HTML +
-      '<span class="shimmer-text ll-live">Thinking</span>' +
+      '<span class="shimmer-text ll-live">' + (node && node.delegated ? 'Working in sub-agent…' : 'Thinking') + '</span>' +
       '<span class="ll-stalled">Saved — waiting for the agent</span>' +
       '<span class="ll-closed">Saved — answered when you reopen this hole</span>' +
       '<span class="ll-frozen">Unanswered when this snapshot was exported</span>' +
@@ -432,7 +432,7 @@ export function fillStreaming(dc, node, surfaceKey){
     else dc.appendChild(caret);
     var st = document.createElement("div");
     st.className = "stream-status";
-    st.innerHTML = '<span class="shimmer-text ll-live">Writing</span>' +
+    st.innerHTML = '<span class="shimmer-text ll-live">' + (node && node.delegated ? 'Working in sub-agent…' : 'Writing') + '</span>' +
       '<span class="ll-stalled">Paused — waiting for the agent</span>' +
       '<span class="ll-closed">Saved — answered in full when you reopen this hole</span>' +
       '<span class="ll-frozen">Unfinished when this snapshot was exported</span>' +

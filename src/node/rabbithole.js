@@ -141,11 +141,11 @@ async function resumeRabbithole(holeId, signal, assets, focus = false) {
 }
 
 /**
- * Answer a pending branch request. A final call blocks until the next browser
- * event; a partial call streams a chunk into the pending node and returns
- * immediately so the human watches the answer arrive.
+ * Answer a pending branch request. Delegation is a state-only transition that
+ * returns immediately. A delegated request's later final answer also returns
+ * immediately; ordinary final answers retain the legacy listener handoff.
  */
-export async function answerBranch({ sessionId, requestId, title, content, partial, baseUrl, assets, signal }) {
+export async function answerBranch({ sessionId, requestId, title, content, partial, delegated, baseUrl, assets, signal }) {
   const session = getSession(sessionId);
   if (!session || session.isClosed()) {
     return { status: "session_closed", session_id: sessionId, reason: session?.closeReason || "session_closed" };
@@ -155,6 +155,7 @@ export async function answerBranch({ sessionId, requestId, title, content, parti
     title,
     content,
     partial,
+    delegated,
     baseUrl: normalizeBaseUrl(baseUrl),
     assets,
     signal,
