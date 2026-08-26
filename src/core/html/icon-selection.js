@@ -39,6 +39,7 @@ export const ICON_SELECTIONS = Object.freeze({
   "download": "download-outline",
   "package": "cube-outline",
   "rename": "create-outline",
+  "pin": "pin-outline",
   "check": "checkmark-outline",
   "info": "information-circle-outline",
 });

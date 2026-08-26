@@ -1608,6 +1608,7 @@ async function verifyStandaloneNotesAndEditing() {
   const context = await browser.newContext();
   await seedConfiguredOpenRouter(context);
   const page = await context.newPage();
+  await page.addInitScript(() => localStorage.setItem("rh-film", "1"));
   let providerCalls = 0;
   await routeProvider(page, {
     onProviderCall: () => { providerCalls += 1; },
@@ -1641,6 +1642,11 @@ async function verifyStandaloneNotesAndEditing() {
     const rootCard = page.locator(".node.root");
     const rootId = await rootCard.getAttribute("data-id");
     await page.waitForTimeout(350);
+
+    await anchoredCard.locator(".node-more").click();
+    assert.equal(await page.locator("#cardmenu #cm-pin").isVisible(), false,
+      "a connected note must not offer window pinning");
+    await page.keyboard.press("Escape");
 
     const persistedNoteCount = async () => page.evaluate(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
@@ -1896,11 +1902,55 @@ async function verifyStandaloneNotesAndEditing() {
     assert.deepEqual(await standaloneCard.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, false],
       "typing should enable both standalone commit intents exactly like card composers");
     await standaloneCard.locator('.ask-commit[data-commit="note"]').click();
-    await page.locator(".node-note .doc-content", { hasText: "Standalone note survives reload" }).waitFor();
+    const committedStandaloneNote = page.locator(".node-note", { hasText: "Standalone note survives reload" });
+    await committedStandaloneNote.locator(".doc-content", { hasText: "Standalone note survives reload" }).waitFor();
     await page.waitForFunction(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
       return hole.nodes.some((node) => node.parent_id === null && node.origin?.kind === "note" && node.markdown === "Standalone note survives reload");
     });
+
+    const standaloneNoteId = await committedStandaloneNote.getAttribute("data-id");
+    await committedStandaloneNote.locator(".node-more").click();
+    const pinAction = page.locator("#cardmenu #cm-pin");
+    await pinAction.waitFor({ state: "visible" });
+    assert.equal(await pinAction.locator(".sm-label").innerText(), "Pin window",
+      "a standalone note should offer pinning only in its card menu");
+    const pinnedRect = await committedStandaloneNote.boundingBox();
+    await pinAction.click();
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return Number.isFinite(node?.extensions?.canvas?.pin?.x)
+        && Number.isFinite(node?.extensions?.canvas?.pin?.y)
+        && Number.isFinite(node?.extensions?.canvas?.pin?.scale);
+    }, standaloneNoteId);
+    const cameraBeforePinMove = await page.evaluate(() => window.__rhFilmCamera.getView());
+    await page.evaluate((camera) => window.__rhFilmCamera.setView(
+      camera.x + 173, camera.y - 91, Math.max(0.2, camera.scale * 0.62)
+    ), cameraBeforePinMove);
+    const pinnedAfterCamera = await committedStandaloneNote.boundingBox();
+    assert.deepEqual({
+      left: Math.round(pinnedAfterCamera.x - pinnedRect.x),
+      top: Math.round(pinnedAfterCamera.y - pinnedRect.y),
+      width: Math.round(pinnedAfterCamera.width - pinnedRect.width),
+      height: Math.round(pinnedAfterCamera.height - pinnedRect.height),
+    }, { left: 0, top: 0, width: 0, height: 0 },
+    "a pinned note should keep its exact screen position and apparent zoom while the camera pans and zooms");
+    await page.waitForTimeout(700);
+    await page.reload({ waitUntil: "networkidle" });
+    await committedStandaloneNote.waitFor();
+    const pinnedAfterReload = await committedStandaloneNote.boundingBox();
+    assert.deepEqual({ x: Math.round(pinnedAfterReload.x), y: Math.round(pinnedAfterReload.y),
+      width: Math.round(pinnedAfterReload.width), height: Math.round(pinnedAfterReload.height) },
+    { x: Math.round(pinnedRect.x), y: Math.round(pinnedRect.y),
+      width: Math.round(pinnedRect.width), height: Math.round(pinnedRect.height) },
+    "a pinned window should restore at its saved screen position and zoom");
+    await committedStandaloneNote.locator(".node-more").click();
+    assert.equal(await pinAction.locator(".sm-label").innerText(), "Unpin window");
+    await pinAction.click();
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return !node?.extensions?.canvas?.pin;
+    }, standaloneNoteId);
 
     point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
@@ -1955,6 +2005,10 @@ async function verifyStandaloneNotesAndEditing() {
     }, { id: askDraftState.id, position: askDraftState.position, size: askDraftState.size });
     await standaloneAsk.filter({ hasText: "The standalone two-intent composer reached the existing provider path." }).waitFor();
     assert.equal(providerCalls, 1, "the standalone Ask action should call the configured provider exactly once");
+    await standaloneAsk.locator(".node-more").click();
+    assert.equal(await page.locator("#cardmenu #cm-pin").isVisible(), true,
+      "a standalone answer should offer the same menu-only pin action as a standalone note");
+    await page.keyboard.press("Escape");
     assert.equal(await page.locator(".node.note-draft").count(), 0, "Ask commit should consume the ephemeral note surface");
     assert.deepEqual(await standaloneAsk.evaluate((card) => ({
       sameCard: card.__standaloneAskIdentity === true,
@@ -2126,7 +2180,7 @@ async function verifyStandaloneNotesAndEditing() {
     assert.equal(await page.locator(`.node[data-id="${rootId}"] .node-title`).innerText(), "Renamed answer window",
       "a renamed non-note title should survive reload");
     assert.equal(await page.locator(".node-note").count(), 2, "only committed notes should survive reload");
-    console.log("ok web app: top-left note spawn, seamless double-click editing, all-node title renames, and persistence");
+    console.log("ok web app: standalone editing, menu-only fixed-screen pinning, title renames, and persistence");
   } finally {
     await context.close();
   }

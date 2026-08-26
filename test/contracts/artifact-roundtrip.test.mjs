@@ -126,8 +126,28 @@ console.log(`ok artifact round trip: all ${fixtureNames.length} corpus fixtures 
   const dockedPayload = JSON.parse(dockedSnapshot.html.match(/<script type="application\/vnd\.rabbithole\+json" id="rabbithole-portable">([\s\S]*?)<\/script>/)[1]);
   assert.deepEqual(dockedPayload.hole.nodes.find((node) => node.id === "docked-note").extensions, { note: { docked: true } },
     "a snapshot keeps a note docked while still clearing personal extension state");
+
+  // A pin is also visible page structure: the frozen canvas should keep the
+  // standalone window at the screen position and zoom chosen by its author.
+  const pinned = JSON.parse(await fs.readFile(new URL("01-empty-root.rabbithole", corpusDir), "utf8"));
+  pinned.hole.nodes.push({
+    id: "pinned-answer", parent_id: null, title: "Pinned", markdown: "Fixed above the canvas.",
+    base_url: null, base_url_source: null,
+    origin: { selected_text: "", question: "Stay here", lens: null, anchor: null, branch_type: "followup" },
+    position: { x: 300, y: 200 }, size: { w: 320, h: 240 }, font_scale: 1, collapsed: false,
+    status: "answered", read: true, created_at: "2026-08-26T00:00:00.000Z",
+    extensions: { canvas: { pin: { x: 64, y: 96, scale: 0.8 } }, future_primitive: { attempts: [1] } },
+  });
+  const pinnedStore = await storeAt("extensions-pinned");
+  const pinnedImported = await importRabbitholeFile(pinnedStore.store, JSON.stringify(pinned));
+  selectDir(pinnedStore.dir);
+  const pinnedSnapshot = await exporterSnapshot(pinnedStore.store, await pinnedStore.store.loadHole(pinnedImported.hole_id));
+  const pinnedPayload = JSON.parse(pinnedSnapshot.html.match(/<script type="application\/vnd\.rabbithole\+json" id="rabbithole-portable">([\s\S]*?)<\/script>/)[1]);
+  assert.deepEqual(pinnedPayload.hole.nodes.find((node) => node.id === "pinned-answer").extensions,
+    { canvas: { pin: { x: 64, y: 96, scale: 0.8 } } },
+    "a snapshot keeps a standalone window pinned while clearing unrelated extension state");
 }
-console.log("ok artifact round trip: extension bags survive portable round trips and are stripped from snapshots");
+console.log("ok artifact round trip: portable extensions survive; snapshots retain only page-shaping extensions");
 
 {
   const text = await fs.readFile(new URL("04-assets-png-svg.rabbithole", corpusDir), "utf8");

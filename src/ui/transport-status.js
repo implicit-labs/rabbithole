@@ -40,6 +40,7 @@ import {
   renderVisibility,
   rollbackNoteConversion,
   scheduleEdges,
+  syncNodeCanvasPresentation,
   updateCardComposer
 } from "./canvas-view.js";
 import { updateComposerState, updateSelectionComposerState } from "./ask-followups.js";
@@ -405,11 +406,14 @@ function handleServer(msg){
       if (pn){
         pn.extensions = pn.extensions || {};
         pn.extensions[msg.namespace] = msg.value;
-        if (pn.bodyEl) fillBody(pn);
-        if (mode === "reader" && currentNodeId === pn.id) renderReaderBody();
-        updateCardComposer(pn);
-        refreshOpenStandaloneComposers();
-        scheduleEdges();
+        if (msg.namespace === "canvas") syncNodeCanvasPresentation(pn);
+        else {
+          if (pn.bodyEl) fillBody(pn);
+          if (mode === "reader" && currentNodeId === pn.id) renderReaderBody();
+          updateCardComposer(pn);
+          refreshOpenStandaloneComposers();
+          scheduleEdges();
+        }
       }
     } else if (msg.type === "pdf_convert_progress"){
       var cn = nodes[msg.node_id];

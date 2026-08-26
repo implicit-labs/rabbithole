@@ -102,6 +102,7 @@ const ICON_DEFINITIONS = Object.freeze({
   download: ionicon(ICON_SELECTIONS.download, 16),
   package: ionicon(ICON_SELECTIONS.package, 16),
   rename: ionicon(ICON_SELECTIONS.rename, 16),
+  pin: ionicon(ICON_SELECTIONS.pin, 16),
   check: ionicon(ICON_SELECTIONS.check, 16),
   info: ionicon(ICON_SELECTIONS.info, 13),
 });

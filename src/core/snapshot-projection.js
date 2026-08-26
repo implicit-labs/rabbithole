@@ -14,8 +14,8 @@ export function createSnapshotProjection(hole, viewState, assets) {
   const projection = createPortableProjection({ ...hole, view_state: viewState }, assets);
   // Shares exclude personal extension state. Native PDF provenance is document
   // content, not a preference, and is required to render the embedded source;
-  // a note's docked flag is likewise how that note is shaped on the page, so a
-  // snapshot that dropped it would strand the note as a card with no place.
+  // a note's docked flag and a standalone window's canvas pin are likewise how
+  // the page is shaped, so a snapshot keeps those while clearing personal state.
   projection.hole = {
     ...projection.hole,
     nodes: projection.hole.nodes.map((node) => ({
@@ -23,6 +23,7 @@ export function createSnapshotProjection(hole, viewState, assets) {
       extensions: {
         ...(node.extensions?.pdf ? { pdf: node.extensions.pdf } : {}),
         ...(node.extensions?.note ? { note: node.extensions.note } : {}),
+        ...(node.extensions?.canvas ? { canvas: node.extensions.canvas } : {}),
       },
     })),
   };

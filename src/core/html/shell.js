@@ -127,6 +127,8 @@ export const CANVAS_SHELL = `
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-copy", role: "menuitem", tabIndex: -1, label: "Copy as Markdown", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("copy") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-rename", role: "menuitem", tabIndex: -1, label: "Rename", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("rename") + '</span>' })}
   ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-convert", role: "menuitem", tabIndex: -1, label: "Convert to Ask", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("question") + '</span>' })}
+  <div class="sm-sep cm-pin-sep"></div>
+  ${buttonMarkup({ bare: true, className: "sm-item", id: "cm-pin", role: "menuitem", tabIndex: -1, label: "Pin window", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("pin") + '</span>' })}
   <div class="sm-sep"></div>
   ${collapseGroupMarkup("cm-")}
   <div class="sm-sep cm-delete-sep"></div>
