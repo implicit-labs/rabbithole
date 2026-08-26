@@ -276,6 +276,21 @@ flowchart LR
   Question --> Explore --> Understand
 ```
 
+For basic label formatting, use Mermaid Markdown Strings rather than HTML:
+
+```mermaid
+flowchart LR
+  Prompt["`Prompt
+
+  *draw a peach hibiscus*
+
+  in watercolour`"] --> Result
+```
+
+Markdown Strings support basic emphasis and multiline labels while keeping
+HTML labels disabled. Raw label tags such as `<i>`, `<b>`, and `<br>` are shown
+as text and should not be used.
+
 The bundled runtime supports flowchart, sequence, class, state, and
 entity-relationship diagrams. Mindmaps, architecture diagrams, and
 Mermaid-side KaTeX are not included; use a `show` visual or regular Rabbithole

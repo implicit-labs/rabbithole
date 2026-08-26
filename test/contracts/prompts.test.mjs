@@ -68,6 +68,8 @@ assert.match(TRANSCRIBE_V1_RULES, /figure:page-NNN:x,y,w,h/); assert.match(TRANS
 assert.equal(transcription[0].content[0].text.includes("x".repeat(500)), true); assert.equal(transcription[0].content[0].text.includes("x".repeat(501)), false);
 assert.match(AUTHORING_VOCABULARY_V1, /```mermaid/);
 assert.match(AUTHORING_VOCABULARY_V1, /flowcharts, sequence, class, state, and entity-relationship/);
+assert.match(AUTHORING_VOCABULARY_V1, /Markdown Strings/);
+assert.match(AUTHORING_VOCABULARY_V1, /Do not put HTML tags such as <i>, <b>, or <br> in Mermaid labels/);
 assert.match(AUTHORING_VOCABULARY_V1, /mindmap, architecture, and Mermaid-side KaTeX syntax are not supported/);
 
 console.log("ok prompts: PDF attachments, note context and budget priority, byte-identical text-only messages, and Mermaid guidance");

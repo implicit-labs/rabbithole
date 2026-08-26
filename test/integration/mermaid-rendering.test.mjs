@@ -108,11 +108,17 @@ async function verifyWebApp() {
       scripts: elements.filter((element) => /^(?:SCRIPT|IFRAME|OBJECT|EMBED|FORM)$/.test(element.tagName)).length,
       handlers: elements.flatMap((element) => [...element.attributes]).filter((attribute) => /^on/i.test(attribute.name)).length,
       javascriptUrls: elements.flatMap((element) => [...element.attributes]).filter((attribute) => /^(?:href|src|xlink:href)$/i.test(attribute.name) && /^\s*javascript:/i.test(attribute.value)).length,
+      italicLabel: elements.some((element) => element.tagName === "tspan"
+        && element.textContent === "draw a peach hibiscus"
+        && [...element.querySelectorAll(":scope > tspan")].every((part) => part.getAttribute("font-style") === "italic")),
+      foreignObjects: elements.filter((element) => element.tagName.toLowerCase() === "foreignobject").length,
       rendered: mounts.filter((mount) => mount.shadowRoot?.querySelector("svg")).length,
       fallbackText: mounts.map((mount) => mount.shadowRoot?.querySelector(".viz-fallback code")?.textContent || "").find(Boolean) || "",
     };
   });
   assert.deepEqual({ pwned: safe.pwned, scripts: safe.scripts, handlers: safe.handlers, javascriptUrls: safe.javascriptUrls }, { pwned: 0, scripts: 0, handlers: 0, javascriptUrls: 0 });
+  assert.equal(safe.italicLabel, true, "strict Mermaid Markdown labels should render semantic emphasis without HTML labels");
+  assert.equal(safe.foreignObjects, 0, "Markdown label formatting should remain native SVG rather than embedding HTML");
   assert(safe.rendered >= 2);
   assert.equal(safe.fallbackText, "this is not valid mermaid");
 
@@ -215,9 +221,9 @@ async function verifyWebApp() {
       closeShadow: getComputedStyle(close).boxShadow,
     };
   });
-  assert.equal(zoomedLayout.overflow, "hidden", "diagram plate should clip zoomed content");
+  assert.equal(zoomedLayout.overflow, "visible", "diagram plate should let zoomed content use the fullscreen overlay");
   assert.equal(zoomedLayout.svgExceedsPlate, true, "2x diagram geometry should exercise the plate clipping boundary");
-  assert.equal(zoomedLayout.diagramHitOutsidePlate, false, "zoomed diagram must not paint or hit-test outside the plate");
+  assert.equal(zoomedLayout.diagramHitOutsidePlate, true, "zoomed diagram should paint and remain interactive outside its initial fitted plate");
   assert(zoomedLayout.closeZ > zoomedLayout.plateZ, `close control must stack above the plate (${JSON.stringify(zoomedLayout)})`);
   assert.equal(zoomedLayout.closeHit, true, `close control must remain hit-testable at 2x zoom (${JSON.stringify(zoomedLayout)})`);
   assert(!zoomedLayout.closeBackground.endsWith(", 0)"), "close control should have an opaque theme surface");
@@ -376,6 +382,18 @@ function portableFixture() {
           "  Rabbithole-->>Human: Branch",
           "```",
         ].join("\n"), 440),
+        node("formatted-label", "root", "Formatted label", [
+          "# Formatted label",
+          "",
+          "```mermaid",
+          "flowchart LR",
+          '  Prompt["`Prompt',
+          '',
+          '  *draw a peach hibiscus*',
+          '',
+          '  in watercolour`"] --> Result[Result]',
+          "```",
+        ].join("\n"), 660),
         node("invalid", "root", "Invalid", "```mermaid\nthis is not valid mermaid\n```", 880),
       ],
     },

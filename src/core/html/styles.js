@@ -118,7 +118,7 @@ html[data-theme="dark"] .md .rh-img-frame > img { color: #191713; }
 .rh-lightbox-content:active { cursor: grabbing; }
 .rh-lightbox-img { display: block; max-width: min(92vw, calc(100vw - 112px)); max-height: 92vh; border-radius: 8px; }
 html[data-theme="dark"] .rh-lightbox-img:not([data-rh-pasted="1"]) { padding: 8px; background: #f4f4f1; border: 1px solid color-mix(in srgb, var(--border) 60%, #f4f4f1); }
-.rh-lightbox-plate { position: relative; z-index: 1; box-sizing: border-box; overflow: hidden; padding: clamp(12px, 2vw, 24px); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--node-bg); color: var(--fg); }
+.rh-lightbox-plate { position: relative; z-index: 1; box-sizing: border-box; overflow: visible; padding: clamp(12px, 2vw, 24px); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--node-bg); color: var(--fg); }
 .rh-lightbox-diagram { display: block; width: 100%; height: 100%; flex: none; }
 .rh-lightbox-close { position: fixed; top: 14px; right: 14px; z-index: 3; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border-focus); border-radius: var(--radius-control-lg); background: var(--node-bg); color: var(--fg-bold); box-shadow: var(--shadow-popover); cursor: pointer; transition: var(--transition-color); }
 .rh-lightbox-close:hover { background: var(--bar-bg); }
