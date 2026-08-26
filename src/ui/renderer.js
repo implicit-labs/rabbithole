@@ -51,6 +51,10 @@ function renderMarkdownToHtml(markdown, options) {
   return markdownRenderer.renderMarkdownToHtml(markdown, options || {});
 }
 
+export function renderMarkdownForSurface(markdown, options) {
+  return renderMarkdownToHtml(markdown, { ...(options || {}), assetNames: assetNames });
+}
+
 function renderNodeMarkdown(node) {
   return renderMarkdownToHtml(node && node.md, {
     baseUrl: (node && node.base_url) || null,

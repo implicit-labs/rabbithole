@@ -1,4 +1,4 @@
-import { setSurfaceOrigin } from "../core.js";
+import { setSurfaceOrigin } from "../overlay/surface-origin.js";
 import { openPopover } from "./popover.js";
 
 export function createAnchoredMenu(options) {

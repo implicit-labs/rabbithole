@@ -7,7 +7,7 @@ import path from "node:path";
 process.env.RABBITHOLE_NO_BROWSER = "1";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-mcp-rearm-"));
 
-const { openRabbithole, answerBranch } = await import("../../src/node/rabbithole.js");
+const { openRabbithole, answerBranch, sendToRabbithole } = await import("../../src/node/rabbithole.js");
 const { closeAllSessions, getSession } = await import("../../src/node/sessions.js");
 const { defaultFsStore } = await import("../../src/node/fs-store.js");
 const { toolDefinitions } = await import("../../src/node/tools/manifest.js");
@@ -146,6 +146,83 @@ async function runConnectedCanvasLifetimeFixture() {
   }
 
   console.log("ok canvas lifetime: connected tab survives inactivity and focus never duplicates it");
+}
+
+async function runAgentPublishFixture() {
+  const publishTool = toolDefinitions.find((tool) => tool.name === "send_to_rabbithole");
+  assert(publishTool, "the MCP manifest must expose send_to_rabbithole");
+  assert.throws(
+    () => publishTool.validateInput({ hole_id: "", operation_id: "", content: "" }),
+    /hole_id is required/
+  );
+  const dormantHoleId = "agent-publish-dormant";
+  await defaultFsStore.saveHole({
+    hole_id: dormantHoleId,
+    title: "Agent publish dormant",
+    root_id: "root",
+    created_at: new Date().toISOString(),
+    view_state: null,
+    nodes: [rootNode()],
+  });
+
+  const standalone = await publishTool.run({
+    hole_id: dormantHoleId,
+    operation_id: "standalone-note-1",
+    title: "Incoming thought",
+    content: "Keep this for later.",
+  });
+  assert.equal(standalone.status, "stored");
+  assert.equal(standalone.duplicate, false);
+
+  const duplicate = await sendToRabbithole({
+    holeId: dormantHoleId,
+    operationId: "standalone-note-1",
+    title: "A retry must not replace the first write",
+    content: "Different retry body.",
+  });
+  assert.equal(duplicate.node_id, standalone.node_id);
+  assert.equal(duplicate.duplicate, true);
+
+  const attached = await sendToRabbithole({
+    holeId: dormantHoleId,
+    operationId: "attached-note-1",
+    content: "Attach this beneath the root.",
+    parentNodeId: "root",
+  });
+  const dormant = await defaultFsStore.loadHole(dormantHoleId);
+  assert.equal(dormant.nodes.length, 3, "a retry must not duplicate the standalone note");
+  assert.equal(dormant.nodes.find((node) => node.id === standalone.node_id).markdown, "Keep this for later.");
+  assert.equal(dormant.nodes.find((node) => node.id === standalone.node_id).parent_id, null);
+  assert.equal(dormant.nodes.find((node) => node.id === attached.node_id).parent_id, "root");
+  await assert.rejects(
+    () => sendToRabbithole({ holeId: dormantHoleId, operationId: "bad-parent", content: "No.", parentNodeId: "missing" }),
+    /Parent node missing not found/
+  );
+
+  const cancelled = await openRabbithole({
+    title: "Agent publish live",
+    content: "Root",
+    signal: abortAfter(),
+  });
+  const live = getSession(cancelled.session_id);
+  assert(live && !live.isClosed());
+  const request = new FakeSseRequest();
+  await live.handleRequest(request, new FakeSseResponse());
+  const queuedBefore = live.queue.length;
+  const published = await sendToRabbithole({
+    holeId: live.holeId,
+    operationId: "live-note-1",
+    content: "Arrive without waking or replacing the listener.",
+    parentNodeId: live.rootId,
+  });
+  assert.equal(published.status, "delivered");
+  assert.equal(live.queue.length, queuedBefore, "publishing a note must not create an agent-facing event");
+  assert(live.outboundEvents.some((event) => event.data.type === "node_answered" && event.data.node_id === published.node_id));
+  assert.equal((await defaultFsStore.loadHole(live.holeId)).nodes.some((node) => node.id === published.node_id), true);
+  request.emit("close");
+  await live.close("agent_publish_test_complete");
+
+  console.log("ok agent publish: dormant/live notes are durable, idempotent, attached optionally, and listener-free");
 }
 
 async function runTransientSseReconnectFixture() {
@@ -349,6 +426,14 @@ async function runProgressKeepaliveFixture() {
   const openTool = toolDefinitions.find((tool) => tool.name === "open_rabbithole");
   const answerTool = toolDefinitions.find((tool) => tool.name === "answer_branch");
   assert(openTool && answerTool);
+  assert.match(openTool.description, /whenever the human says 'Rabbithole' or 'rabbit hole'/,
+    "tool discovery must recognize the product name as an explicit MCP request");
+  assert.match(openTool.description, /Never claim the canvas is open or that you are listening unless this call was actually invoked and remains running/,
+    "the open tool must forbid false listener claims");
+  assert.match(openTool.description, /Do not post a host-chat final answer or end the agent turn/,
+    "the open tool must preserve its blocking listener instead of handing back early");
+  assert.match(answerTool.description, /Do not post a host-chat final answer or end the agent turn/,
+    "the final answer call must preserve its re-armed listener");
   process.env.RABBITHOLE_PROGRESS_INTERVAL_MS = "10";
   try {
     const openingController = new AbortController();
@@ -633,6 +718,7 @@ async function runDoneNotesDeliveryFixture() {
 
 try {
   await runConnectedCanvasLifetimeFixture();
+  await runAgentPublishFixture();
   await runTransientSseReconnectFixture();
   await runZeroIdleTurnsAndSingleListenerFixture();
   await runOrphanedWaiterRecoveryFixture();

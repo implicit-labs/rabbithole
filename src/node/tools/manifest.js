@@ -1,4 +1,4 @@
-import { openRabbithole, answerBranch, listRabbitholes } from "../rabbithole.js";
+import { openRabbithole, answerBranch, listRabbitholes, sendToRabbithole } from "../rabbithole.js";
 import { normalizeBaseUrl } from "../../core/base-url.js";
 import { AUTHORING_VOCABULARY_V1 } from "../../core/prompts/authoring-v1.js";
 import { MAX_ASSETS_PER_CALL } from "../../core/assets.js";
@@ -47,6 +47,12 @@ function validateAnswer(params) {
   validateAssetEntriesSync(params.assets);
 }
 
+function validatePublish(params) {
+  if (!String(params.hole_id || "").trim()) throw new Error("hole_id is required");
+  if (!String(params.operation_id || "").trim()) throw new Error("operation_id is required");
+  if (!String(params.content || "").trim()) throw new Error("content is required");
+}
+
 function progressIntervalMs() {
   const configured = Number(process.env.RABBITHOLE_PROGRESS_INTERVAL_MS);
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : PROGRESS_INTERVAL_MS;
@@ -71,6 +77,8 @@ export const toolDefinitions = [
   {
     name: "open_rabbithole",
     description:
+      "Use this tool whenever the human says 'Rabbithole' or 'rabbit hole' and wants content presented, explained, or explored there. " +
+      "Rabbithole is this MCP product, not a Markdown outline or a generic step-by-step format. " +
       "Open a document on an infinite canvas so the human can read it and dive down rabbit holes. " +
       "Start a NEW hole with { title, content } (or { title, file_path }), or RESUME a saved one with " +
       "{ hole_id } (use list_rabbitholes to find it). " +
@@ -91,6 +99,8 @@ export const toolDefinitions = [
       "On a resumed hole the first branch_request carries " +
       "a 'rehydration' field with the whole tree (and any saved_asks); read it to reload your context. " +
       "Long waits remain blocked and should be left running in the background; never poll the canvas. " +
+      "The pending tool call itself is the listener. Never claim the canvas is open or that you are listening unless this call was actually invoked and remains running. " +
+      "Do not post a host-chat final answer or end the agent turn merely to announce that Rabbithole opened; keep this call pending until a real canvas event arrives. " +
       "If the host truly cancels or times out the tool call, re-call open_rabbithole { hole_id } once; " +
       "nothing is lost and asks are saved. A status='already_listening' result means another live " +
       "background call owns delivery; do not call again. Reconnecting the agent never requires focus. " +
@@ -138,7 +148,7 @@ export const toolDefinitions = [
       "",
       AUTHORING_VOCABULARY_V1,
       "",
-      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
+      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. Do not post a host-chat final answer or end the agent turn while this listener should remain active; the pending MCP call is the listener. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
     ].join("\n"),
     input: obj({
       session_id: str("Active session ID from open_rabbithole", { maxLength: 200 }),
@@ -175,6 +185,29 @@ export const toolDefinitions = [
         partial,
         signal: extra?.signal,
       }), extra),
+  },
+  {
+    name: "send_to_rabbithole",
+    description:
+      "Durably add a note to an existing Rabbithole only when the human explicitly asks you to send or save content there. " +
+      "This never opens or focuses a browser and never creates an answer to a question. Omit parent_node_id for a standalone canvas note, " +
+      "or provide a known node id to place the note beneath that node. Supply a stable operation_id and reuse it for retries so the note is created exactly once. " +
+      "The note appears immediately when that Rabbithole has a connected canvas in this MCP session; otherwise it is stored for the next open.",
+    input: obj({
+      hole_id: str("Saved Rabbithole id from list_rabbitholes or prior context", { maxLength: 200 }),
+      operation_id: str("Caller-chosen stable id for this one publish operation; reuse unchanged on retry", { maxLength: 200 }),
+      title: str("Short note title", { optional: true, maxLength: 2000 }),
+      content: str("Markdown note content", { maxLength: 10485760 }),
+      parent_node_id: str("Optional existing node id to attach the note beneath; omit for a standalone canvas note", { optional: true, maxLength: 200 }),
+    }),
+    validateInput: validatePublish,
+    run: ({ hole_id, operation_id, title, content, parent_node_id }) => sendToRabbithole({
+      holeId: hole_id,
+      operationId: operation_id,
+      title,
+      content,
+      parentNodeId: parent_node_id,
+    }),
   },
   {
     name: "list_rabbitholes",

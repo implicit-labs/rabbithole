@@ -571,6 +571,17 @@ export class RabbitHoleSession {
     return this.saveChain.flush();
   }
 
+  /** Add an explicit agent-published note without consuming or creating an agent listener. */
+  async publishNote(event) {
+    this.touch();
+    const effects = this.dispatchHoleEvent(event, { now: new Date().toISOString() });
+    const node = effects.createdNode;
+    this.scheduleSave();
+    await this.flushSave();
+    this.broadcast(buildNodeAnsweredEvent(node));
+    return node;
+  }
+
   // ---- the answer path (agent -> server -> browser) -----------------------
 
   createGenerationIngress(node) {

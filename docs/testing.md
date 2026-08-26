@@ -108,8 +108,10 @@ host adapters without owning the broad product journey.
   conditional runtime embedding, and zero-network offline snapshots.
 - `mcp-rearm.test.mjs` protects the durable single-listener lease, redundant
   attach guard, cancellation cleanup, progress keepalives, connected-canvas
-  lifetime and duplicate-focus suppression, in-flight recovery after an
-  orphaned waiter, and exactly-once requeue of a saved pending ask.
+  lifetime and duplicate-focus suppression, explicit agent note publishing
+  without listener churn, explicit product-name discovery and no-false-listener
+  guidance, in-flight recovery after an orphaned waiter, and exactly-once requeue
+  of a saved pending ask.
 - `web-ingestion.test.mjs` protects local browser PDF ingestion, arXiv proxy
   fallback and recovery messages, future-schema import refusal, MIME-independent
   file classification, and the Markdown pre-read size limit.

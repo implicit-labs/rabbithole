@@ -5,6 +5,7 @@ import { removeMarks } from "./text-marks.js";
 export function detachNode(node) {
   if (!node) return;
   if (node._noteDraftDispose) node._noteDraftDispose();
+  if (node._noteEditDispose) node._noteEditDispose();
   disposeNodeContent(node);
   if (node.el && node.el.parentNode) node.el.parentNode.removeChild(node.el);
   node.el = null;
@@ -31,6 +32,7 @@ export function detachNode(node) {
   node._noteNormalizing = false;
   node._notePastePending = 0;
   node._noteDraftDispose = null;
+  node._noteEditDispose = null;
   node._noteDockedComposer = null;
   node._noteConversionRollback = null;
 }

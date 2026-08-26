@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { log } from "./logger.js";
 import { buildCanvasHtml } from "./html/canvas.js";
 import { createSession, getSession, getSessionByHole, closeSessionsForHole } from "./sessions.js";
 import { addAssetsToHole, defaultFsStore } from "./fs-store.js";
 import { deriveNodeBaseUrl, normalizeBaseUrl } from "../core/base-url.js";
 import { normalizeBlockIds } from "../core/blocks.js";
+import { DEFAULT_CHILD, DEFAULT_ROOT, DEFAULT_STANDALONE_NOTE, TREE_PARENT_GAP, placeChild } from "../core/layout.js";
+import { BRANCH_FOLLOWUP, isNoteNode } from "../core/model.js";
+import { createHoleState, holeStateToHole, reduceHoleEvent } from "../core/reducer.js";
 import { ingestPdfDocument, isPdfFile } from "./pdf-ingest.js";
 
 async function resolveMarkdown({ content, filePath }) {
@@ -161,4 +164,109 @@ export async function answerBranch({ sessionId, requestId, title, content, parti
 /** List saved Rabbitholes (most-recently-updated first). */
 export async function listRabbitholes() {
   return { holes: await defaultFsStore.listHoles() };
+}
+
+/**
+ * Durably add a human-requested note without opening or focusing a browser.
+ * An operation id maps to one stable node id, so an MCP retry is idempotent.
+ */
+export async function sendToRabbithole({ holeId, operationId, title, content, parentNodeId }) {
+  const nodeId = publishedNoteId(holeId, operationId);
+  const liveSession = getSessionByHole(holeId);
+  if (liveSession) {
+    const existing = liveSession.nodes.get(nodeId);
+    if (existing) return publishResult(existing, liveSession, true);
+    const event = buildPublishedNoteEvent({
+      nodeId,
+      title,
+      content,
+      parentNodeId,
+      rootId: liveSession.rootId,
+      nodes: liveSession.nodes,
+    });
+    const node = await liveSession.publishNote(event);
+    return publishResult(node, liveSession, false);
+  }
+
+  const hole = await defaultFsStore.loadHole(holeId);
+  if (!hole) throw new Error(`Hole ${holeId} not found.`);
+  const existing = hole.nodes.find((node) => node.id === nodeId);
+  if (existing) return { status: "stored", hole_id: holeId, node_id: nodeId, duplicate: true };
+  const state = createHoleState(hole, { cloneExtensions: false });
+  const event = buildPublishedNoteEvent({
+    nodeId,
+    title,
+    content,
+    parentNodeId,
+    rootId: hole.root_id,
+    nodes: state.nodes,
+  });
+  const reduced = reduceHoleEvent(state, event, { now: new Date().toISOString(), mutate: true });
+  await defaultFsStore.saveHole(holeStateToHole(reduced.state));
+  return { status: "stored", hole_id: holeId, node_id: nodeId, duplicate: false };
+}
+
+function publishResult(node, session, duplicate) {
+  return {
+    status: session.sseClients.size > 0 ? "delivered" : "stored",
+    hole_id: session.holeId,
+    session_id: session.id,
+    node_id: node.id,
+    duplicate,
+  };
+}
+
+function publishedNoteId(holeId, operationId) {
+  const digest = createHash("sha256").update(`${holeId}\0${operationId}`).digest("hex").slice(0, 32);
+  return `agent-note-${digest}`;
+}
+
+function buildPublishedNoteEvent({ nodeId, title, content, parentNodeId, rootId, nodes }) {
+  const parentId = parentNodeId == null ? null : String(parentNodeId);
+  if (parentId !== null && !nodes.has(parentId)) throw new Error(`Parent node ${parentId} not found.`);
+  const size = parentId === null ? DEFAULT_STANDALONE_NOTE : DEFAULT_CHILD;
+  return {
+    type: "node_create",
+    id: nodeId,
+    parent_id: parentId,
+    title: String(title || "Note").trim() || "Note",
+    markdown: String(content || "").trim(),
+    origin: { kind: "note" },
+    position: parentId === null
+      ? placeStandalonePublishedNote(nodes, rootId)
+      : placeAttachedPublishedNote(nodes, rootId, parentId),
+    size,
+  };
+}
+
+function layoutNode(node, rootId) {
+  const fallback = node.id === rootId
+    ? DEFAULT_ROOT
+    : (isNoteNode(node) && node.parent_id == null ? DEFAULT_STANDALONE_NOTE : DEFAULT_CHILD);
+  return { ...node, size: node.size || fallback };
+}
+
+function placeAttachedPublishedNote(nodes, rootId, parentId) {
+  const childrenOf = (id) => [...nodes.values()]
+    .filter((node) => node.parent_id === id)
+    .map((node) => layoutNode(node, rootId));
+  return placeChild(layoutNode(nodes.get(parentId), rootId), BRANCH_FOLLOWUP, { childrenOf });
+}
+
+function placeStandalonePublishedNote(nodes, rootId) {
+  let maxX = 0;
+  let minY = 0;
+  let seen = false;
+  for (const raw of nodes.values()) {
+    const node = layoutNode(raw, rootId);
+    if (node.extensions?.note?.docked === true) continue;
+    const x = Number(node.position?.x) || 0;
+    const y = Number(node.position?.y) || 0;
+    const width = Number(node.size?.w) || DEFAULT_CHILD.w;
+    if (!seen) minY = y;
+    else minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + width);
+    seen = true;
+  }
+  return { x: (seen ? maxX + TREE_PARENT_GAP : 0), y: minY };
 }

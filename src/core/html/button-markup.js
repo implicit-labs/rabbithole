@@ -57,14 +57,9 @@ export function buttonMarkup(options = {}) {
 // draft exists. Every composer surface (selection popover, reader composer,
 // card drawer, standalone note/ask surface, note editor) renders this same
 // commit markup — one Note and one Ask, worded once here so no surface can
-// grow a dialect; surfaces without a parent document omit lenses, and surfaces
-// that keep plain Enter for text say so through the two builder options.
-/** @param {{ id?: string, includeLenses?: boolean, noteEnterShortcut?: boolean }} [options] */
+// grow a dialect; surfaces without a parent document omit lenses.
+/** @param {{ id?: string, includeLenses?: boolean }} [options] */
 export function composerActionsMarkup(options = {}) {
-  const noteEnterShortcut = options.noteEnterShortcut !== false;
-  // One chip per button: ⌘S saves on every surface, but only surfaces that
-  // gave Enter away to the text advertise it.
-  const noteKbdHint = noteEnterShortcut ? "↵" : "⌘S";
   const lenses = options.includeLenses === false ? "" :
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" }) +
     buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" }) +
@@ -74,8 +69,8 @@ export function composerActionsMarkup(options = {}) {
     lenses +
     '<div class="commit-actions">' +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "note" },
-      title: noteEnterShortcut ? "Save note (Enter)" : "Save note (Command/Control+S)",
-      label: "Note ", labelClass: "ask-commit-label", kbdHint: noteKbdHint }) +
+      title: "Save note (Enter)",
+      label: "Note ", labelClass: "ask-commit-label", kbdHint: "↵" }) +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "ask" },
       title: "Ask (Command/Control+Enter)",
       label: "Ask ", labelClass: "ask-commit-label", kbdHint: "⌘↵" }) +

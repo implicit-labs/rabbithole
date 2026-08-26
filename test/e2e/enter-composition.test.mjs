@@ -75,9 +75,64 @@ async function verifyPendingRootStandaloneComposer() {
   const page = await context.newPage();
   try {
     await page.goto(session.url, { waitUntil: "domcontentloaded" });
+    const pendingRoot = session.nodes.get("root");
+    pendingRoot.markdown = "A partial answer that is still streaming.";
+    session.broadcast({ type: "node_progress", node_id: "root", markdown: pendingRoot.markdown });
+    await page.locator('.node[data-id="root"] .doc-content', { hasText: "still streaming" }).waitFor();
+    await selectText(page, "partial answer");
+    await page.waitForSelector("#ask.visible");
+    assert.equal(await page.locator("#ask-text").isEnabled(), true,
+      "a selection popover on a streaming answer must remain writable");
+    await page.fill("#ask-text", "Note on the partial answer");
+    assert.deepEqual(await page.locator("#ask .ask-commit").evaluateAll((buttons) =>
+      buttons.map((button) => ({ commit: button.dataset.commit, disabled: button.disabled }))),
+    [{ commit: "note", disabled: false }, { commit: "ask", disabled: true }],
+    "a streaming selection must allow Note while Ask remains reserved for the later queue-based flow");
+    await page.click('#ask .ask-commit[data-commit="note"]');
+    const streamingNote = page.locator('.note-dot[aria-label*="partial answer"]');
+    await streamingNote.waitFor();
+    const streamingNoteId = await streamingNote.getAttribute("data-note");
+    let streamingStored = null;
+    for (let attempt = 0; attempt < 40 && !streamingStored; attempt++) {
+      streamingStored = (await defaultFsStore.loadHole(holeId))?.nodes.find((node) => node.id === streamingNoteId) || null;
+      if (!streamingStored) await page.waitForTimeout(50);
+    }
+    assert.equal(streamingStored?.markdown, "Note on the partial answer",
+      "a note dropped on streamed text must persist immediately as-is");
+    assert.equal(streamingStored?.extensions?.note?.docked, true, "the streamed selection note must stay docked");
+    assert.deepEqual({
+      kind: streamingStored?.origin?.kind,
+      selectedText: streamingStored?.origin?.selected_text,
+      branchType: streamingStored?.origin?.branch_type,
+      anchoredLength: streamingStored?.origin?.anchor.offset_end - streamingStored?.origin?.anchor.offset_start,
+    }, { kind: "note", selectedText: "partial answer", branchType: "selection", anchoredLength: "partial answer".length },
+    "the streamed selection note must preserve its selected-text anchor");
+    pendingRoot.markdown += " More text arrived.";
+    session.broadcast({ type: "node_progress", node_id: "root", markdown: pendingRoot.markdown });
+    await page.locator('.node[data-id="root"] .doc-content', { hasText: "More text arrived" }).waitFor();
+    assert.equal(await page.locator(`mark[data-child="${streamingNoteId}"].mark-note`).count(), 1,
+      "later stream chunks must preserve the saved note anchor");
+
     await page.locator('.node[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
-    assert.equal(await page.locator('.node[data-id="selected-attachment"] .origin-quote').innerText(), "“quoted source”",
-      "selected_text and attachment thumbnails must coexist on the canvas card");
+    assert.equal(await page.locator('.node[data-id="selected-attachment"] .origin-quote').innerText(), "“What is shown?”",
+      "a selection ask must quote its raw query while retaining attachment thumbnails");
+
+    const sourceCard = page.locator('.node[data-id="selected-attachment"]');
+    await sourceCard.locator(".nc-handle").evaluate((button) => button.click());
+    await sourceCard.locator(".nc-inner textarea").fill("Persisted MCP follow-up note");
+    await sourceCard.locator(".nc-inner textarea").press("Enter");
+    const persistedCard = page.locator(".node-note", { hasText: "Persisted MCP follow-up note" });
+    await persistedCard.waitFor();
+    const persistedId = await persistedCard.getAttribute("data-id");
+    let persistedNode = null;
+    for (let attempt = 0; attempt < 40 && !persistedNode; attempt++) {
+      persistedNode = (await defaultFsStore.loadHole(holeId))?.nodes.find((node) => node.id === persistedId) || null;
+      if (!persistedNode) await page.waitForTimeout(50);
+    }
+    assert.deepEqual({ markdown: persistedNode?.markdown, parentId: persistedNode?.parent_id,
+      size: persistedNode?.size, docked: persistedNode?.extensions?.note?.docked ?? false },
+    { markdown: "Persisted MCP follow-up note", parentId: "selected-attachment", size: { w: 420, h: 460 }, docked: false },
+    "Enter in an MCP-backed card follow-up must persist a visible child note window before clearing the draft");
 
     let point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
@@ -201,15 +256,15 @@ async function verifyReaderComposer(page, calls) {
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue("#composer-text"), "line one\nline two", "Shift+Enter should insert a newline in the reader follow-up composer");
   await page.keyboard.press("Enter");
-  // A note about the document you are reading docks onto it: a ring in the
-  // reader's own margin, never a card and never a branch tile.
-  const readerRing = page.locator("#reader-main .note-dot.note-dot-whole").last();
-  await readerRing.waitFor();
-  const readerNoteId = await readerRing.getAttribute("data-note");
-  assert.deepEqual(await storedNote(page, readerNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: true, size: null },
-    "a reader Enter note should persist as a docked, place-less note");
-  assert.equal(await page.locator(`#margin-notes .side-item[data-child="${readerNoteId}"]`).count(), 0,
-    "a docked note is not a branch and must not take a rail tile");
+  // A whole-document follow-up note is a visible child window, including when
+  // it is submitted from the expanded reader.
+  const readerNote = page.locator(".node-note", { hasText: "line one\nline two" }).last();
+  await readerNote.waitFor({ state: "attached" });
+  const readerNoteId = await readerNote.getAttribute("data-id");
+  assert.deepEqual(await storedNote(page, readerNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: false, size: { w: 420, h: 460 } },
+    "a reader Enter note should persist as a visible child note window");
+  assert.equal(await page.locator(`#margin-notes .side-item[data-child="${readerNoteId}"]`).count(), 1,
+    "a placed follow-up note should appear in the reader branch rail");
   assert.equal(calls(), 1, "plain Enter should save a reader note without calling the provider");
   await page.waitForFunction(() => Array.from(document.querySelectorAll("#composer-actions .ask-commit"))
     .every((button) => getComputedStyle(button).display === "none"));
@@ -274,14 +329,14 @@ async function verifyCardComposer(page, calls) {
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue(selector), "line one\nline two", "Shift+Enter should insert a newline in the card follow-up composer");
   await page.keyboard.press("Enter");
-  // The same on the canvas: the card composer's Note commit docks a whole-card
-  // note onto the card it was written from.
-  const cardRing = page.locator(".node.root .note-dot.note-dot-whole").last();
-  await cardRing.waitFor();
-  const cardNoteId = await cardRing.getAttribute("data-note");
-  assert.deepEqual(await storedNote(page, cardNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: true, size: null },
-    "card Enter should persist an anchor-less docked note with no canvas geometry");
-  assert.equal(await page.locator(`.node[data-id="${cardNoteId}"]`).count(), 0, "a docked note has no card of its own");
+  // The same on the canvas: the card composer's Note commit creates a visible
+  // child note window attached to the card it was written from.
+  const cardNote = page.locator(".node-note", { hasText: "line one\nline two" }).last();
+  await cardNote.waitFor();
+  const cardNoteId = await cardNote.getAttribute("data-id");
+  assert.deepEqual(await storedNote(page, cardNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: false, size: { w: 420, h: 460 } },
+    "card Enter should persist a visible child note window");
+  assert.equal(await page.locator(`.node[data-id="${cardNoteId}"]`).count(), 1, "the persisted follow-up note should remain visible on the canvas");
   assert.equal(calls(), 3, "plain Enter should save a card note without calling the provider");
 
   await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
@@ -324,9 +379,9 @@ async function verifyStandaloneComposer(page, calls) {
     { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
   ], "card composers must retain their existing Enter shortcuts");
   assert.deepEqual(actionParity.standalone.map(({ title, hint }) => ({ title, hint: hint || null })), [
-    { title: "Save note (Command/Control+S)", hint: "⌘S" },
+    { title: "Save note (Enter)", hint: "↵" },
     { title: "Ask (Command/Control+Enter)", hint: "⌘↵" },
-  ], "standalone drafts must advertise Note as Cmd/Ctrl+S and Ask as Cmd/Ctrl+Enter");
+  ], "standalone drafts must advertise Note as Enter and Ask as Cmd/Ctrl+Enter");
   assert.equal(actionParity.standaloneLenses, 0, "the root-level standalone composer must not expose document lenses");
   assert.deepEqual(actionParity.disabled, [true, true], "an empty standalone composer must disable both commit actions");
 
@@ -345,17 +400,17 @@ async function verifyStandaloneComposer(page, calls) {
 
   await page.fill(selector, "line one");
   await page.focus(selector);
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Enter");
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue(selector), "line one\nline two",
-    "plain Enter should insert a newline in the standalone composer");
+    "Shift+Enter should insert a newline in the standalone composer");
   assert.equal(await page.locator(".node.note-draft").count(), 1,
-    "plain Enter must leave the standalone draft uncommitted");
-  assert.equal(calls(), 5, "plain Enter must not call the provider or commit the standalone draft");
-  await page.keyboard.press("Control+Shift+Enter");
+    "Shift+Enter must leave the standalone draft uncommitted");
+  assert.equal(calls(), 5, "Shift+Enter must not call the provider or commit the standalone draft");
+  await page.keyboard.press("Enter");
   await page.locator(".node-note", { hasText: "line one" }).last().waitFor();
   await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
-  assert.equal(calls(), 5, "the direct-placement chord should degrade to Note on a standalone window");
+  assert.equal(calls(), 5, "plain Enter should save a standalone note without calling the provider");
 
   point = await findCanvasBackground(page);
   await page.mouse.dblclick(point.x, point.y);

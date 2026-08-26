@@ -1,4 +1,4 @@
-import { setSurfaceOrigin } from "../core.js";
+import { setSurfaceOrigin } from "./surface-origin.js";
 import { registerLayer } from "./layer-stack.js";
 
 function tokenPx(surface, name) {

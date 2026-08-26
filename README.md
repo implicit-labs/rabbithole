@@ -150,7 +150,9 @@ Then start a new agent session and say:
 
 A browser tab opens. Select any text on the page, ask a question (or tap a
 lens — Explain · ELI5 · Example · Go Deeper), and the answer streams in as a
-new document. Keep going.
+new document. Keep going. The MCP call itself stays pending as the listener;
+the agent should not announce that it is listening and end its turn, because
+ending the turn can cancel the listener.
 
 If a host ever reports a tool timeout, nothing is lost — questions are saved
 and re-queued the next time the agent listens.
@@ -179,8 +181,9 @@ Follow these steps exactly:
    For Codex, also add `tool_timeout_sec = 100000` under
    `[mcp_servers.rabbithole]` in `~/.codex/config.toml`; `codex mcp add` cannot
    set that field.
-3. **Verify**: after the client reconnects, three tools should be available —
-   `open_rabbithole`, `answer_branch`, `list_rabbitholes`. (In Claude Code,
+3. **Verify**: after the client reconnects, four tools should be available —
+   `open_rabbithole`, `answer_branch`, `send_to_rabbithole`, and
+   `list_rabbitholes`. (In Claude Code,
    `claude mcp list` should show `rabbithole` as connected. The server itself
    also responds to a standard MCP `initialize` with server name `rabbithole`.)
 4. **Tell your human what to do next**: they should start a session and say
@@ -204,6 +207,7 @@ are cached. If the browser must not auto-open (headless), set
 |------|--------------|
 | `open_rabbithole` | Open a doc (`{ title, content }` / `{ title, file_path }`, optional `base_url`, optional `assets`) or resume one (`{ hole_id }`). Agent reconnection uses `{ hole_id }` without focus. Use `{ hole_id, focus: true }` only when the human explicitly asks to see the canvas; an attached tab is reused and a tab opens only when none is connected. A PDF `file_path` opens natively: rendered pages, selectable text, and box-select — no markdown authoring needed (`title` optional; PDF metadata or filename is used). Opens the canvas in the browser and blocks until the human asks something. |
 | `answer_branch` | Answer a pending branch request → a child document. Stream with `partial: true` chunks, then finish with a normal call carrying the node title; use `base_url` for fetched markdown and `assets` for local images referenced as `asset:name.png`. A `branch_request` from a PDF may include `region.image_path` — read that image before answering. Also streams "Convert to document" transcriptions when a `convert_request` arrives. |
+| `send_to_rabbithole` | Add a durable note only when the human explicitly asks to send or save it. With `parent_node_id` it becomes a placed child note; without one it is a standalone canvas note. It never opens or focuses the browser, and a stable `operation_id` makes retries exactly-once. |
 | `list_rabbitholes` | List saved holes to resume by id. |
 
 The loop: `open_rabbithole` → `branch_request` → `answer_branch` → `branch_request` → … → `session_closed`.

@@ -133,9 +133,9 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
     if (!dc) return;
     if (dc.classList.contains("rh-pdf")) return;
     var parentId = dc.dataset.nodeId;
-    if (!parentId || !nodes[parentId] || nodes[parentId].status === "pending") return;
-    // Asks stay open while the agent is merely away (they queue server-side and
-    // are answered when it returns) — only a fully closed session can't take them.
+    if (!parentId || !nodes[parentId]) return;
+    // The surface stays open while the agent is merely away — only a fully
+    // closed session cannot accept a durable note or queued ask.
     if (closed){
       flashHint(frozen ? "This is a read-only snapshot — asking needs the live Rabbithole."
         : "Session ended — reopen this Rabbithole from your terminal to keep asking.");
@@ -172,7 +172,7 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
 export function showAskFromSelection(options){
     var parentId = options && options.parentId;
     var parent = parentId && nodes[parentId];
-    if (!parent || parent.status === "pending" || parent.extensions?.pdf?.converting) return false;
+    if (!parent || parent.extensions?.pdf?.converting) return false;
     if (closed){
       flashHint(frozen ? "This is a read-only snapshot — asking needs the live Rabbithole."
         : "Session ended — reopen this Rabbithole from your terminal to keep asking.");
@@ -275,10 +275,13 @@ export function disposeAskFollowups(){
 export function updateSelectionComposerState(){
     if (!ask || !ask.classList.contains("visible") || !selectionDraft) return;
     var parent = nodes[selectionDraft.parentId];
+    var parentPending = !!parent && parent.status === "pending";
+    var actions = document.getElementById("ask-actions");
     applyComposerState(
-      { text: askText, commits: document.getElementById("ask-actions").querySelectorAll(".ask-commit"),
-        lenses: document.getElementById("ask-actions").querySelectorAll(".lens"), wrap: ask },
-      { phase: sessionPhase(), pending: !parent || parent.status === "pending" || !!parent.extensions?.pdf?.converting },
+      { text: askText, commits: actions.querySelectorAll(".ask-commit"),
+        lenses: actions.querySelectorAll(".lens"), wrap: ask },
+      { phase: sessionPhase(), pending: parentPending,
+        unavailable: !parent || !!parent.extensions?.pdf?.converting },
       { frozen: "Read-only snapshot", closed: "Session ended", pending: "This answer is still being written…",
         away: "Ask or note…", live: "Ask or note…" }
     );
@@ -296,6 +299,7 @@ export function updateSelectionComposerState(){
     if (!selectionDraft || closed) return;
     var parent = nodes[selectionDraft.parentId];
     if (!parent){ hideAsk(); return; }
+    if (parent.status === "pending" || parent.extensions?.pdf?.converting) return;
     var lens = (lensKey && LENSES[lensKey]) ? lensKey : null;
     var question = lens ? LENSES[lens].q : askText.value.trim();
     var requestId = uuid(), childId = uuid();
@@ -383,7 +387,8 @@ export function updateComposerState(){
     applyComposerState(
       { text: composerText, commits: composerActions.querySelectorAll(".ask-commit"),
         lenses: composerActions.querySelectorAll(".lens"), wrap: composerInner },
-      { phase: sessionPhase(), pending: !current || current.status === "pending" || !!current.extensions?.pdf?.converting },
+      { phase: sessionPhase(), pending: !!current && current.status === "pending",
+        unavailable: !current || !!current.extensions?.pdf?.converting },
       { frozen: "Read-only snapshot — open the live Rabbithole to keep asking",
         closed: "Session ended — reopen this Rabbithole from your terminal; saved questions are answered there",
         pending: "This answer is still being written…",
@@ -464,19 +469,18 @@ export function animateScroll(el, target, source){
   function interruptScrollAnimation(){ cancelScrollAnimation(); }
   // The reader composer's submit gate: null when the session or the current
   // document can't take a new branch (a closed session says so out loud).
-  function readerComposerParent(){
+  function readerComposerParent(needsSettled){
     if (closed){ flashHint(frozen ? "This is a read-only snapshot." : "Session ended — reopen this Rabbithole from your terminal to continue."); return null; }
     var parent = nodes[currentNodeId];
-    if (!parent || parent.status === "pending" || parent.extensions?.pdf?.converting) return null;
+    if (!parent || parent.extensions?.pdf?.converting || (needsSettled && parent.status === "pending")) return null;
     return parent;
   }
   function submitReaderFollowup(commit, source){
-    var parent = readerComposerParent();
+    var parent = readerComposerParent(commit === "ask");
     var question = composerText.value.trim();
     if (!parent || !question) return;
-    var node = commit === "note" ? createDockedNote(parent, question)
-      : commit === "note-window" ? createPlacedNote(parent, question)
-      : sendFollowup(parent, question, null);
+    var node = commit === "ask" ? sendFollowup(parent, question, null)
+      : createPlacedNote(parent, question);
     if (!node) return;
     composerText.value = "";
     autoGrowComposer();
@@ -486,7 +490,7 @@ export function animateScroll(el, target, source){
   // A lens on the reader composer is a whole-document ask — the canned lens
   // question, same as tapping a lens with nothing selected in the popover.
   function submitReaderLens(lens, source){
-    var parent = readerComposerParent();
+    var parent = readerComposerParent(true);
     if (!parent || !sendFollowup(parent, LENSES[lens].q, lens)) return;
     scrollReaderRail(source);
   }

@@ -245,6 +245,16 @@ function sanitizeUrl(href, allow) {
   return allow.test(probe) ? String(href) : null;
 }
 
+/** @param {unknown} href */
+export function sanitizeMarkdownLinkUrl(href) {
+  return sanitizeUrl(href, SAFE_URL);
+}
+
+/** @param {unknown} href */
+export function sanitizeMarkdownImageUrl(href) {
+  return sanitizeUrl(href, SAFE_IMG);
+}
+
 /** @returns {never} */
 function defaultEncodeBase64() {
   throw new Error("Markdown renderer requires an encodeBase64 adapter for visual fences");

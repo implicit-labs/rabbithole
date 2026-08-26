@@ -4,6 +4,8 @@ import { createCleanupScope } from "./lifecycle.js";
 import { mountVisuals } from "./visuals.js";
 import { mountCodeCopy } from "./code-copy.js";
 import { onPreferenceChange, readingScale, toggleTheme } from "./preferences.js";
+import { isNoteNode } from "../core/model.js";
+import { mountStructuredNote } from "./structured-note.js";
 
 export var SVGNS = "http://www.w3.org/2000/svg";
 export var MIN_SCALE = 0.15, MAX_SCALE = 2.5;
@@ -342,19 +344,6 @@ export function playLandingCue(el, cls){
     }
     requestAnimationFrame(function(){ el.classList.remove(cls); });
   }
-export function setSurfaceOrigin(el, anchorRect){
-    if (!el || !anchorRect) return;
-    var er = el.getBoundingClientRect();
-    var ax = anchorRect.left + anchorRect.width / 2;
-    var ay = anchorRect.top + anchorRect.height / 2;
-    var ox = Math.max(0, Math.min(er.width, ax - er.left));
-    var oy;
-    if (anchorRect.bottom <= er.top) oy = 0;
-    else if (anchorRect.top >= er.bottom) oy = er.height;
-    else oy = Math.max(0, Math.min(er.height, ay - er.top));
-    el.style.transformOrigin = Math.round(ox) + "px " + Math.round(oy) + "px";
-  }
-
   // Bring a node to the human in whichever view they're in: the reader opens it
   // (streaming answers render live), the canvas dives to the card and flashes it.
 export function goToNode(node, source){
@@ -504,6 +493,30 @@ export function buildDocContent(node, base){
       else dc.appendChild(buildLoading(node));
     }
     else {
+      if (isNoteNode(node) && !node.extensions?.pdf){
+        var noteDocument = mountStructuredNote(dc, {
+          markdown: node.md || "",
+          html: node.html || "",
+          baseUrl: node.base_url || null,
+          ariaLabel: "Note",
+          editAriaLabel: "Edit note",
+          onChange: function(markdown, transaction){
+            if (node._structuredNoteOnChange) node._structuredNoteOnChange(markdown, transaction, dc);
+          },
+          onReplace: function(){ mountDocMedia(dc, node, base); }
+        });
+        mountDocMedia(dc, node, base);
+        if (!node._contentDisposers) node._contentDisposers = new Set();
+        var disposeNote = function(){
+          if (dc._rhDispose !== disposeNote) return;
+          dc._rhDispose = null;
+          node._contentDisposers.delete(disposeNote);
+          noteDocument.destroy();
+        };
+        node._contentDisposers.add(disposeNote);
+        dc._rhDispose = disposeNote;
+        return dc;
+      }
       var disposePdf = coreHooks.mountPdfView ? coreHooks.mountPdfView(dc, node) : null;
       if (disposePdf){
         if (!node._contentDisposers) node._contentDisposers = new Set();

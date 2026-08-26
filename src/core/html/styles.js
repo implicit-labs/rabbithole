@@ -552,17 +552,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .has-draft .ask-commit { display: inline-flex; }
 .ask-actions.note-only .commit-actions::before { display: none; }
 
-/* The flush-footer note surface, declared once for its two wearers: the
-   fresh standalone composer (.note-draft) and the editor over an existing
-   note (.note-edit-surface). The card body goes full-bleed, the text keeps
-   the body's own 14/16 inset, and the shared action row is the card's bottom
-   edge — hairline running corner to corner, rounded into them. */
-.node.note-draft .node-body, .node.note-editing .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.node.note-draft .ask-input, .note-edit-surface > .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px; }
-/* The editor is the prose it replaces — same face, same rhythm, and none of
-   the ask composer's own textarea insets — so entering it moves no word. */
-.node.note-draft .note-editor, .note-edit-surface .note-editor { max-height: none; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
-.node.note-draft .ask-actions, .note-edit-surface > .ask-actions { flex: 0 0 auto; }
+/* A fresh note still starts as a lightweight composer. Persisted notes use
+   the structured document surface below: read and edit are one DOM tree. */
+.node.note-draft .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.node.note-draft .ask-input { flex: 1 1 auto; min-height: 0; align-items: flex-start; overflow: hidden; padding: 14px 16px; }
+.node.note-draft .note-editor { max-height: none; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
+.node.note-draft .ask-actions { flex: 0 0 auto; }
 .node.note-draft .node-body > .nc-inner { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
   margin: 0; padding: 0; overflow: hidden; border: 0; border-radius: 0 0 var(--radius-card) var(--radius-card);
   background: transparent; box-shadow: none; transform: none; opacity: var(--nc-op, 1); transition: none; }
@@ -578,21 +573,17 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .node.note-draft .ask-actions .ask-commit { display: inline-flex; }
 .node.note-draft .node-composer, .node.note-draft .node-resize, .node.note-draft .node-collapse { display: none; }
 
-/* A note branched off a selection keeps its origin quote stacked above the
-   editor, at the very inset the body's own padding gave it, so nothing moves on
-   the double-click. Only the editor below goes flush. A quote longer than the
-   card yields — scrolling inside itself — down to the editor's own floor, which
-   keeps the footer and a few lines of text on screen whatever was quoted.
-   The resize corner stands down: a drag triangle sitting on a flush footer is
-   a handle with nothing to hold. */
-.node.note-editing .node-body > :not(.note-edit-surface) { flex: 0 1 auto; min-height: 0; overflow: auto;
-  margin-left: 16px; margin-right: 16px; }
-.node.note-editing .node-body > :first-child:not(.note-edit-surface) { margin-top: 14px; }
-.node.note-editing .node-resize { display: none; }
-/* The surface holds its own floor — the quote above does the yielding, inside
-   its own scroll — so the footer and the text's last lines stay on screen. */
-.note-edit-surface { display: flex; flex: 1 0 auto; flex-direction: column; overflow: hidden;
+/* Persisted notes have one structured surface. Editing toggles contenteditable
+   on that exact element; the 14/16 prose inset moves from the body to the same
+   surface while the footer occupies its own row, leaving every block at the
+   identical x/y coordinate and measure. */
+.structured-note { outline: none; }
+.structured-note[contenteditable="true"] { cursor: text; caret-color: var(--fg-bold); }
+.node.note-editing .node-body { display: flex; flex-direction: column; padding: 0; overflow: hidden;
   border-radius: 0 0 var(--radius-card) var(--radius-card); }
+.node.note-editing .structured-note { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; }
+.node.note-editing .note-edit-actions { flex: 0 0 auto; }
+.node.note-editing .node-resize { display: none; }
 
 /* ---------- docked notes ----------
    A note written about a card lives ON that card: the wash marks the words and
@@ -633,23 +624,14 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* The note's own surface: the product's popover, sized to a paragraph. No
    header and no ×; read prose sits directly on that surface like a comment. */
 .note-pop { width: 304px; min-width: 0; }
-/* Saving with ⌘S parks the keyboard on the dialog surface itself; a dialog
+/* Saving parks the keyboard on the dialog surface itself; a dialog
    carries no focus ring of its own, so the save never paints an outline. */
 .note-pop:focus { outline: none; }
 .note-pop-view { max-height: 264px; overflow: auto; overscroll-behavior: contain;
   padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
-/* WYSIWYG with the textarea: a blank line in the source is one line box, so
-   the rendered paragraph gap must be exactly one line box too — then a plain
-   note keeps the identical popover height in read and edit. The .md last-child
-   reset stays in charge of the trailing edge via :not(:last-child). */
+/* A blank source line is one line box. Keep paragraph rhythm identical in the
+   persistent document whether it is read-only or carrying a caret. */
 .note-pop-view .md p:not(:last-child) { margin-bottom: calc(var(--leading-doc) * 1em); }
-/* The edit state is the read state with a caret: same inset, same face, same
-   rhythm — only the prose becomes a textarea, so no word ever moves. */
-.note-pop .ask-input { align-items: flex-start; padding: var(--share-item-padding-block) var(--share-item-padding-inline); }
-/* 248px = the read view's 264px ceiling minus its 16px block padding: both
-   states clamp a long note at the same total height (kept in step with
-   NOTE_POP_EDITOR_MAX in docked-notes.js). */
-.note-pop .note-editor { max-height: 248px; padding: 0; min-height: 1.72em; font-family: var(--font-doc); line-height: var(--leading-doc); color: var(--fg); }
 /* One footer for both states, wearing the composer's own hairline bar (see
    .ask-actions above), run out to the popover's edge. Read fills it with the
    two verbs in the composer's pill; edit swaps in the Note / Ask commit pair —

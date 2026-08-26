@@ -22,7 +22,6 @@ import {
 } from "./ask-followups.js";
 import {
   closeDockedNotePopover,
-  createDockedNote,
   createPlacedNote,
   disposeDockedNotes,
   initDockedNotes,
@@ -103,7 +102,6 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
     registerCanvasHooks({
       hideAsk: hideAsk,
       sendFollowup: sendFollowup,
-      sendNote: createDockedNote,
       sendPlacedNote: createPlacedNote,
       renderDockedNotes: renderDockedNotes,
       positionDockedNotes: positionDockedNotes,

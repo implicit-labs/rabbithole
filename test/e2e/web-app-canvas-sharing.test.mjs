@@ -873,6 +873,7 @@ async function verifyDockedNotes() {
       const bar = surface.querySelector(".note-pop-actions");
       const barRect = bar.getBoundingClientRect();
       const view = surface.querySelector(".note-pop-view");
+      window.__popoverNoteDocument = view.querySelector(".doc-content");
       const viewRect = view.getBoundingClientRect();
       const viewStyle = getComputedStyle(view);
       const range = document.createRange();
@@ -895,20 +896,24 @@ async function verifyDockedNotes() {
     await popover.locator(".note-editor").waitFor();
     assert.deepEqual(await popover.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => ({
       commit: button.dataset.commit, hint: button.querySelector("kbd")?.textContent }))), [
-      { commit: "note", hint: "⌘S" }, { commit: "ask", hint: "⌘↵" },
+      { commit: "note", hint: "↵" }, { commit: "ask", hint: "⌘↵" },
     ], "the popover edits with the composer's own bar");
     const editState = await popover.evaluate((surface) => {
       const bar = surface.querySelector(".note-pop-actions");
       const barRect = bar.getBoundingClientRect();
       const editor = surface.querySelector(".note-editor");
-      const editorRect = editor.getBoundingClientRect();
-      const style = getComputedStyle(editor);
-      const wrapStyle = getComputedStyle(editor.closest(".ask-input"));
+      const view = surface.querySelector(".note-pop-view");
+      const range = document.createRange();
+      const first = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT).nextNode();
+      range.setStart(first, 0); range.setEnd(first, 1);
+      const glyph = range.getBoundingClientRect();
+      const wrapStyle = getComputedStyle(view);
       return {
         bar: { left: barRect.left, top: barRect.top, width: barRect.width, height: barRect.height },
         hairline: getComputedStyle(bar).borderTopWidth,
         bars: surface.querySelectorAll(".ask-actions, .note-pop-actions").length,
-        origin: { left: editorRect.left + parseFloat(style.paddingLeft), top: editorRect.top + parseFloat(style.paddingTop) },
+        sameSurface: editor === window.__popoverNoteDocument,
+        glyph: { left: glyph.left, top: glyph.top },
         chrome: { background: wrapStyle.backgroundColor, borderLeft: wrapStyle.borderLeftWidth, radius: wrapStyle.borderRadius },
       };
     });
@@ -917,8 +922,9 @@ async function verifyDockedNotes() {
       `read→edit must not move or resize the footer bar: ${JSON.stringify({ readState, editState })}`);
     assert.equal(editState.hairline, "1px", "the edit footer keeps the same hairline");
     assert.equal(editState.bars, 1, "one footer bar, never a second");
-    assert(near(editState.origin.left, readState.origin.left) && near(editState.origin.top, readState.origin.top),
-      `entering edit must not shift the text origin: ${JSON.stringify({ readState, editState })}`);
+    assert.equal(editState.sameSurface, true, "the popover must edit its existing rendered document surface");
+    assert(near(editState.glyph.left, readState.glyph.left) && near(editState.glyph.top, readState.glyph.top),
+      `entering edit must not shift the first glyph: ${JSON.stringify({ readState, editState })}`);
     assert.deepEqual(editState.chrome, { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", radius: "0px" },
       "the edit state is plain: no wash, no left rule, no radius");
     await popover.locator(".note-editor").fill("Text that Escape must throw away");
@@ -941,14 +947,14 @@ async function verifyDockedNotes() {
     assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("note-dot")), true,
       "closing returns focus to the affordance that opened it");
 
-    // Double-clicking the wash edits, Enter is a newline, ⌘S saves and returns
-    // to the read state.
+    // Double-clicking the wash edits, Shift+Enter is a newline, and Enter saves
+    // and returns to the read state.
     await rootCard.locator(`mark[data-child="${firstId}"]`).dblclick();
     await popover.locator(".note-editor").waitFor();
     await popover.locator(".note-editor").fill("The first docked note, revised");
+    await popover.locator(".note-editor").press("Shift+Enter");
+    assert.match(await popover.locator(".note-editor").innerText(), /revised\n/, "Shift+Enter creates a new line inside a note");
     await popover.locator(".note-editor").press("Enter");
-    assert.match(await popover.locator(".note-editor").inputValue(), /revised\n$/, "Enter writes a newline inside a note");
-    await popover.locator(".note-editor").press("Control+s");
     await popover.locator(".note-pop-view").waitFor();
     assert.equal((await popover.locator(".note-pop-view").innerText()).trim(), "The first docked note, revised",
       "saving returns to the read state showing what was written");
@@ -959,14 +965,15 @@ async function verifyDockedNotes() {
     // The dot answers the same grammar as the wash: one click reads, two edit.
     await page.locator(`.note-dot[data-note="${firstId}"]`).dblclick();
     await popover.locator(".note-editor").waitFor();
-    assert.equal(await popover.locator(".note-editor").inputValue(), "The first docked note, revised",
+    assert.equal((await popover.locator(".note-editor").innerText()).trim(), "The first docked note, revised",
       "double-clicking the dot opens the note for editing");
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
 
-    // A note about the whole card: the card's own composer writes it. The ⋯
-    // menu carries no "Add note" of its own — one entry point, one path.
+    // A note about the whole card: the card's own composer creates a visible
+    // child window. The ⋯ menu carries no "Add note" of its own — one entry
+    // point, one path.
     await rootCard.locator(".node-more").click();
     assert.equal(await page.locator("#cm-note").count(), 0,
       "the card menu offers no Add note anywhere — the card composer is the way in");
@@ -974,21 +981,17 @@ async function verifyDockedNotes() {
     await rootCard.locator(".nc-handle").click();
     await rootCard.locator(".nc-inner textarea").fill("A note about this whole card");
     await rootCard.locator('.nc-inner .ask-commit[data-commit="note"]').click();
-    await page.waitForSelector(".note-dot-whole");
-    const wholeId = await waitForStoredHole(page, (hole) => hole.nodes.some((node) => node.markdown === "A note about this whole card"),
-      "the whole-card note to persist").then((hole) => hole.nodes.find((node) => node.markdown === "A note about this whole card").id);
-    assert.deepEqual(await page.locator(".note-dot").evaluateAll((dots) => dots.map((dot) => ({
-      id: dot.dataset.note, label: dot.getAttribute("aria-label"), whole: dot.classList.contains("note-dot-whole"),
-      top: parseFloat(dot.style.top) }))).then((dots) => ({
-      first: dots[0].id, leadsColumn: dots[0].whole && dots[0].top < dots[1].top, label: dots[0].label })),
-    { first: wholeId, leadsColumn: true, label: "Note on this card" },
-    "a whole-card note is a hollow ring at the top of the column");
-    assert.deepEqual(await page.locator(`.note-dot[data-note="${wholeId}"]`).evaluate((dot) => {
-      const box = dot.getBoundingClientRect();
-      const ink = getComputedStyle(dot, "::after");
-      return { size: { width: box.width, height: box.height }, border: ink.borderTopWidth };
-    }), { size: { width: 9, height: 9 }, border: "2px" },
-    "the whole-card ring should stay proportional at 9px with a 2px stroke");
+    const wholeCard = page.locator(".node-note", { hasText: "A note about this whole card" });
+    await wholeCard.waitFor();
+    const wholeId = await wholeCard.getAttribute("data-id");
+    const wholeStored = await waitForStoredHole(page, (hole) => {
+      const note = hole.nodes.find((node) => node.id === wholeId);
+      return note?.size && !note.extensions?.note?.docked;
+    }, "the whole-card note window to persist").then((hole) => hole.nodes.find((node) => node.id === wholeId));
+    assert.deepEqual({ size: wholeStored.size, edge: await page.locator(`#edges path[data-child="${wholeId}"]`).count(),
+      dot: await page.locator(`.note-dot[data-note="${wholeId}"]`).count() },
+    { size: { w: 420, h: 460 }, edge: 1, dot: 0 },
+    "the follow-up Note action should create a visible child window with standard canvas geometry");
     await page.keyboard.press("Escape");
 
     // The 24px hit targets are clipped at the dot layer, never at the pointer:
@@ -1009,11 +1012,11 @@ async function verifyDockedNotes() {
     // Reader: the same notes, in the reader's real margin.
     await page.evaluate(() => document.querySelector(".node.root [aria-label='Expand document']").click());
     await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
-    await page.waitForFunction(() => document.querySelectorAll("#reader-main .note-dot").length === 3);
+    await page.waitForFunction(() => document.querySelectorAll("#reader-main .note-dot").length === 2);
     assert.deepEqual(await page.locator("#reader-main .note-dot").evaluateAll((dots) => {
       const column = document.querySelector(".reader-col").getBoundingClientRect();
       return dots.map((dot) => Math.round(dot.getBoundingClientRect().left - column.right));
-    }), [12, 12, 12], "reader dots stand in the real margin, 12px past the column edge");
+    }), [12, 12], "reader dots stand in the real margin, 12px past the column edge");
     assert.deepEqual(await page.locator("#reader-main").evaluate((main) => {
       const dot = main.querySelector(".note-dot");
       const box = dot.getBoundingClientRect();
@@ -1022,7 +1025,7 @@ async function verifyDockedNotes() {
     }), { horizontalOverflow: 0, centerHits: true },
     "margin dots must add no horizontal scroll to the reader while staying clickable");
     assert.deepEqual(await page.locator("#margin-notes .side-item").evaluateAll((items) => items.map((item) => item.dataset.child)),
-      [directPlacedId], "only the placed note belongs in the branch rail; docked notes must stay out");
+      [directPlacedId, wholeId], "placed notes belong in the branch rail; docked annotations stay out");
     await page.keyboard.press("Escape");
     await page.waitForSelector("body.mode-canvas");
     await page.waitForTimeout(300);
@@ -1032,7 +1035,7 @@ async function verifyDockedNotes() {
     await page.waitForTimeout(120);
     assert.equal(await page.locator(".note-dot:visible").count(), 0, "a collapsed card shows no dots");
     await rootCard.locator(".node-collapse").click();
-    await page.waitForFunction(() => document.querySelectorAll(".node.root .note-dot").length === 3);
+    await page.waitForFunction(() => document.querySelectorAll(".node.root .note-dot").length === 2);
 
     // Place on canvas: the same node, now with a place.
     const cardsBefore = await page.locator(".node").count();
@@ -1090,14 +1093,14 @@ async function verifyDockedNotes() {
     await waitForStoredHole(page, (hole) => !hole.nodes.some((node) => node.id === firstId), "the removal to commit", 15000);
 
     await page.reload({ waitUntil: "networkidle" });
-    await page.waitForSelector(".note-dot");
+    await page.waitForSelector(".node-note");
     await page.waitForTimeout(400);
     assert.deepEqual(await page.evaluate(() => ({
       dots: document.querySelectorAll(".note-dot").length,
       whole: document.querySelectorAll(".note-dot-whole").length,
       noteCards: document.querySelectorAll(".node-note").length,
-    })), { dots: 1, whole: 1, noteCards: 2 },
-    "a reload rebuilds docked notes on their card and placed notes as windows");
+    })), { dots: 0, whole: 0, noteCards: 3 },
+    "a reload keeps follow-up notes as windows and rebuilds any remaining docked annotations");
 
     // Asking from a docked note is one motion: the note gains a place and then
     // becomes the question, so the answer has something to hang from.
@@ -1287,7 +1290,7 @@ async function measureTextGeometry(page, surfaceSelector, paragraphNeedle) {
 
 /* WYSIWYG between the popover's two states: for plain text the note dialog is
    exactly as tall reading as it is editing — single line, multi-paragraph, and
-   at the long-note clamp — and a ⌘S save leaves no focus ring behind. */
+   at the long-note clamp — and an Enter save leaves no focus ring behind. */
 async function verifyNotePopoverWysiwyg() {
   const context = await browser.newContext();
   await seedConfiguredOpenRouter(context);
@@ -1317,6 +1320,7 @@ async function verifyNotePopoverWysiwyg() {
     }
 
     async function popoverHeights(id) {
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
       await page.locator(`.note-dot[data-note="${id}"]`).click();
       await popover.waitFor({ state: "visible" });
       await popover.locator(".note-pop-view").waitFor();
@@ -1343,9 +1347,9 @@ async function verifyNotePopoverWysiwyg() {
     assert(Math.abs(single.edit - single.read) < 1,
       `a single-line note must keep the same popover height in read and edit: ${JSON.stringify(single)}`);
 
-    // ⌘S returns to the read state with focus alive inside the dialog — the
+    // Enter returns to the read state with focus alive inside the dialog — the
     // read shortcuts must still fire — but with no visible focus outline.
-    await popover.locator(".note-editor").press("Control+s");
+    await popover.locator(".note-editor").press("Enter");
     await popover.locator(".note-pop-view").waitFor();
     const savedFocus = await page.evaluate(() => {
       const active = document.activeElement;
@@ -1356,16 +1360,17 @@ async function verifyNotePopoverWysiwyg() {
     });
     assert.equal(savedFocus.inside, true, `saving must keep focus inside the popover: ${JSON.stringify(savedFocus)}`);
     assert(savedFocus.outlineStyle === "none" || parseFloat(savedFocus.outlineWidth) === 0 || !savedFocus.focusVisible,
-      `saving with ⌘S must not paint a focus outline: ${JSON.stringify(savedFocus)}`);
+      `saving with Enter must not paint a focus outline: ${JSON.stringify(savedFocus)}`);
     // Proof the keyboard flow survived the ringless focus target: the read
     // state's delete shortcut still lands without touching the mouse.
     await page.keyboard.press("Backspace");
     await page.waitForFunction((id) => !document.querySelector(`.note-dot[data-note="${id}"]`), singleId);
+    await popover.waitFor({ state: "hidden" });
 
     const multi = await popoverHeights(multiId);
     assert(Math.abs(multi.edit - multi.read) < 1,
       `a multi-paragraph plain note must keep the same popover height in read and edit: ${JSON.stringify(multi)}`);
-    // Escape from the editor is the same keyboard path as ⌘S: no outline either.
+    // Escape from the editor is the same keyboard path as Enter: no outline either.
     await page.keyboard.press("Escape");
     await popover.locator(".note-pop-view").waitFor();
     const escapedFocus = await page.evaluate(() => {
@@ -1389,7 +1394,7 @@ async function verifyNotePopoverWysiwyg() {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await popover.waitFor({ state: "hidden" });
-    console.log("ok web app: note popover reads and edits at one height, and ⌘S leaves no focus ring");
+    console.log("ok web app: note popover reads and edits at one height, and Enter leaves no focus ring");
   } finally {
     await context.close();
   }
@@ -1563,7 +1568,7 @@ async function verifyNotePopoverAnchorStability() {
     await popover.locator(".note-pop-view").dblclick();
     await popover.locator(".note-editor").waitFor();
     await popover.locator(".note-editor").fill("The neighbouring dot, revised");
-    await popover.locator(".note-editor").press("Control+s");
+    await popover.locator(".note-editor").press("Enter");
     await popover.locator(".note-pop-view").waitFor();
     await waitForStoredHole(page, (hole) => hole.nodes.find((node) => node.id === secondId)?.markdown === "The neighbouring dot, revised",
       "the revised note to persist");
@@ -1627,7 +1632,7 @@ async function verifyStandaloneNotesAndEditing() {
     // place it on the canvas first and then edit the card it became.
     await selectText(page, "anchored edit target");
     await page.waitForSelector("#ask.visible");
-    await page.fill("#ask-text", "Original anchored note");
+    await page.fill("#ask-text", "Original anchored note\n\n- First list item\n- Second list item");
     await page.click('#ask .ask-commit[data-commit="note"]');
     await page.waitForSelector(".node.root .note-dot");
     const anchoredId = await placeDockedNote(page);
@@ -1686,21 +1691,18 @@ async function verifyStandaloneNotesAndEditing() {
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
 
     const anchoredSurface = anchoredCard.locator(".doc-content");
-    const renderedStyle = await anchoredSurface.evaluate((surface) => {
-      const style = getComputedStyle(surface);
-      return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
-        color: style.color, backgroundColor: style.backgroundColor, padding: style.padding };
-    });
-    // Where the origin quote sits while the note is rendered — the editor has to
-    // slot in underneath it, not beside it, and must not move it a pixel.
-    const quoteAtRest = await anchoredCard.evaluate((card) => {
-      const cardRect = card.getBoundingClientRect();
-      const quoteRect = card.querySelector(".origin-quote").getBoundingClientRect();
-      return { left: quoteRect.left - cardRect.left, top: quoteRect.top - cardRect.top, width: quoteRect.width };
-    });
+    await anchoredSurface.evaluate((surface) => { window.__anchoredNoteSurface = surface; });
+    const renderedBlocks = await anchoredSurface.evaluate((surface) => Array.from(surface.querySelectorAll("p, ul, li"), (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return { tag: element.tagName, text: element.textContent, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        margin: [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft], padding: style.padding };
+    }));
+    assert.equal(await anchoredCard.locator(".origin-quote").count(), 0,
+      "an anchored note should rely on its parent highlight instead of repeating the selected text");
     await anchoredSurface.click({ position: { x: 8, y: 8 } });
     assert.equal(await anchoredCard.locator(".note-editor").count(), 0, "a single note-body click should remain ordinary document interaction");
-    const clickedWordBox = await anchoredSurface.evaluate((surface) => {
+    const clickedWord = await anchoredSurface.evaluate((surface) => {
       const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = walker.nextNode())) {
@@ -1711,100 +1713,105 @@ async function verifyStandaloneNotesAndEditing() {
         range.setEnd(node, idx + "anchored".length);
         const rect = range.getBoundingClientRect();
         const host = surface.getBoundingClientRect();
-        return { x: rect.left - host.left + rect.width / 2, y: rect.top - host.top + rect.height / 2 };
+        return { click: { x: rect.left - host.left + rect.width / 2, y: rect.top - host.top + rect.height / 2 },
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
       }
       return null;
     });
-    assert(clickedWordBox, "the rendered note should contain the word targeted for caret placement");
-    await anchoredSurface.dblclick({ position: clickedWordBox });
+    assert(clickedWord, "the rendered note should contain the word targeted for caret placement");
+    await anchoredSurface.dblclick({ position: clickedWord.click });
     const anchoredEditor = anchoredCard.locator(".note-editor");
     await anchoredEditor.waitFor();
-    assert.equal(await anchoredEditor.evaluate((editor) => editor.classList.contains("doc-content")), false,
-      "the note editor must not participate in document selection handling");
+    assert.equal(await anchoredEditor.evaluate((editor) => editor === window.__anchoredNoteSurface), true,
+      "editing must toggle the exact rendered note surface instead of replacing it");
     const editorSurface = await anchoredEditor.evaluate((editor) => {
       const style = getComputedStyle(editor);
-      return { visual: { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
-        color: style.color, backgroundColor: style.backgroundColor, padding: style.padding },
-        border: style.borderTopWidth, outline: style.outlineStyle, shadow: style.boxShadow,
-        caret: [editor.selectionStart, editor.selectionEnd, editor.value.length] };
+      const selection = window.getSelection();
+      const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+      let node, rect = null;
+      while ((node = walker.nextNode())) {
+        const at = node.textContent.indexOf("anchored");
+        if (at === -1) continue;
+        const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + "anchored".length);
+        const box = range.getBoundingClientRect();
+        rect = { left: box.left, top: box.top, width: box.width, height: box.height };
+        break;
+      }
+      return { border: style.borderTopWidth, outline: style.outlineStyle, shadow: style.boxShadow,
+        sameWordRect: rect, caretInside: editor.contains(selection.focusNode), collapsed: selection.isCollapsed };
     });
-    assert.deepEqual(editorSurface.visual, renderedStyle, "the markdown-source editor should inherit the rendered document surface exactly");
     assert.deepEqual({ border: editorSurface.border, outline: editorSurface.outline, shadow: editorSurface.shadow },
       { border: "0px", outline: "none", shadow: "none" }, "the note editor should add no box or focus chrome");
-    const editorValue = await anchoredEditor.inputValue();
-    const clickedWordStart = editorValue.indexOf("anchored");
-    assert.equal(editorSurface.caret[0], editorSurface.caret[1], "double-click editing should leave a collapsed caret, not a selection");
-    assert(editorSurface.caret[0] >= clickedWordStart && editorSurface.caret[0] <= clickedWordStart + "anchored".length,
-      `double-click editing should place the caret at the clicked point in the markdown source (caret ${editorSurface.caret[0]}, word at ${clickedWordStart})`);
-    assert.deepEqual(await anchoredCard.evaluate((card, atRest) => {
+    assert.deepEqual(editorSurface.sameWordRect, clickedWord.rect,
+      "the edited word must retain the exact rendered x/y position and dimensions");
+    assert.deepEqual(await anchoredEditor.evaluate((surface) => Array.from(surface.querySelectorAll("p, ul, li"), (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return { tag: element.tagName, text: element.textContent, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        margin: [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft], padding: style.padding };
+    })), renderedBlocks, "paragraph and list DOM geometry must be byte-for-byte identical in read and edit modes");
+    assert(editorSurface.caretInside && editorSurface.collapsed, "double-click editing should place a collapsed caret in the shared note surface");
+    assert.deepEqual(await anchoredCard.evaluate((card) => {
       const body = card.querySelector(".node-body");
-      const quote = body.querySelector(".origin-quote");
-      const surface = body.querySelector(".note-edit-surface");
-      const actions = surface.querySelector(".ask-actions");
-      const cardRect = card.getBoundingClientRect();
+      const surface = body.querySelector(".structured-note");
+      const actions = body.querySelector(".note-edit-actions");
       const bodyRect = body.getBoundingClientRect();
-      const quoteRect = quote.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
       const actionsRect = actions.getBoundingClientRect();
       return {
         stack: getComputedStyle(body).flexDirection,
-        quoteUnmoved: Math.abs(quoteRect.left - cardRect.left - atRest.left) < 1
-          && Math.abs(quoteRect.top - cardRect.top - atRest.top) < 1
-          && Math.abs(quoteRect.width - atRest.width) < 1,
-        editorBelowQuote: surfaceRect.top >= quoteRect.bottom - 1,
+        noOriginQuote: !body.querySelector(".origin-quote"),
         surfaceFullWidth: Math.abs(surfaceRect.left - bodyRect.left) < 1 && Math.abs(surfaceRect.right - bodyRect.right) < 1,
         barFullWidth: Math.abs(actionsRect.left - bodyRect.left) < 1 && Math.abs(actionsRect.right - bodyRect.right) < 1,
         barAtBottom: Math.abs(actionsRect.bottom - bodyRect.bottom) < 1,
         noOverflow: body.scrollHeight <= body.clientHeight + 1,
       };
-    }, quoteAtRest), {
-      stack: "column", quoteUnmoved: true, editorBelowQuote: true,
+    }), {
+      stack: "column", noOriginQuote: true,
       surfaceFullWidth: true, barFullWidth: true, barAtBottom: true, noOverflow: true,
-    }, "editing a quoted note should stack the quote above a full-width editor and bar, not beside them");
-    // The quote's height is the card's too: a note long enough to hit the cap
-    // must still end inside the editor box the quote left behind.
+    }, "editing an anchored note should use a full-width editor and action bar without an origin quote");
+    assert.match(await anchoredEditor.evaluate((surface) => {
+      const item = surface.querySelector("li:last-child");
+      item.append(" updated");
+      surface.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " updated" }));
+      return surface._rhStructuredNote.markdown;
+    }), /- Second list item updated/,
+    "editing formatted prose should serialize the existing list structure, not flatten it to text");
     await anchoredEditor.fill(Array.from({ length: 40 }, (_value, index) => `Cap line ${index} of an anchored note that has to wrap.`).join("\n"));
     assert.deepEqual(await anchoredCard.evaluate((card) => {
-      const surface = card.querySelector(".note-edit-surface");
-      const input = surface.querySelector(".ask-input");
-      const editor = surface.querySelector(".note-editor");
-      const inputRect = input.getBoundingClientRect();
-      const editorRect = editor.getBoundingClientRect();
-      const scale = card.getBoundingClientRect().width / card.offsetWidth;
-      const contentBottom = inputRect.bottom - parseFloat(getComputedStyle(input).paddingBottom) * scale;
+      const body = card.querySelector(".node-body");
+      const editor = body.querySelector(".note-editor");
       return {
         atCap: editor.scrollHeight > editor.clientHeight && getComputedStyle(editor).overflowY === "auto",
-        capFits: editorRect.bottom <= contentBottom + 1,
-        capFills: editorRect.bottom >= contentBottom - 1,
+        bodyFits: body.scrollHeight <= body.clientHeight + 1,
       };
-    }), { atCap: true, capFits: true, capFills: true },
-    "the note editor's height cap should account for the origin quote above it");
-    await anchoredEditor.fill("Edited anchored **durably**");
-    await anchoredCard.locator('.note-edit-surface .ask-commit[data-commit="note"]').click();
-    await anchoredCard.locator(".doc-content strong", { hasText: "durably" }).waitFor();
+    }), { atCap: true, bodyFits: true },
+    "the anchored note editor should respect its height cap without an origin quote");
+    await anchoredEditor.fill("Edited anchored durably");
+    await anchoredCard.locator('.note-edit-actions .ask-commit[data-commit="note"]').click();
+    await anchoredCard.locator(".doc-content", { hasText: "Edited anchored durably" }).waitFor();
     await page.waitForFunction(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
-      return hole.nodes.some((node) => node.origin?.kind === "note" && node.markdown === "Edited anchored **durably**");
+      return hole.nodes.some((node) => node.origin?.kind === "note" && node.markdown === "Edited anchored durably");
     });
     const assertEditedStored = async (label) => {
       const markdown = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id)?.markdown, anchoredId);
-      assert.equal(markdown, "Edited anchored **durably**", label);
+      assert.equal(markdown, "Edited anchored durably", label);
     };
     await page.waitForTimeout(1000);
     await assertEditedStored("the edited note must remain durable after pending saves settle");
 
-    // ⌘S/Ctrl+S is the editor's save key: no Enter of any shape commits here,
-    // so the keyboard needs one gesture that means "done".
-    await anchoredSurface.dblclick({ position: clickedWordBox });
+    // Enter is the editor's save key; Shift+Enter remains available for text.
+    await anchoredSurface.dblclick({ position: clickedWord.click });
     await anchoredEditor.waitFor();
-    await anchoredEditor.fill("Saved anchored **with the save key**");
-    await anchoredEditor.press("Control+s");
-    await anchoredCard.locator(".doc-content strong", { hasText: "with the save key" }).waitFor();
+    await anchoredEditor.fill("Saved anchored with the save key");
+    await anchoredEditor.press("Enter");
+    await anchoredCard.locator(".doc-content", { hasText: "Saved anchored with the save key" }).waitFor();
     assert.equal(await anchoredCard.locator(".note-editor").count(), 0,
-      "Control+S should close the note editor by committing it, not by cancelling");
+      "Enter should close the note editor by committing it, not by cancelling");
     await page.waitForFunction(async (id) => {
       const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
-      return node?.markdown === "Saved anchored **with the save key**";
+      return node?.markdown === "Saved anchored with the save key";
     }, anchoredId);
 
     let point = await findCanvasBackground(page);
@@ -1879,7 +1886,7 @@ async function verifyStandaloneNotesAndEditing() {
       lenses: 0,
       collapseVisible: false,
       commits: [
-        { commit: "note", title: "Save note (Command/Control+S)", hint: "⌘S", disabled: true, visible: true },
+        { commit: "note", title: "Save note (Enter)", hint: "↵", disabled: true, visible: true },
         { commit: "ask", title: "Ask (Command/Control+Enter)", hint: "⌘↵", disabled: true, visible: true },
       ],
     }, "standalone drafts should start compact and focused with honest disabled commit actions but no lenses");
@@ -2202,14 +2209,14 @@ async function verifyStandaloneImagePaste() {
     await committedSurface.dispatchEvent("dblclick", { bubbles: true, cancelable: true, clientX: 0, clientY: 0 });
     let reentryEditor = editableImageNote.locator(".note-editor");
     await reentryEditor.waitFor();
-    await reentryEditor.evaluate((textarea) => textarea.setSelectionRange(textarea.value.length, textarea.value.length));
+    await reentryEditor.evaluate((editor) => editor._rhStructuredNote.focusAt());
     assert.equal(await pasteSyntheticImage(reentryEditor, "reentry-save.png", "#ea4"), true,
       "a committed-note editor should consume image paste");
     await page.waitForFunction((id) => {
       const editor = document.querySelector(`.node[data-id="${id}"] .note-editor`);
-      return editor && /\n\n!\[Pasted image\]\(asset:paste-[a-f0-9-]+\.png\)$/.test(editor.value);
+      return editor && Array.from(editor._rhStructuredNote.markdown.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length === 2;
     }, imageNoteId);
-    const savedEditMarkdown = await reentryEditor.inputValue();
+    const savedEditMarkdown = await reentryEditor.evaluate((editor) => editor._rhStructuredNote.markdown);
     const savedEditAsset = savedEditMarkdown.match(/asset:(paste-[a-f0-9-]+\.png)\)$/)?.[1];
     assert(savedEditAsset, "the pasted image link should be inserted at the caret as its own paragraph");
     await reentryEditor.evaluate((textarea) => textarea.blur());
@@ -2230,9 +2237,9 @@ async function verifyStandaloneImagePaste() {
     // two steps. Waiting on the store alone reads the editor a beat early.
     await page.waitForFunction((id) => {
       const editor = document.querySelector(`.node[data-id="${id}"] .note-editor`);
-      return !!editor && Array.from(editor.value.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length === 3;
+      return !!editor && Array.from(editor._rhStructuredNote.markdown.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length === 3;
     }, imageNoteId);
-    const cancelledMarkdown = await reentryEditor.inputValue();
+    const cancelledMarkdown = await reentryEditor.evaluate((editor) => editor._rhStructuredNote.markdown);
     assert.equal(Array.from(cancelledMarkdown.matchAll(/asset:paste-[a-f0-9-]+\.png/g)).length, 3,
       "the cancel case should finish inserting its newly uploaded image before rollback");
     await reentryEditor.press("Escape");
@@ -2383,15 +2390,14 @@ async function verifyNoteToAskConversion() {
 
     const anchored = await createAnchoredNote("Anchored conversion phrase", "Anchored note draft");
 
-    // A card-composer note has no anchor, so it docks as the card's whole-card
-    // ring; placing it gives the conversion path its window.
+    // A card-composer note has no anchor and is born as a child window.
     await rootCard.locator(".nc-handle").click();
     await rootCard.locator(".nc-inner textarea").fill("Follow-up note draft");
     await rootCard.locator('.nc-inner .ask-commit[data-commit="note"]').click();
-    await page.waitForSelector(".note-dot.note-dot-whole");
-    const followupId = await placeDockedNote(page, ".note-dot.note-dot-whole");
-    const followupCard = page.locator(`.node[data-id="${followupId}"]`);
+    let followupCard = page.locator(".node-note", { hasText: "Follow-up note draft" });
     await followupCard.locator(".doc-content", { hasText: "Follow-up note draft" }).waitFor();
+    const followupId = await followupCard.getAttribute("data-id");
+    followupCard = page.locator(`.node[data-id="${followupId}"]`);
 
     // Entering edit ADDS the bar under the text — it never carves the bar out
     // of the card: for a plain note the first line keeps its exact rect on the
@@ -2411,7 +2417,9 @@ async function verifyNoteToAskConversion() {
     // displaced; the product owns that scroll at zero, so measure from zero.
     await page.evaluate(() => { const viewport = document.getElementById("viewport"); viewport.scrollTop = 0; viewport.scrollLeft = 0; });
     const restLine = await followupCard.evaluate(measureFirstLine);
-    await followupCard.locator(".doc-content").dblclick();
+    await followupCard.locator(".doc-content").dispatchEvent("dblclick", {
+      bubbles: true, cancelable: true, clientX: 0, clientY: 0,
+    });
     await followupCard.locator(".note-editor").waitFor();
     const editLine = await followupCard.evaluate((card) => {
       const editor = card.querySelector(".note-editor");
@@ -2440,8 +2448,7 @@ async function verifyNoteToAskConversion() {
     const protectedComposer = protectedNote.card.locator(".nc-inner textarea");
     await protectedComposer.fill("Child note blocks conversion");
     await protectedComposer.press("Enter");
-    // The child docks onto the note it was written about — a child all the same.
-    await protectedNote.card.locator(".note-dot").waitFor();
+    await page.locator(".node-note", { hasText: "Child note blocks conversion" }).waitFor();
 
     const standalone = await createStandaloneNote("Standalone note question");
     const imageNote = await createStandaloneNote("What does this pasted diagram show?", true);
@@ -2492,8 +2499,8 @@ async function verifyNoteToAskConversion() {
     await emptyPage.close();
 
     let editor = await openNoteEditor(followupCard);
-    assert.deepEqual(await followupCard.locator(".note-edit-surface .ask-actions").evaluate((actions) => {
-      const surface = actions.closest(".note-edit-surface");
+    assert.deepEqual(await followupCard.locator(".note-edit-actions").evaluate((actions) => {
+      const surface = actions.closest(".node-body");
       const commits = Array.from(actions.querySelectorAll(".ask-commit"));
       const actionsRect = actions.getBoundingClientRect();
       const surfaceRect = surface.getBoundingClientRect();
@@ -2548,15 +2555,15 @@ async function verifyNoteToAskConversion() {
       flushBottom: true, flushSides: true, footerCorners: true, resizeHidden: true,
       hintCount: 0, commitsVisible: true, narrowFits: true, narrowSplit: true,
       commits: [
-        { kind: "note", hint: "⌘S", label: "Note", title: "Save note (Command/Control+S)" },
+        { kind: "note", hint: "↵", label: "Note", title: "Save note (Enter)" },
         { kind: "ask", hint: "⌘↵", label: "Ask", title: "Ask (Command/Control+Enter)" },
       ],
     }, "editing an existing note should use the standalone composer's flush footer and its verbatim Note/Ask bar");
     await editor.fill("");
-    assert.equal(await followupCard.locator('.note-edit-surface [data-commit="ask"]').isDisabled(), true,
+    assert.equal(await followupCard.locator('.note-edit-actions [data-commit="ask"]').isDisabled(), true,
       "an empty note question should disable Ask");
     await editor.fill("Saved follow-up note edit");
-    await followupCard.locator('.note-edit-surface .ask-commit[data-commit="note"]').click();
+    await followupCard.locator('.note-edit-actions .ask-commit[data-commit="note"]').click();
     await page.waitForFunction(async (id) => {
       const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
       return node?.origin?.kind === "note" && node.markdown === "Saved follow-up note edit";
@@ -2589,7 +2596,7 @@ async function verifyNoteToAskConversion() {
 
     editor = await openNoteEditor(followupCard);
     await editor.fill("Follow-up conversion via Ask button");
-    await followupCard.locator('.note-edit-surface [data-commit="ask"]').click();
+    await followupCard.locator('.note-edit-actions [data-commit="ask"]').click();
     await followupCard.locator(".doc-content", { hasText: "The follow-up note became this streamed answer." }).waitFor();
     const storedFollowup = await page.evaluate(async (id) => (await window.__rabbitholeTest.readStoredHole()).nodes.find((node) => node.id === id), followupId);
     assert.deepEqual({ parent_id: storedFollowup.parent_id, branch_type: storedFollowup.origin.branch_type,
@@ -2609,7 +2616,7 @@ async function verifyNoteToAskConversion() {
       /Conversion root context sentinel/, "a parentless converted ask should still receive the root document as context");
 
     editor = await openNoteEditor(imageNote.card);
-    const imageMarkdown = await editor.inputValue();
+    const imageMarkdown = await editor.evaluate((surface) => surface._rhStructuredNote.markdown);
     const imageAsset = imageMarkdown.match(/asset:(paste-[a-f0-9-]+\.png)/)?.[1];
     assert(imageAsset, "the image-note fixture should contain a durable pasted asset ref");
     await editor.press("Control+Enter");

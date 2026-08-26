@@ -80,6 +80,7 @@ import { normalizeClipboardImage } from "./clipboard-image.js";
 import { appendOriginAttachmentThumbnails, originAttachmentNames } from "./origin-attachments.js";
 import { createEdgeScroller } from "./edge-scroll.js";
 import { createAnchoredMenu } from "./primitives/anchored-menu.js";
+import { structuredNoteController } from "./structured-note.js";
 
 function isSelectionBranch(node) {
   return branchTypeOfNode(node) === BRANCH_SELECTION;
@@ -118,7 +119,6 @@ function defaultCanvasHooks(){
   return {
     hideAsk: function(){},
     sendFollowup: function(){ return null; },
-    sendNote: function(){ return null; },
     sendPlacedNote: function(){ return null; },
     rollbackBranch: function(){},
     copyNodeMarkdown: function(){},
@@ -505,9 +505,9 @@ export function createNodeEl(node, enter){
     if (isNoteNode(node)) body.addEventListener("dblclick", function(e){
       var dc = e.target.closest && e.target.closest(".doc-content");
       if (!dc || !body.contains(dc)) return;
-      if (e.target.closest("a, button, input, textarea, select, summary, [contenteditable], [role=button], [role=link], [data-child]")) return;
+      if (e.target.closest("a, button, input, textarea, select, summary, [role=button], [role=link], [data-child]")) return;
       e.stopPropagation();
-      startNoteEditing(node, dc, markdownCaretForPrefix(node.md || "", renderedPrefixAtPoint(dc, e.clientX, e.clientY)));
+      startNoteEditing(node, dc, null, { left: e.clientX, top: e.clientY });
     });
     // Hovering a card lights up its edge and the exact text it branched from.
     el.addEventListener("mouseenter", function(){ focusOrigin(node, true); });
@@ -608,8 +608,8 @@ export function autoGrowEl(ta, max){
     node.ncComp.classList.remove("open");
     node.ncHandle.setAttribute("aria-expanded", "false");
   }
-  // Same honest states as the reader's composer: an away agent doesn't disable
-  // asking (questions queue server-side); only a pending doc or a dead session does.
+  // Same intent split as every other composer: a pending doc can take notes,
+  // while asks wait for the answer to settle.
 export function updateCardComposer(node){
     if (node._noteComposer){ updateStandaloneNoteComposer(node); return; }
     if (node._noteEditor && !canConvertNote(node)){
@@ -624,15 +624,16 @@ export function updateCardComposer(node){
     applyComposerState(
       { text: node.ncText, commits: node.ncActions.querySelectorAll(".ask-commit"),
         lenses: node.ncActions.querySelectorAll(".lens"), wrap: node.ncInner },
-      { phase: sessionPhase(), pending: node.status === "pending" || !!node.extensions?.pdf?.converting },
+      { phase: sessionPhase(), pending: node.status === "pending",
+        unavailable: !!node.extensions?.pdf?.converting },
       CARD_COMPOSER_COPY
     );
   }
   // The card composer's submit gate (a closed session says so out loud), and
   // the shared landing: retract the drawer and pan the new card into view.
-  function cardComposerBlocked(node){
+  function cardComposerBlocked(node, needsSettled){
     if (closed){ flashHint("Session ended — reopen this Rabbithole from your terminal to continue."); return true; }
-    return node.status === "pending" || !!node.extensions?.pdf?.converting;
+    return !node || !!node.extensions?.pdf?.converting || (needsSettled && node.status === "pending");
   }
   function settleCardSubmit(node, kid, source){
     closeCardDrawer(node);
@@ -642,17 +643,16 @@ export function updateCardComposer(node){
   // A lens on a card is a whole-document ask on that card — canned question,
   // same contract as the reader composer and the empty-box popover lenses.
   function submitCardLens(node, lens, source){
-    if (cardComposerBlocked(node)) return;
+    if (cardComposerBlocked(node, true)) return;
     var kid = canvasLifecycle.hooks.sendFollowup(node, LENSES[lens].q, lens);
     if (kid) settleCardSubmit(node, kid, source);
   }
   function submitCardFollowup(node, commit, source){
-    if (cardComposerBlocked(node)) return;
+    if (cardComposerBlocked(node, commit === "ask")) return;
     var question = node.ncText.value.trim();
     if (!question) return;
-    var kid = commit === "note" ? canvasLifecycle.hooks.sendNote(node, question)
-      : commit === "note-window" ? canvasLifecycle.hooks.sendPlacedNote(node, question)
-      : canvasLifecycle.hooks.sendFollowup(node, question, null);
+    var kid = commit === "ask" ? canvasLifecycle.hooks.sendFollowup(node, question, null)
+      : canvasLifecycle.hooks.sendPlacedNote(node, question);
     if (!kid) return;
     node.ncText.value = "";
     autoGrowEl(node.ncText, 90);
@@ -708,11 +708,12 @@ export function fillBody(node){
     var previous = body.querySelector(".doc-content"); if (previous && previous._rhDispose) previous._rhDispose();
     body.classList.remove("pdf-body");
     body.innerHTML = "";
-    if (node.origin && node.origin.selected_text){
-      var q = document.createElement("div"); q.className = "origin-quote"; q.textContent = "“" + node.origin.selected_text + "”";
+    if (node.origin && node.origin.kind !== "note" && node.origin.selected_text){
+      var quotedText = node.origin.question || node.origin.selected_text;
+      var q = document.createElement("div"); q.className = "origin-quote"; q.textContent = "“" + quotedText + "”";
       appendOriginAttachmentThumbnails(q, node);
       body.appendChild(q);
-    } else if (node.origin && (node.origin.question || node.origin.lens || originAttachmentNames(node).length)){
+    } else if (node.origin && node.origin.kind !== "note" && (node.origin.question || node.origin.lens || originAttachmentNames(node).length)){
       var fq = document.createElement("div"); fq.className = "origin-quote";
       fq.textContent = node.origin.lens ? "Follow-up — " + lensLabel(node.origin.lens) : (node.origin.question || "Pasted image");
       appendOriginAttachmentThumbnails(fq, node);
@@ -744,11 +745,11 @@ export function fillBody(node){
   // and keyed the same way whether the note is being written for the first time
   // or edited afterwards. Note commits the text, Ask branches it, ⌘↵ asks.
 export function noteComposerActions(){
-    return cardButton(composerActionsMarkup({ includeLenses: false, noteEnterShortcut: false }));
+    return cardButton(composerActionsMarkup({ includeLenses: false }));
   }
 export function noteCommitFromEnter(e){
-    if (e.altKey || !(e.metaKey || e.ctrlKey) || !isCommandEnter(e)) return null;
-    return e.shiftKey ? "note-window" : "ask";
+    if (e.altKey || !isCommandEnter(e) || e.shiftKey) return null;
+    return e.metaKey || e.ctrlKey ? "ask" : "note";
   }
   // Whatever the editor sits under inside the card body — an origin quote, an
   // origin crop — belongs to the body, not to the surface, so its height comes
@@ -787,16 +788,14 @@ export function noteCommitFromEnter(e){
     var parent = nodes[rootId];
     var hasDraft = !!node._noteEditor.value.trim() || !!node._noteAttachments?.length || !!node._notePastePending;
     node._noteComposer.classList.toggle("has-draft", hasDraft);
-    var rootPending = !parent || parent.status === "pending" || !!parent.extensions?.pdf?.converting;
     applyComposerState(
       { text: node._noteEditor, commits: node._noteActions.querySelectorAll(".ask-commit"),
         wrap: node._noteComposer, hasDraft: hasDraft },
-      { phase: sessionPhase(), pending: false,
+      { phase: sessionPhase(), pending: !!parent && parent.status === "pending",
+        unavailable: !parent || !!parent.extensions?.pdf?.converting,
         disabled: !!node._noteUploading || !!node._noteNormalizing },
       STANDALONE_COMPOSER_COPY
     );
-    var askCommit = node._noteActions.querySelector('[data-commit="ask"]');
-    if (askCommit) askCommit.disabled = askCommit.disabled || rootPending;
   }
   function startStandaloneNoteComposer(node, dc){
     var scope = createCleanupScope();
@@ -1066,15 +1065,6 @@ export function noteCommitFromEnter(e){
     editor.setSelectionRange(editor.value.length, editor.value.length);
     pinCanvasScroll();
   }
-  function refreshMountedNoteSurfaces(node, editor){
-    var mounted = document.querySelectorAll('.doc-content[data-node-id="' + node.id + '"]');
-    replaceNoteSurface(node, editor.dataset.surface, node._noteEditSurface || editor);
-    mounted.forEach(function(dc){
-      if (dc._rhDispose) dc._rhDispose();
-      replaceNoteSurface(node, dc.dataset.surface, dc);
-    });
-    scheduleEdges();
-  }
   // Leaving the editor — saved, cancelled, or converted — hands the card's
   // bottom edge back to its ordinary body padding and resize corner, and its
   // resting height back to layout.
@@ -1082,15 +1072,6 @@ export function noteCommitFromEnter(e){
     if (!node || !node.el) return;
     node.el.classList.remove("note-editing");
     layoutNode(node);
-  }
-  function cancelNoteEditing(node, editor){
-    var surface = node._noteEditSurface || editor;
-    endNoteEditingChrome(node);
-    node._noteEditor = null;
-    node._noteEditSurface = null;
-    if (node._ephemeral){ teardownNode(node.id); return; }
-    replaceNoteSurface(node, editor.dataset.surface, surface);
-    scheduleEdges();
   }
 export function startTitleEditing(node, titleEl){
     if (frozen || closed || titleEl.isContentEditable) return;
@@ -1122,27 +1103,6 @@ export function startTitleEditing(node, titleEl){
     }
     titleEl.addEventListener("keydown", onKeyDown);
     titleEl.addEventListener("blur", function(){ finish(true); }, { once: true });
-  }
-  function commitNoteEditing(node, editor){
-    var markdown = editor.value;
-    if (!markdown.trim()){ cancelNoteEditing(node, editor); return; }
-    endNoteEditingChrome(node);
-    node._noteEditor = null;
-    node.md = markdown;
-    refreshNodeHtml(node);
-    refreshMountedNoteSurfaces(node, editor);
-    node._noteEditSurface = null;
-    if (!node._ephemeral){ canvasLifecycle.hooks.persistNode(node); return; }
-    delete node._ephemeral;
-    ensureNodeMenuButton(node);
-    Promise.resolve(postBrowserEvent({ type: "node_create", id: node.id, parent_id: null,
-      title: node.title, markdown: node.md, origin: node.origin,
-      position: { x: node.x, y: node.y }, size: { w: node.w, h: node.h } }))
-      .then(function(response){
-        if (response && response.ok) return;
-        if (nodes[node.id] === node) teardownNode(node.id);
-        flashHint("Couldn't save that note — it was undone.");
-      });
   }
   function setConversionMarkState(node, pending){
     var parent = node.parent_id == null ? null : nodes[node.parent_id];
@@ -1228,132 +1188,79 @@ export function convertNoteToAsk(node, text){
     }).catch(function(){ rollbackNoteConversion(node); });
     return true;
   }
-  // The rendered text from the top of the note to the double-clicked point.
-  // Null when the point doesn't resolve to text inside this note.
-  function renderedPrefixAtPoint(dc, x, y){
-    var caretNode = null, caretOffset = 0;
-    if (document.caretPositionFromPoint){
-      var pos = document.caretPositionFromPoint(x, y);
-      if (pos){ caretNode = pos.offsetNode; caretOffset = pos.offset; }
-    } else if (document.caretRangeFromPoint){
-      var cr = document.caretRangeFromPoint(x, y);
-      if (cr){ caretNode = cr.startContainer; caretOffset = cr.startOffset; }
-    }
-    if (!caretNode || !dc.contains(caretNode)) return null;
-    var r = document.createRange();
-    r.selectNodeContents(dc);
-    try { r.setEnd(caretNode, caretOffset); } catch(e){ return null; }
-    return r.toString();
-  }
-  function countOccurrences(haystack, needle){
-    var count = 0, idx = haystack.indexOf(needle);
-    while (idx !== -1){ count++; idx = haystack.indexOf(needle, idx + needle.length); }
-    return count;
-  }
-  function nthOccurrence(haystack, needle, n){
-    var idx = -1;
-    while (n-- > 0){
-      idx = haystack.indexOf(needle, idx === -1 ? 0 : idx + needle.length);
-      if (idx === -1) return -1;
-    }
-    return idx;
-  }
-  // Maps a rendered-text prefix back to a caret offset in the markdown source.
-  // Rendered text and markdown disagree on whitespace and syntax (**, #, links),
-  // so match on a whitespace-stripped suffix of the prefix, longest needle
-  // first; the needle's occurrence ordinal inside the prefix picks the right
-  // duplicate. Returns -1 when nothing matches (caller falls back to the end).
-  function markdownCaretForPrefix(md, prefix){
-    if (prefix == null) return -1;
-    var stripped = prefix.replace(/\s+/g, "");
-    if (!stripped) return 0;
-    var norm = "", map = [];
-    for (var i = 0; i < md.length; i++){
-      if (!/\s/.test(md[i])){ norm += md[i]; map.push(i); }
-    }
-    for (var len = Math.min(48, stripped.length); len >= 1; len -= (len > 12 ? 12 : 1)){
-      var needle = stripped.slice(-len);
-      var idx = nthOccurrence(norm, needle, countOccurrences(stripped, needle));
-      if (idx !== -1) return map[idx + needle.length - 1] + 1;
-    }
-    return -1;
-  }
-  function startNoteEditing(node, dc, caretOffset){
+  function startNoteEditing(node, dc, caretOffset, pointer){
     if (!isNoteNode(node) || frozen || closed || node._noteEditor) return;
     if (node._ephemeral){ startStandaloneNoteComposer(node, dc); return; }
-    var surface = document.createElement("div");
-    surface.className = "note-edit-surface has-draft";
-    var input = document.createElement("div"); input.className = "ask-input";
-    var editor = document.createElement("textarea");
-    editor.className = "note-editor md";
-    editor.rows = 1;
-    editor.dataset.nodeId = node.id;
-    editor.dataset.surface = dc.dataset.surface || "canvas";
-    editor.setAttribute("aria-label", "Edit note");
-    editor.spellcheck = true;
-    editor.value = node.md || "";
-    editor.style.fontSize = dc.style.fontSize;
+    var controller = structuredNoteController(dc);
+    if (!controller) return;
+    var original = node.md || "";
+    var markdown = original;
+    var editCleanups = [];
+    function listen(target, type, handler){
+      target.addEventListener(type, handler);
+      editCleanups.push(function(){ target.removeEventListener(type, handler); });
+    }
     var actions = noteComposerActions();
-    // A note that cannot become an ask (root, has children, frozen) keeps the
-    // bar with Note alone — one button, so no divider down the middle.
     var convertible = canConvertNote(node);
     if (!convertible){ actions.querySelector('[data-commit="ask"]').remove(); actions.classList.add("note-only"); }
-    input.appendChild(editor);
-    surface.append(input, actions);
-    dc.replaceWith(surface);
-    // The card wears the edit state so its body can go full-bleed and its
-    // resize corner can stand down while the footer owns the bottom edge.
+    actions.classList.add("note-edit-actions", "has-draft");
+    node.bodyEl.appendChild(actions);
     node.el.classList.add("note-editing");
-    node._noteEditor = editor;
-    node._noteEditSurface = surface;
+    node._noteEditor = dc;
+    node._noteEditSurface = node.bodyEl;
     var settled = false;
     var settling = false;
     var uploadedNames = new Set();
     var pendingPasteCount = 0;
     var pasteQueue = Promise.resolve();
-    // The bar is added to the card, not carved out of the text: for the length
-    // of the edit the card's ceiling rises by the bar's own height, so every
-    // line of the note stays exactly where it was. layoutNode hands the resting
-    // height back on exit.
-    function grow(){
-      var grown = node.h + actions.offsetHeight;
-      if (node.el.style.height === "auto") node.el.style.maxHeight = grown + "px";
-      else node.el.style.height = grown + "px";
-      autoGrowEl(editor, noteEditorCap(node, input, actions, null) + actions.offsetHeight);
-    }
-    function insertPastedImage(name){
-      var start = editor.selectionStart;
-      var end = editor.selectionEnd;
-      var before = editor.value.slice(0, start);
-      var after = editor.value.slice(end);
-      var leading = before && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
-      var trailing = after && !after.startsWith("\n\n") ? (after.startsWith("\n") ? "\n" : "\n\n") : "";
-      var insertion = leading + "![Pasted image](asset:" + name + ")" + trailing;
-      editor.value = before + insertion + after;
-      var nextCaret = before.length + insertion.length;
-      editor.setSelectionRange(nextCaret, nextCaret);
-      grow();
-    }
     function updateActions(){
-      var disabled = settling || !editor.value.trim();
+      var disabled = settling || !markdown.trim();
       var commits = actions.querySelectorAll(".ask-commit");
       for (var i = 0; i < commits.length; i++) commits[i].disabled = disabled;
+    }
+    function stopEditing(){
+      if (node._noteEditDispose) node._noteEditDispose();
+      controller.setOnChange(null);
+      controller.setEditable(false);
+      actions.remove();
+      node.el.classList.remove("note-editing");
+      node._noteEditor = null;
+      node._noteEditSurface = null;
+      node._noteEditDispose = null;
+      layoutNode(node);
+      scheduleEdges();
     }
     async function finish(kind){
       if (settled || settling) return;
       settling = true;
       updateActions();
       await pasteQueue;
-      var referenced = kind === "cancel" ? new Set() : extractNodeAssetRefs({ markdown: editor.value });
+      var referenced = kind === "cancel" ? new Set() : extractNodeAssetRefs({ markdown: markdown });
       var cleanup = Array.from(uploadedNames).filter(function(name){ return !referenced.has(name); });
       await Promise.allSettled(cleanup.map(function(name){ return Promise.resolve(deleteAsset(name)); }));
       settled = true;
-      if (kind === "ask" && convertNoteToAsk(node, editor.value)) return;
-      if (kind === "note" || kind === "ask") commitNoteEditing(node, editor);
-      else cancelNoteEditing(node, editor);
+      if (kind === "cancel"){
+        controller.replaceMarkdown(original);
+        stopEditing();
+        return;
+      }
+      if (!markdown.trim()){
+        controller.replaceMarkdown(original);
+        stopEditing();
+        return;
+      }
+      stopEditing();
+      if (kind === "ask" && convertNoteToAsk(node, markdown)) return;
+      node.md = markdown;
+      refreshNodeHtml(node);
+      document.querySelectorAll('.doc-content[data-node-id="' + node.id + '"]').forEach(function(other){
+        if (other === dc) return;
+        var otherController = structuredNoteController(other);
+        if (otherController) otherController.replaceMarkdown(markdown);
+      });
+      canvasLifecycle.hooks.persistNode(node);
     }
-    editor.addEventListener("input", function(){ grow(); updateActions(); });
-    editor.addEventListener("paste", function(e){
+    function onPaste(e){
       if (settled || settling) return;
       var imageFiles = clipboardImageFiles(e);
       if (!imageFiles.length) return;
@@ -1380,7 +1287,7 @@ export function convertNoteToAsk(node, text){
             }
             uploadedNames.add(normalized.name);
             registerRendererAssetName(normalized.name);
-            insertPastedImage(normalized.name);
+            controller.insertImage("asset:" + normalized.name, "Pasted image");
             updateActions();
           } catch (_error) {
             flashHint("Couldn't save that image — try again.");
@@ -1389,33 +1296,39 @@ export function convertNoteToAsk(node, text){
           }
         }
       });
-    });
-    editor.addEventListener("keydown", function(e){
+    }
+    function onKeyDown(e){
       if (e.key === "Escape"){
         e.preventDefault(); e.stopPropagation(); finish("cancel");
       }
-    });
-    actions.addEventListener("pointerdown", function(e){
+    }
+    dc.addEventListener("paste", onPaste, true);
+    editCleanups.push(function(){ dc.removeEventListener("paste", onPaste, true); });
+    listen(dc, "keydown", onKeyDown);
+    listen(actions, "pointerdown", function(e){
       if (e.target.closest && e.target.closest("button")) e.preventDefault();
     });
-    wireComposerActions({ text: editor, actions: actions,
-      hasDraft: function(){ return !!editor.value.trim(); },
-      // A note card already has a place, so the hidden place chord degrades to
-      // the same save as Note. Plain ⌘↵ remains Ask.
+    wireComposerActions({ text: dc, actions: actions, listen: listen,
+      hasDraft: function(){ return !!markdown.trim(); },
       commitFromEnter: noteCommitFromEnter,
       onCommit: function(kind, e){ e.stopPropagation(); finish(kind === "note-window" ? "note" : kind); },
       onLens: function(){} });
-    surface.addEventListener("focusout", function(){
-      setTimeout(function(){ if (!settled && !surface.contains(document.activeElement)) finish("note"); }, 0);
-    });
-    grow();
+    function onFocusOut(){
+      setTimeout(function(){
+        if (!settled && !dc.contains(document.activeElement) && !actions.contains(document.activeElement)) finish("note");
+      }, 0);
+    }
+    listen(dc, "focusout", onFocusOut);
+    listen(actions, "focusout", onFocusOut);
+    node._noteEditDispose = function(){
+      var pending = editCleanups.splice(0);
+      for (var cleanupIndex = 0; cleanupIndex < pending.length; cleanupIndex++) pending[cleanupIndex]();
+      controller.setOnChange(null);
+    };
+    controller.setOnChange(function(next){ markdown = next; updateActions(); });
     updateActions();
-    editor.focus({ preventScroll: true });
-    var caret = (caretOffset == null || caretOffset < 0 || caretOffset > editor.value.length)
-      ? editor.value.length : caretOffset;
-    editor.setSelectionRange(caret, caret);
-    // Setting a textarea selection can scroll an overflow-hidden ancestor even
-    // after preventScroll focus. The camera owns this viewport, never DOM scroll.
+    if (pointer) controller.focusAtCoords(pointer.left, pointer.top);
+    else controller.focusAt(caretOffset);
     viewport.scrollLeft = 0; viewport.scrollTop = 0;
   }
 function layoutNode(node){
