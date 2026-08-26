@@ -434,6 +434,14 @@ async function runProgressKeepaliveFixture() {
     "the open tool must preserve its blocking listener instead of handing back early");
   assert.match(answerTool.description, /Do not post a host-chat final answer or end the agent turn/,
     "the final answer call must preserve its re-armed listener");
+  assert.match(answerTool.description, /ordinary, never-delegated request/,
+    "the tool contract must scope blocking final-answer behavior to ordinary work");
+  assert.match(answerTool.description, /containing exactly session_id, request_id, and delegated=true/,
+    "the tool contract must teach the minimal state-only delegation call");
+  assert.match(answerTool.description, /Both its partial chunks and final completion return immediately/,
+    "the tool contract must prevent a delegated completion from stealing the listener");
+  assert.match(answerTool.description, /delegated requests may finish in any order/,
+    "the tool contract must explicitly allow out-of-order sub-agent completion");
   process.env.RABBITHOLE_PROGRESS_INTERVAL_MS = "10";
   try {
     const openingController = new AbortController();

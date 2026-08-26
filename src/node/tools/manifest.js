@@ -97,7 +97,8 @@ export const toolDefinitions = [
       "For arXiv, prefer the HTML version with base_url when available. " +
       "The canvas opens in the browser and this call BLOCKS until the human acts. " +
       "It returns status='branch_request' when the human selects text and asks a question — answer it " +
-      "with answer_branch. A branch_request with EMPTY selected_text is a follow-up question about the " +
+      "with answer_branch. Retain its session_id/request_id to answer it and its hole_id to restore the listener after delegation. " +
+      "A branch_request with EMPTY selected_text is a follow-up question about the " +
       "parent document as a whole (a chat reply beneath it) — answer conversationally in that document's " +
       "context. A branch_request may carry a 'lens' (explain | eli5 | example | deeper) — the question " +
       "text spells out the style the human tapped; honor it. One marked saved=true was asked while no " +
@@ -156,9 +157,9 @@ export const toolDefinitions = [
       "",
       AUTHORING_VOCABULARY_V1,
       "",
-      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. The final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. Do not post a host-chat final answer or end the agent turn while this listener should remain active; the pending MCP call is the listener. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
+      "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. For an ordinary, never-delegated request, the final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. Do not post a host-chat final answer or end the agent turn while this listener should remain active; the pending MCP call is the listener. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
       "",
-      "SUB-AGENT COORDINATION: sub-agents never call Rabbithole directly. After you assign this request to a sub-agent, immediately make a state-only answer_branch call with delegated=true and retain this session_id/request_id in your own conversation state. That call returns immediately, marks the window 'Working in sub-agent…', and prevents it from blocking later canvas requests. Resume the sole listener with open_rabbithole { hole_id } when appropriate. When the sub-agent returns, you—the main coordinator—stream or finish the original request_id normally, omitting delegated; its final completion returns immediately instead of taking the listener. If delegation is cancelled or you reclaim the work, make a state-only call with delegated=false.",
+      "SUB-AGENT COORDINATION (branch_request only; never convert_request): sub-agents never call Rabbithole directly. Immediately after spawning one for this request, the main coordinator makes a state-only answer_branch call containing exactly session_id, request_id, and delegated=true. Retain those IDs. The call returns immediately, marks the window 'Working in sub-agent…', and removes this request from listener redelivery. Immediately restore the sole listener with open_rabbithole { hole_id }, unless one is already active, so later asks can arrive. When the sub-agent returns, the main coordinator answers the retained request_id normally and omits delegated. Both its partial chunks and final completion return immediately; delegated requests may finish in any order and never take over the listener. Use the state-only delegated=false call only to cancel delegation or reclaim the work; this restores ordinary Thinking and ordinary listener behavior.",
     ].join("\n"),
     input: obj({
       session_id: str("Active session ID from open_rabbithole", { maxLength: 200 }),
@@ -179,14 +180,16 @@ export const toolDefinitions = [
         kind: "boolean",
         description:
           "true = stream this chunk into the pending answer and return immediately; " +
-          "omit/false = finish the answer and block for the next event",
+          "omit/false = finish the answer. An ordinary final answer blocks for the next event; " +
+          "a previously delegated final answer returns immediately",
         optional: true,
       },
       delegated: {
         kind: "boolean",
         description:
-          "State-only sub-agent coordination flag. true marks this pending request delegated and returns immediately; " +
-          "false returns it to ordinary Thinking state. When present, omit all content fields.",
+          "State-only sub-agent coordination flag for branch requests (conversion requests cannot be delegated). " +
+          "true marks this pending request delegated and returns immediately; false reclaims it into ordinary " +
+          "Thinking/listener behavior. When present, omit title, content, base_url, assets, and partial.",
         optional: true,
       },
     }),
