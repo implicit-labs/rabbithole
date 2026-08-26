@@ -253,23 +253,8 @@ export function childrenOf(id) {
     return siblings;
   }
 export function isVisible(node, cache){
-    if (node._pendingDelete) return false;
-    if (cache && Object.prototype.hasOwnProperty.call(cache, node.id)) return cache[node.id];
-    var trail = [], p = node.parent_id ? nodes[node.parent_id] : null, visible = true;
-    while(p){
-      if (cache && Object.prototype.hasOwnProperty.call(cache, p.id)){ visible = cache[p.id]; break; }
-      trail.push(p);
-      p = p.parent_id ? nodes[p.parent_id] : null;
-    }
-    if (cache){
-      for (var i = trail.length - 1; i >= 0; i--){
-        cache[trail[i].id] = visible;
-        if (trail[i].collapsed) visible = false;
-      }
-      cache[node.id] = visible;
-    } else {
-      for (var j = 0; j < trail.length; j++) if (trail[j].collapsed) return false;
-    }
+    var visible = !node._pendingDelete;
+    if (cache) cache[node.id] = visible;
     return visible;
   }
 /*

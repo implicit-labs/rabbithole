@@ -375,7 +375,7 @@ body.mode-flight #viewport { display: block; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--border-focus) 50%); border-bottom-right-radius: 9px; opacity: 0.5; }
 .node-resize:hover { opacity: 1; }
 .node.collapsed .node-body, .node.collapsed .node-resize, .node.collapsed .node-composer { display: none; }
-.node.collapsed { height: auto !important; }
+.node.collapsed { height: auto !important; overflow: hidden; }
 .node.collapsed .node-head { border-radius: var(--radius-card); border-bottom: none; }
 /* Landing flash when ⌘K jumps the canvas to a card. */
 .node.flash::after { opacity: 1; }

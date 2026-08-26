@@ -1973,7 +1973,6 @@ export function tidy(source){
       visited[node.id] = true;
       node.x = x; node.y = y;
       var bounds = nodeBounds(node, { effH: effH });
-      if (node.collapsed) return bounds;
 
       var kids = placedChildren(node.id).sort(nodeOrder);
       var selectionKids = kids.filter(isSelectionBranch);
@@ -2002,9 +2001,7 @@ export function tidy(source){
       return bounds;
     }
     var root = nodes[rootId]; if (!root) return; place(root, 0, 0);
-    // Only nodes actually visited (the visible tree) are laid out — hidden
-    // descendants of a collapsed node keep their positions instead of being
-    // yanked around by a stale traversal.
+    // Only nodes actually visited (the live tree) are laid out.
     var ids = Object.keys(visited);
     var moved = [];
     ids.forEach(function(id){ var nn=nodes[id]; layoutNode(nn); moved.push(nn); });

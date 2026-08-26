@@ -3081,6 +3081,14 @@ async function verifyCardMenu() {
     // Row 1 — this card only.
     await pickCollapse(collapseMenu, "cc-collapse");
     assert.deepEqual(await renderedFlags(), [true, false], "Collapse should fold the card and nothing under it");
+    assert.equal(await page.locator(`.node[data-id="${descendantId}"]`).isVisible(), true,
+      "collapsing one card should leave its descendants visible");
+    assert.deepEqual(await page.evaluate(({ alphaId, descendantId }) => ({
+      parent: document.querySelectorAll(`#edges path[data-child="${alphaId}"]`).length,
+      child: document.querySelectorAll(`#edges path[data-child="${descendantId}"]`).length,
+      overflow: getComputedStyle(document.querySelector(`.node[data-id="${alphaId}"]`)).overflow,
+    }), { alphaId, descendantId }), { parent: 1, child: 1, overflow: "hidden" },
+    "a collapsed card should retain both chain connectors and clip its header to the rounded border");
     await waitStored(true, false);
     assert.deepEqual(await openCollapseMenuOn(alphaId), ["Expand", "Expand branch", "Collapse children"],
       "the card rows flip on the card's own state while the children row keeps its own");
