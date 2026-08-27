@@ -1644,9 +1644,38 @@ async function verifyStandaloneNotesAndEditing() {
     await page.waitForTimeout(350);
 
     await anchoredCard.locator(".node-more").click();
-    assert.equal(await page.locator("#cardmenu #cm-pin").isVisible(), false,
-      "a connected note must not offer window pinning");
-    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#cardmenu #cm-pin").isVisible(), true,
+      "a connected note card must offer the same window pinning as every other card");
+    const connectedRect = await anchoredCard.boundingBox();
+    await page.locator("#cardmenu #cm-pin").click();
+    const connectedProjection = page.locator(`[data-pinned-node-id="${anchoredId}"]`);
+    await connectedProjection.waitFor();
+    await page.waitForTimeout(350);
+    const readConnectedProjection = () => connectedProjection.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const parent = element.parentElement.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, styleLeft: element.style.left, transform: getComputedStyle(element).transform,
+        parentX: parent.x, scrollLeft: element.parentElement.scrollLeft };
+    });
+    const connectedProjectionBefore = await readConnectedProjection();
+    const connectedEdge = page.locator(`#edges path[data-child="${anchoredId}"]`);
+    const normalizePath = (path) => String(path).replace(/-?\d+(?:\.\d+)?/g, (value) => Number(value).toFixed(3));
+    const connectedEdgeBefore = normalizePath(await connectedEdge.getAttribute("d"));
+    const connectedCamera = await page.evaluate(() => window.__rhFilmCamera.getView());
+    await page.evaluate((camera) => window.__rhFilmCamera.setView(camera.x + 137, camera.y - 73, camera.scale * 0.78), connectedCamera);
+    const connectedOriginalAfter = await anchoredCard.boundingBox();
+    const connectedProjectionAfter = await readConnectedProjection();
+    assert.deepEqual({ x: Math.round(connectedProjectionAfter.x), y: Math.round(connectedProjectionAfter.y) },
+      { x: Math.round(connectedProjectionBefore.x), y: Math.round(connectedProjectionBefore.y) },
+      `a connected card's viewport projection must stay fixed while its canonical card moves with the graph (${JSON.stringify({ connectedProjectionBefore, connectedProjectionAfter })})`);
+    assert.notDeepEqual({ x: Math.round(connectedOriginalAfter.x), y: Math.round(connectedOriginalAfter.y) },
+      { x: Math.round(connectedRect.x), y: Math.round(connectedRect.y) });
+    assert.equal(normalizePath(await connectedEdge.getAttribute("d")), connectedEdgeBefore,
+      "a connected pinned card's parent edge must remain attached to its canonical graph position");
+    await connectedProjection.locator('[aria-label="Unpin window"]').click();
+    await connectedProjection.waitFor({ state: "detached" });
+    await zoomToFit(page);
+    await page.waitForTimeout(350);
 
     const persistedNoteCount = async () => page.evaluate(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
@@ -1902,7 +1931,7 @@ async function verifyStandaloneNotesAndEditing() {
     assert.deepEqual(await standaloneCard.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, false],
       "typing should enable both standalone commit intents exactly like card composers");
     await standaloneCard.locator('.ask-commit[data-commit="note"]').click();
-    const committedStandaloneNote = page.locator(".node-note", { hasText: "Standalone note survives reload" });
+    const committedStandaloneNote = page.locator("#world .node-note", { hasText: "Standalone note survives reload" });
     await committedStandaloneNote.locator(".doc-content", { hasText: "Standalone note survives reload" }).waitFor();
     await page.waitForFunction(async () => {
       const hole = await window.__rabbitholeTest.readStoredHole();
@@ -1917,6 +1946,8 @@ async function verifyStandaloneNotesAndEditing() {
       "a standalone note should offer pinning only in its card menu");
     const pinnedRect = await committedStandaloneNote.boundingBox();
     await pinAction.click();
+    const pinnedWindow = page.locator(`[data-pinned-node-id="${standaloneNoteId}"]`);
+    await pinnedWindow.waitFor();
     await page.waitForFunction(async (id) => {
       const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
       return Number.isFinite(node?.extensions?.canvas?.pin?.x)
@@ -1924,33 +1955,68 @@ async function verifyStandaloneNotesAndEditing() {
         && Number.isFinite(node?.extensions?.canvas?.pin?.scale);
     }, standaloneNoteId);
     const cameraBeforePinMove = await page.evaluate(() => window.__rhFilmCamera.getView());
+    const readEdgeGeometry = () => page.locator("#edges").evaluate((edges) =>
+      [...edges.children].map((element) => [...element.attributes].filter((attribute) => ["d", "cx", "cy"].includes(attribute.name))
+        .map((attribute) => [attribute.name, attribute.value.replace(/-?\d+(?:\.\d+)?/g, (value) => Number(value).toFixed(3))])));
+    const edgeGeometryBeforePinMove = await readEdgeGeometry();
     await page.evaluate((camera) => window.__rhFilmCamera.setView(
       camera.x + 173, camera.y - 91, Math.max(0.2, camera.scale * 0.62)
     ), cameraBeforePinMove);
-    const pinnedAfterCamera = await committedStandaloneNote.boundingBox();
+    const originalAfterCamera = await committedStandaloneNote.boundingBox();
+    const pinnedAfterCamera = await pinnedWindow.boundingBox();
     assert.deepEqual({
       left: Math.round(pinnedAfterCamera.x - pinnedRect.x),
       top: Math.round(pinnedAfterCamera.y - pinnedRect.y),
       width: Math.round(pinnedAfterCamera.width - pinnedRect.width),
       height: Math.round(pinnedAfterCamera.height - pinnedRect.height),
     }, { left: 0, top: 0, width: 0, height: 0 },
-    "a pinned note should keep its exact screen position and apparent zoom while the camera pans and zooms");
+    "a pinned projection should keep its exact screen position and apparent zoom while the camera pans and zooms");
+    assert.notDeepEqual({ x: Math.round(originalAfterCamera.x), y: Math.round(originalAfterCamera.y) },
+      { x: Math.round(pinnedRect.x), y: Math.round(pinnedRect.y) },
+      "the canonical canvas card must continue moving with the graph beneath its pinned projection");
+    assert.deepEqual(await readEdgeGeometry(), edgeGeometryBeforePinMove,
+      "pinning and camera movement must not rewrite graph-edge geometry");
     await page.waitForTimeout(700);
     await page.reload({ waitUntil: "networkidle" });
     await committedStandaloneNote.waitFor();
-    const pinnedAfterReload = await committedStandaloneNote.boundingBox();
+    await pinnedWindow.waitFor();
+    await page.waitForFunction(async (id) => {
+      const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
+      return Number.isFinite(node?.extensions?.canvas?.pin?.x);
+    }, standaloneNoteId);
+    const pinnedAfterReload = await pinnedWindow.boundingBox();
     assert.deepEqual({ x: Math.round(pinnedAfterReload.x), y: Math.round(pinnedAfterReload.y),
       width: Math.round(pinnedAfterReload.width), height: Math.round(pinnedAfterReload.height) },
     { x: Math.round(pinnedRect.x), y: Math.round(pinnedRect.y),
       width: Math.round(pinnedRect.width), height: Math.round(pinnedRect.height) },
     "a pinned window should restore at its saved screen position and zoom");
-    await committedStandaloneNote.locator(".node-more").click();
-    assert.equal(await pinAction.locator(".sm-label").innerText(), "Unpin window");
-    await pinAction.click();
+    assert.equal(await pinnedWindow.getAttribute("role"), "region");
+    assert.match(await pinnedWindow.getAttribute("aria-label"), /^Pinned:/,
+      "the duplicate presentation must announce its pinned identity");
+    await pinnedWindow.locator('[aria-label="Show original on canvas"]').click();
+    await page.waitForFunction((id) => {
+      const original = document.querySelector(`.node[data-id="${id}"]`);
+      if (!original) return false;
+      const rect = original.getBoundingClientRect();
+      return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+    }, standaloneNoteId);
+    await pinnedWindow.locator('[aria-label="Unpin window"]').click();
     await page.waitForFunction(async (id) => {
       const node = (await window.__rabbitholeTest.readStoredHole()).nodes.find((entry) => entry.id === id);
       return !node?.extensions?.canvas?.pin;
     }, standaloneNoteId);
+    await page.waitForFunction((id) => !document.querySelector(`.node[data-id="${id}"]`)?.classList.contains("has-pinned-projection"), standaloneNoteId);
+    await pinnedWindow.waitFor({ state: "detached" });
+    await committedStandaloneNote.locator(".node-more").click();
+    assert.equal(await pinAction.locator(".sm-label").innerText(), "Pin window");
+    await pinAction.focus();
+    await page.keyboard.press("Enter");
+    const keyboardProjection = page.locator(`[data-pinned-node-id="${standaloneNoteId}"]`);
+    await keyboardProjection.waitFor();
+    await keyboardProjection.locator('[aria-label="Unpin window"]').focus();
+    await page.keyboard.press("Enter");
+    await keyboardProjection.waitFor({ state: "detached" });
+    await page.waitForFunction(() => document.activeElement?.classList.contains("node-more"));
 
     point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
@@ -2180,7 +2246,7 @@ async function verifyStandaloneNotesAndEditing() {
     assert.equal(await page.locator(`.node[data-id="${rootId}"] .node-title`).innerText(), "Renamed answer window",
       "a renamed non-note title should survive reload");
     assert.equal(await page.locator(".node-note").count(), 2, "only committed notes should survive reload");
-    console.log("ok web app: standalone editing, menu-only fixed-screen pinning, title renames, and persistence");
+    console.log("ok web app: connected and standalone viewport projections, editing, title renames, and persistence");
   } finally {
     await context.close();
   }
@@ -3048,6 +3114,12 @@ async function verifyCardMenu() {
     await rootCard.locator(".node-more").click();
     await cardMenu.waitFor({ state: "visible" });
     assert.equal(await cardMenu.locator("#cm-delete").isVisible(), false, "the root card menu should omit Delete branch");
+    assert.equal(await cardMenu.locator("#cm-pin").isVisible(), true, "the root card must offer window pinning");
+    await page.keyboard.press("Escape");
+
+    await alphaTrigger.click();
+    await cardMenu.waitFor({ state: "visible" });
+    assert.equal(await cardMenu.locator("#cm-pin").isVisible(), true, "a connected branch card must offer window pinning");
     await page.keyboard.press("Escape");
 
     await alphaTrigger.click();

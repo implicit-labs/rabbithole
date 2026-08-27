@@ -81,6 +81,7 @@ import { appendOriginAttachmentThumbnails, originAttachmentNames } from "./origi
 import { createEdgeScroller } from "./edge-scroll.js";
 import { createAnchoredMenu } from "./primitives/anchored-menu.js";
 import { structuredNoteController } from "./structured-note.js";
+import { createPinnedWindows } from "./pinned-windows.js";
 
 function isSelectionBranch(node) {
   return branchTypeOfNode(node) === BRANCH_SELECTION;
@@ -157,9 +158,10 @@ var cardMenuController = null;
 var cardMenuNode = null;
 var collapseMenuController = null;
 var collapseMenuNode = null;
+var pinnedWindows = null;
 
 function canPinWindow(node){
-  return !!node && !node._ephemeral && node.id !== rootId && node.parent_id == null;
+  return !!node && !node._ephemeral && !isDockedNote(node);
 }
 function nodePin(node){
   if (!canPinWindow(node)) return null;
@@ -172,20 +174,11 @@ function persistCanvasExtension(node){
   postBrowserEvent({ type: "node_extensions_patch", node_id: node.id,
     namespace: "canvas", value: node.extensions.canvas });
 }
-function applyNodePinTransform(node){
+function syncNodePinPresentation(node){
   if (!node || !node.el) return;
   var pin = nodePin(node);
-  node.el.classList.toggle("pinned", !!pin);
-  if (!pin){
-    node.el.style.transform = "";
-    node.el.style.transformOrigin = "";
-    return;
-  }
-  var cameraScale = view.scale || 1;
-  var dx = (pin.x - view.x) / cameraScale - node.x;
-  var dy = (pin.y - view.y) / cameraScale - node.y;
-  node.el.style.transformOrigin = "0 0";
-  node.el.style.transform = "translate(" + dx + "px," + dy + "px) scale(" + (pin.scale / cameraScale) + ")";
+  node.el.classList.toggle("has-pinned-projection", !!pin);
+  pinnedWindows?.sync(node, pin);
 }
 export function syncNodeCanvasPresentation(node){
   layoutNode(node);
@@ -201,10 +194,7 @@ function setWindowPinned(node, pinned){
     node.extensions.canvas.pin = { x: rect.left, y: rect.top, scale: view.scale };
   } else {
     if (!current) return;
-    node.x = (current.x - view.x) / view.scale;
-    node.y = (current.y - view.y) / view.scale;
     delete node.extensions.canvas.pin;
-    canvasLifecycle.hooks.persistNode(node);
   }
   layoutNode(node);
   persistCanvasExtension(node);
@@ -217,6 +207,18 @@ export function registerCanvasHooks(hooks) {
 export function initCanvasView(){
   cleanupCanvasView(false);
   var canvasScope = canvasLifecycle.beginInit();
+  pinnedWindows = createPinnedWindows({
+    layer: document.getElementById("pinned-windows"),
+    world: world,
+    readOnly: frozen,
+    onMove: function(node){ persistCanvasExtension(node); },
+    onShowOriginal: showPinnedOriginal,
+    onUnpin: function(node){
+      setWindowPinned(node, false);
+      requestAnimationFrame(function(){ node.moreBtn?.focus({ preventScroll: true }); });
+    }
+  });
+  canvasScope.addCleanup(function(){ pinnedWindows?.dispose(); pinnedWindows = null; });
   if (typeof ResizeObserver === "function") cardResizeObserver = new ResizeObserver(function(entries){
     for (var i = 0; i < entries.length; i++) {
       var id = entries[i].target && entries[i].target.dataset && entries[i].target.dataset.nodeId;
@@ -274,6 +276,8 @@ function cleanupCanvasView(resetHooks){
   cardMenuNode = null;
   collapseMenuController = null;
   collapseMenuNode = null;
+  pinnedWindows?.dispose();
+  pinnedWindows = null;
   cancelViewAnimation();
   if (edgeRaf){ cancelAnimationFrame(edgeRaf); edgeRaf = 0; }
   edgeRedrawAll = false;
@@ -312,7 +316,6 @@ function applyTransform(){
     if (collapseMenuController && collapseMenuController.isOpen()) collapseMenuController.close({ restoreFocus: false });
     canvasLifecycle.hooks.closeDockedNotePopover({ restoreFocus: false, commit: true });
     world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
-    for (var id in nodes) applyNodePinTransform(nodes[id]);
     zoomLabel.textContent = Math.round(view.scale * 100) + "%";
     canvasLifecycle.hooks.scheduleViewSave();
   }
@@ -596,11 +599,24 @@ function diveToNode(node, source){
     var t = diveTargetView(node);
     animateView(t.x, t.y, t.scale, { source: source, duration: 270, ease: "inOut" });
   }
+function showPinnedOriginal(node, source){
+    if (!node?.el) return;
+    var changed = [];
+    var ancestor = node.parent_id ? nodes[node.parent_id] : null;
+    while (ancestor){
+      if (applyCollapsedState(ancestor, false)) changed.push(ancestor);
+      ancestor = ancestor.parent_id ? nodes[ancestor.parent_id] : null;
+    }
+    for (var i = 0; i < changed.length; i++) canvasLifecycle.hooks.persistNode(changed[i]);
+    if (changed.length){ renderVisibility(); drawEdges(); }
+    diveToNode(node, source);
+    node.el.classList.add("flash");
+    setTimeout(function(){ node.el?.classList.remove("flash"); }, 520);
+    if (source === "keyboard") setTimeout(function(){ node.moreBtn?.focus({ preventScroll: true }); }, 300);
+  }
   // A card's on-screen rect under a given camera pose (defaults to the live one).
 function cardScreenRect(node, v){
     v = v || view;
-    var pin = nodePin(node);
-    if (pin) return { left: pin.x, top: pin.y, width: node.w * pin.scale, height: effH(node) * pin.scale };
     return { left: node.x * v.scale + v.x, top: node.y * v.scale + v.y, width: node.w * v.scale, height: effH(node) * v.scale };
   }
 function rectMostlyVisible(rect){
@@ -723,7 +739,7 @@ export function updateCardComposer(node){
   // possibly off-screen. Pan just enough to bring it into view (user-initiated,
   // so moving the viewport is expected; streaming never does this).
 export function revealNode(n, source){
-    if (mode !== "canvas" || !n || isNoteNode(n) || nodePin(n)) return;
+    if (mode !== "canvas" || !n || isNoteNode(n)) return;
     var pad = 30, vw = viewport.clientWidth, vh = viewport.clientHeight;
     var x1 = n.x * view.scale + view.x, y1 = n.y * view.scale + view.y;
     var x2 = (n.x + n.w) * view.scale + view.x, y2 = (n.y + effH(n)) * view.scale + view.y;
@@ -1413,7 +1429,7 @@ function layoutNode(node){
         el.style.maxHeight = node.h + "px";
       }
     }
-    applyNodePinTransform(node);
+    syncNodePinPresentation(node);
   }
 
   // Shared pointer-gesture wiring: cleans up on pointerup AND pointercancel/
@@ -1462,13 +1478,10 @@ function layoutNode(node){
   // And every camera step re-runs that derivation from the *unchanged* pointer,
   // so while the canvas scrolls the card keeps travelling with the cursor.
   function enableCardGesture(node, handle, opts){
-    var grabX, grabY, lastX, lastY, pin = null, scroller = null;
+    var grabX, grabY, lastX, lastY, scroller = null;
     function place(){
-      if (pin && opts.screenApply) opts.screenApply(node, pin, lastX - grabX, lastY - grabY);
-      else {
-        var w = screenToWorld(lastX, lastY);
-        opts.apply(node, w.x - grabX, w.y - grabY);
-      }
+      var w = screenToWorld(lastX, lastY);
+      opts.apply(node, w.x - grabX, w.y - grabY);
       layoutNode(node); scheduleNodeEdges(node);
     }
     onPointerGesture(handle,
@@ -1477,17 +1490,11 @@ function layoutNode(node){
         e.preventDefault();
         if (opts.stopPropagation) e.stopPropagation();
         canvasLifecycle.hooks.hideAsk();
-        pin = nodePin(node);
-        if (pin && opts.screenAnchor){
-          var screenAnchor = opts.screenAnchor(node, pin);
-          grabX = e.clientX - screenAnchor.x; grabY = e.clientY - screenAnchor.y;
-        } else {
-          var w = screenToWorld(e.clientX, e.clientY);
-          var anchor = opts.anchor(node);
-          grabX = w.x - anchor.x; grabY = w.y - anchor.y;
-        }
+        var w = screenToWorld(e.clientX, e.clientY);
+        var anchor = opts.anchor(node);
+        grabX = w.x - anchor.x; grabY = w.y - anchor.y;
         lastX = e.clientX; lastY = e.clientY;
-        scroller = pin ? null : createEdgeScroller(visibleCanvasRect, function(dx, dy){
+        scroller = createEdgeScroller(visibleCanvasRect, function(dx, dy){
           cancelViewAnimation(); // an in-flight glide would fight the drag
           setViewAdjusted(true);
           view.x += dx; view.y += dy;
@@ -1501,7 +1508,6 @@ function layoutNode(node){
         if (scroller) scroller.stop();
         scroller = null;
         drawEdges();
-        if (pin) persistCanvasExtension(node);
         canvasLifecycle.hooks.persistNode(node);
       });
   }
@@ -1509,9 +1515,7 @@ function layoutNode(node){
     enableCardGesture(node, handle, {
       accept: function(e){ return !onCardControl(e); },
       anchor: function(n){ return { x: n.x, y: n.y }; },
-      apply: function(n, x, y){ n.x = x; n.y = y; },
-      screenAnchor: function(_n, pin){ return { x: pin.x, y: pin.y }; },
-      screenApply: function(_n, pin, x, y){ pin.x = x; pin.y = y; }
+      apply: function(n, x, y){ n.x = x; n.y = y; }
     });
   }
   function enableResize(node, handle){
@@ -1519,12 +1523,7 @@ function layoutNode(node){
       stopPropagation: true,
       accept: function(){ return true; },
       anchor: function(n){ return { x: n.x + n.w, y: n.y + n.h }; },
-      apply: function(n, x, y){ n.w = Math.max(240, x - n.x); n.h = Math.max(160, y - n.y); },
-      screenAnchor: function(n, pin){ return { x: pin.x + n.w * pin.scale, y: pin.y + n.h * pin.scale }; },
-      screenApply: function(n, pin, x, y){
-        n.w = Math.max(240, (x - pin.x) / pin.scale);
-        n.h = Math.max(160, (y - pin.y) / pin.scale);
-      }
+      apply: function(n, x, y){ n.w = Math.max(240, x - n.x); n.h = Math.max(160, y - n.y); }
     });
   }
 function applyCollapsedState(node, collapsed){
@@ -1533,6 +1532,7 @@ function applyCollapsedState(node, collapsed){
     if (node.el) node.el.classList.toggle("collapsed", collapsed);
     if (node.collapseBtn) syncCollapseButton(node, node.collapseBtn);
     if (!collapsed && node.el) layoutNode(node);
+    else if (node.el) syncNodePinPresentation(node);
     return true;
   }
 function toggleCollapse(node, deep){
@@ -1794,7 +1794,7 @@ function focusOrigin(node, on){
   function initViewportPan(){
     var sx, sy, ox, oy;
     onPointerGesture(viewport,
-      function(e){ if (e.pointerType === "touch" || e.button !== 0 || e.target.closest(".node")) return false; canvasLifecycle.hooks.hideAsk(); cancelViewAnimation(); viewport.classList.add("panning"); sx=e.clientX; sy=e.clientY; ox=view.x; oy=view.y; return true; },
+      function(e){ if (e.pointerType === "touch" || e.button !== 0 || e.target.closest(".node, .pinned-window")) return false; canvasLifecycle.hooks.hideAsk(); cancelViewAnimation(); viewport.classList.add("panning"); sx=e.clientX; sy=e.clientY; ox=view.x; oy=view.y; return true; },
       function(ev){ setViewAdjusted(true); view.x = ox + (ev.clientX - sx); view.y = oy + (ev.clientY - sy); applyTransform(); },
       function(){ viewport.classList.remove("panning"); }, canvasLifecycle.scope);
     initTouchViewportGestures();
@@ -1863,7 +1863,7 @@ function focusOrigin(node, on){
         event.preventDefault(); event.stopPropagation();
         return;
       }
-      if (!(event.target.closest && event.target.closest(".node"))){
+      if (!(event.target.closest && event.target.closest(".node, .pinned-window"))){
         canvasLifecycle.hooks.hideAsk();
         cancelViewAnimation();
         capture(event.pointerId);
@@ -1964,7 +1964,7 @@ function focusOrigin(node, on){
   function onViewportWheel(e){
     if (e.ctrlKey){ e.preventDefault(); wheelKind = null; zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.01)); return; }
     if (!wheelKind || e.timeStamp - wheelTs > 180){
-      wheelCard = (e.target.closest && e.target.closest(".node")) || null;
+      wheelCard = (e.target.closest && e.target.closest(".node, .pinned-window")) || null;
       wheelKind = wheelCard ? "card" : "pan";
     }
     wheelTs = e.timeStamp;
@@ -1972,7 +1972,7 @@ function focusOrigin(node, on){
       e.preventDefault(); cancelViewAnimation(); setViewAdjusted(true); view.x -= e.deltaX; view.y -= e.deltaY; applyTransform();
       return;
     }
-    var over = (e.target.closest && e.target.closest(".node")) || null;
+    var over = (e.target.closest && e.target.closest(".node, .pinned-window")) || null;
     if (over !== wheelCard){
       // Drifted off the origin card mid-scroll: keep moving ITS content by hand.
       e.preventDefault();
@@ -1997,7 +1997,7 @@ export function frameAll(animate, source){
     var ids = Object.keys(nodes).filter(function(id){
       var node = nodes[id];
       var emptyDraft = node._ephemeral && !node._noteEditor?.value.trim() && !node._noteAttachments?.length && !node._notePastePending;
-      return !emptyDraft && !isDockedNote(node) && !nodePin(node) && isVisible(node, visCache);
+      return !emptyDraft && !isDockedNote(node) && isVisible(node, visCache);
     });
     if (!ids.length) return;
     var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
@@ -2038,7 +2038,7 @@ export function createStandaloneNoteAtViewportCenter(){
   }
   function onViewportDblClick(e){
     if (Date.now() < suppressClickUntil) return;
-    if (e.target.closest && e.target.closest(".node")) return;
+    if (e.target.closest && e.target.closest(".node, .pinned-window")) return;
     createStandaloneNoteAtScreen(e.clientX, e.clientY);
   }
 

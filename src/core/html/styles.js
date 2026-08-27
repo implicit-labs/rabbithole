@@ -348,6 +348,33 @@ body.mode-flight #viewport { display: block; }
 .node.root { border-color: var(--border-focus); }
 /* The document you're "in" (last read, Space's target) keeps a quiet identity. */
 .node.current { border-color: var(--border-focus); }
+/* A pin is a viewport projection, never a graph move. The canonical card stays
+   in #world with its edges intact; this layer carries a read-oriented mirror
+   above the camera and below taskbar/popover chrome. */
+#pinned-windows { position: fixed; inset: 0; z-index: 30; overflow: hidden; pointer-events: none; }
+.pinned-window { position: absolute; pointer-events: auto; transform-origin: 0 0; }
+.pinned-window-card { --card-head-bg: var(--node-head); position: relative; display: flex; flex-direction: column;
+  box-sizing: border-box; overflow: visible; background: var(--node-bg); border: 1px solid var(--border-focus);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-popover); transform-origin: 0 0; }
+.pinned-window-card.node-note { --card-head-bg: var(--note-card-head); background: var(--note-card-bg); border-color: var(--note-card-border); }
+.pinned-window-card.collapsed { height: auto !important; overflow: hidden; }
+.pinned-window-card.collapsed .node-body { display: none; }
+.pinned-window-card.collapsed .node-head { border-bottom: 0; border-radius: var(--radius-card); }
+.pinned-window-card > .node-body:not(.pdf-body) { padding-inline-end: var(--space-6); }
+.pinned-window-card .node-body.pdf-body .rh-pdf-scroll { flex: 1 1 auto; min-height: 0; max-height: none; }
+.pinned-window-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; margin-inline-start: var(--space-4); }
+.pinned-window-actions .node-btn { width: 28px; height: 28px; color: var(--fg-dim); }
+.node-pin-status { display: inline-flex; width: 13px; height: 13px; flex: 0 0 13px; align-items: center; justify-content: center;
+  margin-inline-end: 6px; color: var(--accent); }
+.node-pin-status svg { display: block; }
+.node.has-pinned-projection { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-focus)); }
+.pinned-window.dragging .node-head { cursor: grabbing; }
+@media (hover: hover) {
+  .pinned-window-actions .node-btn:hover { color: var(--fg-bold); background-color: color-mix(in srgb, currentColor 8%, transparent); }
+}
+@media (hover: none), (pointer: coarse) {
+  .pinned-window-actions .node-btn { width: 44px; height: 44px; }
+}
 /* The head stays minimal — just the title — so the card reads like a document.
    Controls sit in a right-edge overlay with secondary text sizing de-emphasized. */
 .node-head { position: relative; display: flex; align-items: center; padding: var(--space-4) var(--space-6); background: var(--card-head-bg); border-bottom: var(--border-default); border-radius: var(--radius-card) var(--radius-card) 0 0; cursor: grab; user-select: none; flex-shrink: 0; }

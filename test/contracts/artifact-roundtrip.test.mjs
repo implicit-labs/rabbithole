@@ -127,11 +127,11 @@ console.log(`ok artifact round trip: all ${fixtureNames.length} corpus fixtures 
   assert.deepEqual(dockedPayload.hole.nodes.find((node) => node.id === "docked-note").extensions, { note: { docked: true } },
     "a snapshot keeps a note docked while still clearing personal extension state");
 
-  // A pin is also visible page structure: the frozen canvas should keep the
-  // standalone window at the screen position and zoom chosen by its author.
+  // A pin is also visible page structure: the frozen canvas should keep a
+  // connected card's projection at the screen position and zoom its author chose.
   const pinned = JSON.parse(await fs.readFile(new URL("01-empty-root.rabbithole", corpusDir), "utf8"));
   pinned.hole.nodes.push({
-    id: "pinned-answer", parent_id: null, title: "Pinned", markdown: "Fixed above the canvas.",
+    id: "pinned-answer", parent_id: pinned.hole.root_id, title: "Pinned", markdown: "Fixed above the canvas.",
     base_url: null, base_url_source: null,
     origin: { selected_text: "", question: "Stay here", lens: null, anchor: null, branch_type: "followup" },
     position: { x: 300, y: 200 }, size: { w: 320, h: 240 }, font_scale: 1, collapsed: false,
@@ -145,7 +145,7 @@ console.log(`ok artifact round trip: all ${fixtureNames.length} corpus fixtures 
   const pinnedPayload = JSON.parse(pinnedSnapshot.html.match(/<script type="application\/vnd\.rabbithole\+json" id="rabbithole-portable">([\s\S]*?)<\/script>/)[1]);
   assert.deepEqual(pinnedPayload.hole.nodes.find((node) => node.id === "pinned-answer").extensions,
     { canvas: { pin: { x: 64, y: 96, scale: 0.8 } } },
-    "a snapshot keeps a standalone window pinned while clearing unrelated extension state");
+    "a snapshot keeps a connected card pinned while clearing unrelated extension state");
 }
 console.log("ok artifact round trip: portable extensions survive; snapshots retain only page-shaping extensions");
 

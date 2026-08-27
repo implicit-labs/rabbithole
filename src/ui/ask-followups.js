@@ -141,11 +141,8 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
         : "Session ended — reopen this Rabbithole from your terminal to keep asking.");
       return;
     }
-    var range = sel.getRangeAt(0);
-    // Both endpoints must live inside this same document — a selection dragged
-    // out into the sidebar/another card would otherwise yield offsets past the
-    // doc's text (no inline mark, a bad persisted anchor).
-    if (!dc.contains(range.startContainer) || !dc.contains(range.endContainer)) return;
+    var range = rangeInsideDocument(sel.getRangeAt(0), dc, sel.toString());
+    if (!range) return;
     var startOff = charOffset(dc, range.startContainer, range.startOffset);
     var endOff = charOffset(dc, range.endContainer, range.endOffset);
     if (endOff <= startOff) return;
@@ -167,6 +164,21 @@ function inAsk(e){ return e.target && e.target.closest && e.target.closest("#ask
     // focusing collapses the native selection, so the cloned Range plus the
     // painted highlight carry it, and Escape puts the selection back.
     openAskSurface(virtualAnchor, owner);
+  }
+
+  function rangeInsideDocument(range, dc, selectedText){
+    if (dc.contains(range.startContainer) && dc.contains(range.endContainer)) return range;
+    // A browser paragraph-selection gesture includes the following block
+    // boundary. For a card's final paragraph that boundary is the card composer,
+    // just outside .doc-content. Clip such structural promotion back to the
+    // document, but still reject a real selection dragged into another surface.
+    if (!range.intersectsNode(dc)) return null;
+    var clipped = range.cloneRange();
+    try {
+      if (!dc.contains(clipped.startContainer)) clipped.setStart(dc, 0);
+      if (!dc.contains(clipped.endContainer)) clipped.setEnd(dc, dc.childNodes.length);
+    } catch(e){ return null; }
+    return clipped.toString().trim() === selectedText.trim() ? clipped : null;
   }
   var selectionDraft = null;
 export function showAskFromSelection(options){
