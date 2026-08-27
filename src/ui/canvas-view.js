@@ -170,6 +170,8 @@ function nodePin(node){
       || !Number.isFinite(pin.scale) || pin.scale < MIN_SCALE || pin.scale > MAX_SCALE) return null;
   return pin;
 }
+function canvasCard(node){ return node && (node.canvasEl || node.el); }
+function canvasBody(node){ return node && (node.canvasBodyEl || node.bodyEl); }
 function persistCanvasExtension(node){
   postBrowserEvent({ type: "node_extensions_patch", node_id: node.id,
     namespace: "canvas", value: node.extensions.canvas });
@@ -177,7 +179,6 @@ function persistCanvasExtension(node){
 function syncNodePinPresentation(node){
   if (!node || !node.el) return;
   var pin = nodePin(node);
-  node.el.classList.toggle("has-pinned-projection", !!pin);
   pinnedWindows?.sync(node, pin);
 }
 export function syncNodeCanvasPresentation(node){
@@ -190,8 +191,10 @@ function setWindowPinned(node, pinned){
   var current = nodePin(node);
   if (pinned){
     if (current) return;
-    var rect = node.el.getBoundingClientRect();
-    node.extensions.canvas.pin = { x: rect.left, y: rect.top, scale: view.scale };
+    var graphCard = canvasCard(node);
+    var rect = graphCard.getBoundingClientRect();
+    node.extensions.canvas.pin = { x: rect.left, y: rect.top, scale: view.scale,
+      w: node.w, h: Math.max(160, graphCard.offsetHeight || node.h) };
   } else {
     if (!current) return;
     delete node.extensions.canvas.pin;
@@ -209,9 +212,8 @@ export function initCanvasView(){
   var canvasScope = canvasLifecycle.beginInit();
   pinnedWindows = createPinnedWindows({
     layer: document.getElementById("pinned-windows"),
-    world: world,
     readOnly: frozen,
-    onMove: function(node){ persistCanvasExtension(node); },
+    onChange: function(node){ persistCanvasExtension(node); },
     onShowOriginal: showPinnedOriginal,
     onUnpin: function(node){
       setWindowPinned(node, false);
@@ -610,9 +612,12 @@ function showPinnedOriginal(node, source){
     for (var i = 0; i < changed.length; i++) canvasLifecycle.hooks.persistNode(changed[i]);
     if (changed.length){ renderVisibility(); drawEdges(); }
     diveToNode(node, source);
-    node.el.classList.add("flash");
-    setTimeout(function(){ node.el?.classList.remove("flash"); }, 520);
-    if (source === "keyboard") setTimeout(function(){ node.moreBtn?.focus({ preventScroll: true }); }, 300);
+    var original = canvasCard(node);
+    original?.classList.add("flash");
+    setTimeout(function(){ original?.classList.remove("flash"); }, 520);
+    if (source === "keyboard") setTimeout(function(){
+      original?.querySelector(".pinned-origin-overlay")?.focus({ preventScroll: true });
+    }, 300);
   }
   // A card's on-screen rect under a given camera pose (defaults to the live one).
 function cardScreenRect(node, v){
@@ -1409,7 +1414,7 @@ export function convertNoteToAsk(node, text){
     viewport.scrollLeft = 0; viewport.scrollTop = 0;
   }
 function layoutNode(node){
-    var el = node.el; el.style.left = node.x + "px"; el.style.top = node.y + "px"; el.style.width = node.w + "px";
+    var el = canvasCard(node); el.style.left = node.x + "px"; el.style.top = node.y + "px"; el.style.width = node.w + "px";
     if (!node.collapsed){
       // Branch cards use their saved/default height as a ceiling, not a floor.
       // Short answers therefore hug their content while longer answers retain
@@ -1513,7 +1518,7 @@ function layoutNode(node){
   }
   function enableDrag(node, handle){
     enableCardGesture(node, handle, {
-      accept: function(e){ return !onCardControl(e); },
+      accept: function(e){ return !nodePin(node) && !onCardControl(e); },
       anchor: function(n){ return { x: n.x, y: n.y }; },
       apply: function(n, x, y){ n.x = x; n.y = y; }
     });
@@ -1521,7 +1526,7 @@ function layoutNode(node){
   function enableResize(node, handle){
     enableCardGesture(node, handle, {
       stopPropagation: true,
-      accept: function(){ return true; },
+      accept: function(){ return !nodePin(node); },
       anchor: function(n){ return { x: n.x + n.w, y: n.y + n.h }; },
       apply: function(n, x, y){ n.w = Math.max(240, x - n.x); n.h = Math.max(160, y - n.y); }
     });
@@ -1570,7 +1575,9 @@ export function renderVisibility(){
       var display;
       if (n.id === rootId){ display = ""; cache[n.id] = true; }
       else display = isVisible(n, cache) ? "" : "none";
-      if (n.el.style.display !== display) n.el.style.display = display;
+      var graphCard = canvasCard(n);
+      if (graphCard.style.display !== display) graphCard.style.display = display;
+      if (!n.canvasEl && n.el.style.display !== display) n.el.style.display = display;
     }
   }
 var edgeRaf = 0;           // coalesces edge redraws during drag/resize/scroll
@@ -1607,7 +1614,7 @@ function scheduleNodeEdges(node){
 
   // Effective on-canvas height follows the rendered card: collapsed cards are
   // head-only and short branches may be smaller than their saved height cap.
-export function effH(n){ return n.el ? (n.el.offsetHeight || (n.collapsed ? 36 : n.h)) : n.h; }
+export function effH(n){ var el = canvasCard(n); return el ? (el.offsetHeight || (n.collapsed ? 36 : n.h)) : n.h; }
 function edgeMeasure(n, cache){
     var measured = cache[n.id];
     if (!measured){
@@ -1638,13 +1645,14 @@ function clamp(lo, hi, v){ return Math.max(lo, Math.min(hi, v)); }
   function edgeStart(p, child, side, measureCache){
     var measured = edgeMeasure(p, measureCache);
     var ph = measured.h, ax = null, ay = null, anchored = false;
-    if (!p.collapsed && p.el && p.bodyEl){
-      var mark = p.bodyEl.querySelector('mark[data-child="' + child.id + '"]');
+    var graphCard = canvasCard(p), graphBody = canvasBody(p);
+    if (!p.collapsed && graphCard && graphBody){
+      var mark = graphBody.querySelector('mark[data-child="' + child.id + '"]');
       if (mark){
         var mr = mark.getBoundingClientRect();
         if (mr.height > 0){
-          var er = measured.elRect || (measured.elRect = p.el.getBoundingClientRect());
-          var br = measured.bodyRect || (measured.bodyRect = p.bodyEl.getBoundingClientRect());
+          var er = measured.elRect || (measured.elRect = graphCard.getBoundingClientRect());
+          var br = measured.bodyRect || (measured.bodyRect = graphBody.getBoundingClientRect());
           ay = p.y + clamp((br.top - er.top) / view.scale + 10, (br.bottom - er.top) / view.scale - 10,
                            (mr.top + mr.height / 2 - er.top) / view.scale);
           ax = p.x + clamp((br.left - er.left) / view.scale + 10, (br.right - er.left) / view.scale - 10,
@@ -1778,8 +1786,9 @@ function focusOrigin(node, on){
     if (mode !== "canvas") return;
     setEdgeHighlight(node.id, on);
     var p = node.parent_id ? nodes[node.parent_id] : null;
-    if (p && p.bodyEl){
-      var marks = p.bodyEl.querySelectorAll('[data-child="' + node.id + '"]');
+    var graphBody = canvasBody(p);
+    if (graphBody){
+      var marks = graphBody.querySelectorAll('[data-child="' + node.id + '"]');
       for (var i = 0; i < marks.length; i++) marks[i].classList.toggle("mark-focus", on);
     }
   }

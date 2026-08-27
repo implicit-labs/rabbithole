@@ -1,22 +1,20 @@
 import { iconSvg } from "../core/html/icons.js";
 
-const INTERACTIVE_SELECTOR = "button, input, textarea, select, [contenteditable]";
 const DUPLICATE_REFERENCE_ATTRIBUTES = ["aria-controls", "aria-describedby", "aria-labelledby", "for"];
 
 /**
- * Viewport projections for canonical canvas cards.
- *
- * The graph owns one real card. This module owns a second, read-oriented
- * presentation above the camera so pinning never changes graph layout, edge
- * geometry, or node identity.
+ * Pins the existing interactive card above the camera and leaves an inert
+ * canvas proxy behind. Callers continue to own node identity and graph state;
+ * this module owns the two presentation surfaces and their independent
+ * viewport geometry.
  */
 export function createPinnedWindows(options) {
   var layer = options.layer;
   var entries = new Map();
   var nextZ = 1;
   var disposed = false;
-  var worldObserver = typeof MutationObserver === "function" ? new MutationObserver(removeDetachedEntries) : null;
-  if (worldObserver && options.world) worldObserver.observe(options.world, { childList: true });
+  var layerObserver = typeof MutationObserver === "function" ? new MutationObserver(removeDetachedEntries) : null;
+  layerObserver?.observe(layer, { childList: true, subtree: true });
 
   function sync(node, pin) {
     if (disposed || !node?.el || !pin) {
@@ -24,173 +22,172 @@ export function createPinnedWindows(options) {
       return;
     }
     var entry = entries.get(node.id);
-    if (!entry) entry = createEntry(node);
+    if (!entry) entry = createEntry(node, pin);
     entry.node = node;
     entry.pin = pin;
-    ensureSourceBadge(entry);
+    normalizePinSize(entry);
+    syncPinnedActions(entry);
+    scheduleProxyRender(entry);
     positionEntry(entry);
-    scheduleRender(entry);
   }
 
-  function createEntry(node) {
+  function createEntry(node, pin) {
+    var source = node.el;
     var wrapper = document.createElement("section");
     wrapper.className = "pinned-window";
     wrapper.dataset.pinnedNodeId = node.id;
     wrapper.setAttribute("role", "region");
+    wrapper.setAttribute("aria-label", "Pinned: " + (node.title || "Untitled card"));
     wrapper.style.zIndex = String(nextZ++);
+
+    var origin = document.createElement("div");
+    origin.className = "pinned-origin";
+    origin.dataset.pinnedOriginId = node.id;
+    source.before(origin);
     layer.appendChild(wrapper);
 
-    var entry = { node, pin: null, wrapper, sourceBadge: null, card: null, renderFrame: 0,
-      renderSuspended: false, renderPending: false,
-      lastHeight: Math.max(1, node.el.offsetHeight || node.h || 1), observer: null, resizeObserver: null };
-    entry.observer = typeof MutationObserver === "function" ? new MutationObserver(function(){ scheduleRender(entry); }) : null;
-    // Mirror document/content changes and inline presentation changes. Card
-    // state classes such as hover/flash are intentionally excluded: they are
-    // transient canvas feedback and replacing a projection for them could tear
-    // down a button between pointerdown and click.
-    entry.observer?.observe(node.el, { attributes: true, attributeFilter: ["style"], characterData: true, childList: true, subtree: true });
-    entry.resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(function(){
-      var height = node.el?.offsetHeight;
-      if (height > 0) entry.lastHeight = height;
-      positionEntry(entry);
-      scheduleRender(entry);
-    }) : null;
-    entry.resizeObserver?.observe(node.el);
-    wrapper.addEventListener("pointerdown", function(event){
-      wrapper.style.zIndex = String(nextZ++);
-      var action = event.target.closest?.("[data-pinned-action]");
-      if (action) entry.actionPointer = { id: event.pointerId, action: action.dataset.pinnedAction };
-    });
-    wrapper.addEventListener("pointerup", function(event){
-      var pending = entry.actionPointer;
-      entry.actionPointer = null;
-      if (!pending || pending.id !== event.pointerId) return;
-      var action = event.target.closest?.("[data-pinned-action]")?.dataset.pinnedAction;
-      if (action !== pending.action) return;
-      entry.pointerAction = action;
-      runAction(entry, action, "pointer");
-    });
-    wrapper.addEventListener("pointercancel", function(){ entry.actionPointer = null; });
-    wrapper.addEventListener("click", function(event){
-      var action = event.target.closest?.("[data-pinned-action]")?.dataset.pinnedAction;
-      if (!action || entry.pointerAction === action) { entry.pointerAction = null; return; }
-      runAction(entry, action, event.detail === 0 ? "keyboard" : "pointer");
-    });
+    var entry = {
+      node, pin, wrapper, origin, card: source, visual: null, originBody: null,
+      renderFrame: 0, movingCard: true, pinnedActions: [],
+      graphStyle: {
+        height: source.style.height,
+        minHeight: source.style.minHeight,
+        maxHeight: source.style.maxHeight,
+      },
+    };
     entries.set(node.id, entry);
+    node.canvasEl = origin;
+    source.classList.add("pinned-window-card");
+    wrapper.appendChild(source);
+    entry.movingCard = false;
+
+    entry.observer = typeof MutationObserver === "function" ? new MutationObserver(function(){
+      scheduleProxyRender(entry);
+      positionEntry(entry);
+    }) : null;
+    entry.observer?.observe(source, { attributes: true, attributeFilter: ["class"], characterData: true, childList: true, subtree: true });
+    wrapper.addEventListener("pointerdown", function(){ raise(entry); });
+    wireDrag(entry, source.querySelector(":scope > .node-head"));
+    wireResize(entry, source.querySelector(":scope > .node-resize"));
+    renderProxy(entry);
     return entry;
   }
 
-  function ensureSourceBadge(entry) {
-    var existing = entry.node.el.querySelector(":scope > .node-head > .node-pin-status");
-    if (!existing) {
-      existing = document.createElement("span");
-      existing.className = "node-pin-status";
-      existing.title = "Pinned to screen";
-      existing.setAttribute("aria-label", "Pinned to screen");
-      existing.innerHTML = iconSvg("pin", { size: 13 });
-      var title = entry.node.el.querySelector(":scope > .node-head > .node-title");
-      title?.before(existing);
+  function normalizePinSize(entry) {
+    var scale = entry.pin.scale;
+    if (!Number.isFinite(entry.pin.w) || entry.pin.w < 240) entry.pin.w = Math.max(240, entry.node.w || entry.card.offsetWidth || 240);
+    if (!Number.isFinite(entry.pin.h) || entry.pin.h < 160) {
+      var rendered = entry.card.getBoundingClientRect().height / Math.max(scale, 0.01);
+      entry.pin.h = Math.max(160, rendered || entry.node.h || 160);
     }
-    entry.sourceBadge = existing;
-    entry.node.el.classList.add("has-pinned-projection");
   }
 
-  function scheduleRender(entry) {
-    if (disposed || !entries.has(entry.node.id)) return;
-    if (entry.renderSuspended) { entry.renderPending = true; return; }
-    if (entry.renderFrame) return;
+  function raise(entry) {
+    entry.wrapper.style.zIndex = String(nextZ++);
+  }
+
+  function syncPinnedActions(entry) {
+    var acts = entry.card.querySelector(":scope > .node-head > .node-acts");
+    if (!acts) return;
+    if (!entry.pinnedActions.length) {
+      var focus = iconButton("locate", "Focus original on canvas", "focus-original");
+      focus.addEventListener("click", function(event){
+        event.stopPropagation();
+        options.onShowOriginal?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
+      });
+      entry.pinnedActions.push(focus);
+      if (!options.readOnly) {
+        var unpin = iconButton("pin-active", "Unpin window", "unpin");
+        unpin.addEventListener("click", function(event){
+          event.stopPropagation();
+          options.onUnpin?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
+        });
+        entry.pinnedActions.push(unpin);
+      }
+    }
+    var divider = entry.node.actDivider;
+    for (var i = 0; i < entry.pinnedActions.length; i++) acts.insertBefore(entry.pinnedActions[i], divider || acts.firstChild);
+  }
+
+  function scheduleProxyRender(entry) {
+    if (disposed || !entries.has(entry.node.id) || entry.renderFrame) return;
     entry.renderFrame = requestAnimationFrame(function(){
       entry.renderFrame = 0;
-      if (!entry.node.el?.isConnected || !entries.has(entry.node.id)) return remove(entry.node.id);
-      renderEntry(entry);
+      if (!entry.card?.isConnected || !entries.has(entry.node.id)) return remove(entry.node.id);
+      renderProxy(entry);
     });
   }
 
-  function renderEntry(entry) {
-    var previousBody = entry.card?.querySelector(":scope > .node-body");
-    var previousScroll = previousBody?.scrollTop || 0;
-    var source = entry.node.el;
-    var card = source.cloneNode(true);
-    card.classList.remove("node", "current", "flash", "node-enter", "entered", "has-pinned-projection", "note-editing", "note-draft");
-    card.classList.add("pinned-window-card");
-    card.removeAttribute("data-id");
-    card.style.left = "";
-    card.style.top = "";
-    card.style.transform = "";
-    card.style.transformOrigin = "";
-    card.style.display = "";
-
-    card.querySelector(":scope > .node-composer")?.remove();
-    card.querySelector(":scope > .node-resize")?.remove();
-    card.querySelector(":scope > .node-head > .node-acts")?.remove();
-    card.querySelectorAll(".note-dots, .code-copy, .rh-img-handle, .rh-pdf-toolbar, .note-edit-actions").forEach(function(el){ el.remove(); });
-    card.querySelectorAll("[id]").forEach(function(el){ el.removeAttribute("id"); });
-    card.querySelectorAll("[data-id]").forEach(function(el){ el.removeAttribute("data-id"); });
-    card.querySelectorAll("[data-node-id]").forEach(function(el){ el.removeAttribute("data-node-id"); });
-    card.querySelectorAll(INTERACTIVE_SELECTOR).forEach(makeReadOnly);
-    card.querySelectorAll("*").forEach(function(el){
+  function renderProxy(entry) {
+    var source = entry.card;
+    var previousScroll = entry.originBody?.scrollTop || source.querySelector(":scope > .node-body")?.scrollTop || 0;
+    var visual = source.cloneNode(true);
+    visual.classList.remove("node", "current", "flash", "node-enter", "entered", "pinned-window-card", "dragging");
+    visual.classList.add("pinned-origin-card");
+    visual.removeAttribute("data-id");
+    visual.removeAttribute("style");
+    visual.style.width = entry.node.w + "px";
+    visual.style.height = entry.node.collapsed ? "auto" : entry.graphStyle.height;
+    visual.style.minHeight = entry.node.collapsed ? "" : entry.graphStyle.minHeight;
+    visual.style.maxHeight = entry.node.collapsed ? "" : entry.graphStyle.maxHeight;
+    visual.inert = true;
+    visual.setAttribute("aria-hidden", "true");
+    visual.querySelectorAll("[id]").forEach(function(el){ el.removeAttribute("id"); });
+    visual.querySelectorAll("[data-id]").forEach(function(el){ el.removeAttribute("data-id"); });
+    visual.querySelectorAll("[data-node-id]").forEach(function(el){ el.removeAttribute("data-node-id"); });
+    visual.querySelectorAll("*").forEach(function(el){
       for (var i = 0; i < DUPLICATE_REFERENCE_ATTRIBUTES.length; i++) el.removeAttribute(DUPLICATE_REFERENCE_ATTRIBUTES[i]);
     });
 
-    var head = card.querySelector(":scope > .node-head");
-    var actions = document.createElement("span");
-    actions.className = "pinned-window-actions";
-    var showOriginal = iconButton("canvas", "Show original on canvas", "show-original");
-    preserveActionGesture(entry, showOriginal, function(){ scheduleRender(entry); });
-    actions.appendChild(showOriginal);
-    if (!options.readOnly) {
-      var unpin = iconButton("pin", "Unpin window", "unpin");
-      preserveActionGesture(entry, unpin, function(){ scheduleRender(entry); });
-      actions.appendChild(unpin);
-    }
-    head?.appendChild(actions);
-    wireDrag(entry, head);
+    var overlay = document.createElement("button");
+    overlay.type = "button";
+    overlay.className = "pinned-origin-overlay";
+    overlay.setAttribute("aria-label", "Show pinned window: " + (entry.node.title || "Untitled card"));
+    overlay.innerHTML = '<span class="pinned-origin-label">' + iconSvg("pin-active") + '<span>Pinned to screen</span></span>';
+    overlay.addEventListener("click", function(){
+      raise(entry);
+      entry.node.moreBtn?.focus({ preventScroll: true });
+    });
 
-    var sourceTitle = entry.node.title || "Untitled card";
-    entry.wrapper.setAttribute("aria-label", "Pinned: " + sourceTitle);
-    entry.wrapper.replaceChildren(card);
-    entry.card = card;
-    var nextBody = card.querySelector(":scope > .node-body");
-    if (nextBody) nextBody.scrollTop = previousScroll;
-    copyCanvasPixels(source, card);
-    positionEntry(entry);
+    entry.origin.replaceChildren(visual, overlay);
+    entry.visual = visual;
+    entry.originBody = visual.querySelector(":scope > .node-body");
+    entry.node.canvasBodyEl = entry.originBody;
+    if (entry.originBody) entry.originBody.scrollTop = previousScroll;
+    copyCanvasPixels(source, visual);
+    positionOrigin(entry);
+  }
+
+  function positionOrigin(entry) {
+    var origin = entry.origin;
+    origin.style.left = entry.node.x + "px";
+    origin.style.top = entry.node.y + "px";
+    origin.style.width = entry.node.w + "px";
   }
 
   function positionEntry(entry) {
-    if (!entry.pin || !entry.wrapper) return;
-    var sourceHeight = entry.node.el?.offsetHeight;
-    if (sourceHeight > 0) entry.lastHeight = sourceHeight;
+    if (!entry.pin) return;
     var scale = entry.pin.scale;
+    entry.wrapper.setAttribute("aria-label", "Pinned: " + (entry.node.title || "Untitled card"));
     entry.wrapper.style.left = entry.pin.x + "px";
     entry.wrapper.style.top = entry.pin.y + "px";
-    entry.wrapper.style.width = entry.node.w * scale + "px";
-    entry.wrapper.style.height = entry.lastHeight * scale + "px";
-    if (entry.card) {
-      entry.card.style.width = entry.node.w + "px";
-      entry.card.style.height = entry.lastHeight + "px";
-      entry.card.style.transform = "scale(" + scale + ")";
-    }
-  }
-
-  function runAction(entry, action, source) {
-    if (!entries.has(entry.node.id)) return;
-    if (action === "show-original") {
-      options.onShowOriginal?.(entry.node, source);
-      return;
-    }
-    if (action !== "unpin" || options.readOnly) return;
-    // The viewport responds synchronously; persistence follows through the
-    // canvas callback. A later failed/reloaded save can still reconstruct the
-    // projection from canonical extension state.
-    remove(entry.node.id);
-    options.onUnpin?.(entry.node);
+    entry.wrapper.style.width = entry.pin.w * scale + "px";
+    entry.wrapper.style.height = (entry.node.collapsed ? entry.card.querySelector(":scope > .node-head")?.offsetHeight || 36 : entry.pin.h) * scale + "px";
+    entry.card.style.left = "0";
+    entry.card.style.top = "0";
+    entry.card.style.width = entry.pin.w + "px";
+    entry.card.style.height = entry.node.collapsed ? "auto" : entry.pin.h + "px";
+    entry.card.style.minHeight = "";
+    entry.card.style.maxHeight = "";
+    entry.card.style.transform = "scale(" + scale + ")";
+    positionOrigin(entry);
   }
 
   function wireDrag(entry, head) {
     if (!head) return;
     var pointerId = null, startX = 0, startY = 0, originX = 0, originY = 0, moved = false;
     head.addEventListener("pointerdown", function(event){
-      if (event.button !== 0 || event.target.closest("button, a")) return;
+      if (event.button !== 0 || event.target.closest("button, a, [contenteditable]")) return;
       event.preventDefault();
       pointerId = event.pointerId;
       startX = event.clientX; startY = event.clientY;
@@ -204,12 +201,8 @@ export function createPinnedWindows(options) {
       var dx = event.clientX - startX, dy = event.clientY - startY;
       moved = moved || Math.hypot(dx, dy) > 2;
       var visibleGrip = 44;
-      var minX = visibleGrip - entry.wrapper.offsetWidth;
-      var maxX = Math.max(0, layer.clientWidth - visibleGrip);
-      var minY = 0;
-      var maxY = Math.max(0, layer.clientHeight - visibleGrip);
-      entry.pin.x = Math.max(minX, Math.min(maxX, originX + dx));
-      entry.pin.y = Math.max(minY, Math.min(maxY, originY + dy));
+      entry.pin.x = Math.max(visibleGrip - entry.wrapper.offsetWidth, Math.min(Math.max(0, layer.clientWidth - visibleGrip), originX + dx));
+      entry.pin.y = Math.max(0, Math.min(Math.max(0, layer.clientHeight - visibleGrip), originY + dy));
       positionEntry(entry);
     });
     function finish(event) {
@@ -217,7 +210,7 @@ export function createPinnedWindows(options) {
       try { head.releasePointerCapture(pointerId); } catch (_error) {}
       pointerId = null;
       entry.wrapper.classList.remove("dragging");
-      if (moved) options.onMove?.(entry.node, entry.pin);
+      if (moved) options.onChange?.(entry.node, entry.pin);
     }
     head.addEventListener("pointerup", finish);
     head.addEventListener("pointercancel", finish);
@@ -225,7 +218,44 @@ export function createPinnedWindows(options) {
       if (pointerId === null) return;
       pointerId = null;
       entry.wrapper.classList.remove("dragging");
-      if (moved) options.onMove?.(entry.node, entry.pin);
+      if (moved) options.onChange?.(entry.node, entry.pin);
+    });
+  }
+
+  function wireResize(entry, handle) {
+    if (!handle || options.readOnly) return;
+    var pointerId = null, startX = 0, startY = 0, startW = 0, startH = 0, moved = false;
+    handle.addEventListener("pointerdown", function(event){
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pointerId = event.pointerId;
+      startX = event.clientX; startY = event.clientY;
+      startW = entry.pin.w; startH = entry.pin.h;
+      moved = false;
+      try { handle.setPointerCapture(pointerId); } catch (_error) {}
+    });
+    handle.addEventListener("pointermove", function(event){
+      if (pointerId !== event.pointerId) return;
+      var dx = (event.clientX - startX) / entry.pin.scale;
+      var dy = (event.clientY - startY) / entry.pin.scale;
+      moved = moved || Math.hypot(dx, dy) > 2;
+      entry.pin.w = Math.max(240, startW + dx);
+      entry.pin.h = Math.max(160, startH + dy);
+      positionEntry(entry);
+    });
+    function finish(event) {
+      if (pointerId !== event.pointerId) return;
+      try { handle.releasePointerCapture(pointerId); } catch (_error) {}
+      pointerId = null;
+      if (moved) options.onChange?.(entry.node, entry.pin);
+    }
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("lostpointercapture", function(){
+      if (pointerId === null) return;
+      pointerId = null;
+      if (moved) options.onChange?.(entry.node, entry.pin);
     });
   }
 
@@ -235,20 +265,32 @@ export function createPinnedWindows(options) {
     entries.delete(id);
     if (entry.renderFrame) cancelAnimationFrame(entry.renderFrame);
     entry.observer?.disconnect();
-    entry.resizeObserver?.disconnect();
-    entry.sourceBadge?.remove();
-    entry.node.el?.classList.remove("has-pinned-projection");
+    entry.pinnedActions.forEach(function(action){ action.remove(); });
+    if (entry.card?.isConnected) {
+      entry.origin.before(entry.card);
+      entry.card.classList.remove("pinned-window-card");
+      entry.card.style.transform = "";
+      entry.card.style.left = entry.node.x + "px";
+      entry.card.style.top = entry.node.y + "px";
+      entry.card.style.width = entry.node.w + "px";
+      entry.card.style.height = entry.graphStyle.height;
+      entry.card.style.minHeight = entry.graphStyle.minHeight;
+      entry.card.style.maxHeight = entry.graphStyle.maxHeight;
+    }
+    entry.origin.remove();
     entry.wrapper.remove();
+    delete entry.node.canvasEl;
+    delete entry.node.canvasBodyEl;
   }
 
   function removeDetachedEntries() {
-    entries.forEach(function(entry, id){ if (!entry.node.el?.isConnected) remove(id); });
+    entries.forEach(function(entry, id){ if (!entry.card?.isConnected && !entry.movingCard) remove(id); });
   }
 
   function dispose() {
     if (disposed) return;
     disposed = true;
-    worldObserver?.disconnect();
+    layerObserver?.disconnect();
     Array.from(entries.keys()).forEach(remove);
   }
 
@@ -258,55 +300,12 @@ export function createPinnedWindows(options) {
 function iconButton(icon, label, action) {
   var button = document.createElement("button");
   button.type = "button";
-  button.className = "node-btn";
+  button.className = "node-btn pinned-window-action";
   button.setAttribute("aria-label", label);
   button.dataset.pinnedAction = action;
   button.title = label;
   button.innerHTML = iconSvg(icon);
   return button;
-}
-
-function preserveActionGesture(entry, button, resumeRender) {
-  function begin() {
-    entry.renderSuspended = true;
-    if (entry.renderFrame) {
-      cancelAnimationFrame(entry.renderFrame);
-      entry.renderFrame = 0;
-      entry.renderPending = true;
-    }
-  }
-  function end() {
-    setTimeout(function(){
-      entry.renderSuspended = false;
-      if (!entry.renderPending) return;
-      entry.renderPending = false;
-      resumeRender();
-    }, 0);
-  }
-  button.addEventListener("pointerdown", function(){
-    begin();
-    function finish(){
-      window.removeEventListener("pointerup", finish, true);
-      window.removeEventListener("pointercancel", finish, true);
-      end();
-    }
-    window.addEventListener("pointerup", finish, true);
-    window.addEventListener("pointercancel", finish, true);
-  });
-  button.addEventListener("keydown", function(event){
-    if (event.key === "Enter" || event.key === " ") begin();
-  });
-  button.addEventListener("keyup", function(event){
-    if (event.key === "Enter" || event.key === " ") end();
-  });
-  button.addEventListener("blur", end);
-}
-
-function makeReadOnly(element) {
-  element.removeAttribute("contenteditable");
-  element.tabIndex = -1;
-  if ("disabled" in element) element.disabled = true;
-  element.setAttribute("aria-disabled", "true");
 }
 
 function copyCanvasPixels(source, clone) {

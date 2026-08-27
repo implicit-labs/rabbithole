@@ -40,6 +40,8 @@ export const ICON_SELECTIONS = Object.freeze({
   "package": "cube-outline",
   "rename": "create-outline",
   "pin": "pin-outline",
+  "pin-active": "pin",
+  "locate": "locate-outline",
   "check": "checkmark-outline",
   "info": "information-circle-outline",
 });
