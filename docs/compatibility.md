@@ -79,11 +79,20 @@ files, snapshots, MCP hydration, and stored holes.
 
 The server exposes `open_rabbithole`, `answer_branch`, `send_to_rabbithole`,
 and `list_rabbitholes`. Tool inputs are validated and capped before filesystem
-or session mutation. Sub-agent delegation markers are transient session state:
-they can be rehydrated into a connected live page but never enter persisted
-holes, portable files, or snapshots. The browser transport uses the event vocabulary in
+or session mutation. The browser transport uses the event vocabulary in
 `src/core/contracts/engine.d.ts`; the agent loop receives branch requests,
 conversion requests, rehydration, and terminal session status.
+
+Sub-agent protocol (`branch_request` only; never `convert_request`):
+
+1. Sub-agents never call Rabbithole; the main agent is the sole coordinator.
+2. After spawning a sub-agent, call `answer_branch` with exactly `{ session_id, request_id, delegated: true }`. It returns immediately; the card shows “Working in sub-agent…”. Pass the question and `selected_text` to the sub-agent yourself—it cannot fetch them.
+3. Immediately restore the sole listener with `open_rabbithole { hole_id }`. Skip this only while an ordinary final `answer_branch` is still blocked: that call is the listener; `already_listening` confirms one is attached.
+4. When the sub-agent returns, stream or finish the retained `request_id` normally, omitting `delegated`. Partials and the final all return immediately; delegated requests may finish in any order and never take the listener.
+5. If the sub-agent fails or is abandoned, call `answer_branch` with exactly `{ session_id, request_id, delegated: false }` to reclaim it, then answer it yourself. It returns to ordinary Thinking and listener behavior.
+
+Delegation is live coordination state: it survives canvas reload, not server restart.
+It never enters persisted holes, portable files, or snapshots.
 
 stdout is reserved for MCP protocol messages. Application logs always go to
 stderr.

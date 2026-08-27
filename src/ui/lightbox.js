@@ -33,15 +33,15 @@ function diagramAspect(content){
   return 1;
 }
 
-function diagramPlateInset(style, start, end){
+function diagramViewportInset(style, start, end){
   return (parseFloat(style[start]) || 0) + (parseFloat(style[end]) || 0);
 }
 
-function sizeDiagramPlate(content, viewport){
+function sizeDiagramViewport(content, viewport){
   if (!content.classList.contains("rh-lightbox-diagram")) return;
   var style = getComputedStyle(viewport);
-  var insetWidth = diagramPlateInset(style, "paddingLeft", "paddingRight") + diagramPlateInset(style, "borderLeftWidth", "borderRightWidth");
-  var insetHeight = diagramPlateInset(style, "paddingTop", "paddingBottom") + diagramPlateInset(style, "borderTopWidth", "borderBottomWidth");
+  var insetWidth = diagramViewportInset(style, "paddingLeft", "paddingRight") + diagramViewportInset(style, "borderLeftWidth", "borderRightWidth");
+  var insetHeight = diagramViewportInset(style, "paddingTop", "paddingBottom") + diagramViewportInset(style, "borderTopWidth", "borderBottomWidth");
   var maxWidth = Math.max(1, Math.min(innerWidth * 0.96, innerWidth - 112));
   var maxHeight = Math.max(1, Math.min(innerHeight * 0.92, innerHeight - 32));
   var availableWidth = Math.max(1, maxWidth - insetWidth);
@@ -74,7 +74,7 @@ export function openLightbox(options){
   close.setAttribute("aria-label", "Close");
   close.innerHTML = iconSvg("close");
   var viewport = document.createElement("div");
-  viewport.className = "rh-lightbox-viewport" + (diagram ? " rh-lightbox-plate" : "");
+  viewport.className = "rh-lightbox-viewport" + (diagram ? " rh-lightbox-diagram-viewport" : "");
   var content = options.content;
   content.classList.add("rh-lightbox-content");
   viewport.appendChild(content);
@@ -104,7 +104,7 @@ export function openLightbox(options){
       drag = null;
       recentContentPointer = false;
       setLightboxTransform(nextContent, state);
-      sizeDiagramPlate(nextContent, viewport);
+      sizeDiagramViewport(nextContent, viewport);
       return true;
     },
     close: function(){ if (activeLightbox === entry) closeLightbox(); },
@@ -181,7 +181,7 @@ export function openLightbox(options){
   }
 
   function onResize(){
-    sizeDiagramPlate(entry.content, viewport);
+    sizeDiagramViewport(entry.content, viewport);
   }
 
   function cleanup(){
@@ -221,7 +221,7 @@ export function openLightbox(options){
     removeOnDispose: true,
     onClose: cleanup
   });
-  sizeDiagramPlate(content, viewport);
+  sizeDiagramViewport(content, viewport);
   entry.dialog = dialogHandle;
   return entry;
 }

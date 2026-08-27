@@ -7,6 +7,16 @@ import fs from "node:fs";
 
 const PROGRESS_INTERVAL_MS = 4 * 60 * 1000;
 
+export const SUB_AGENT_PROTOCOL = [
+  "Sub-agent protocol (branch_request only; never convert_request):",
+  "1. Sub-agents never call Rabbithole; the main agent is the sole coordinator.",
+  "2. After spawning a sub-agent, call answer_branch with exactly { session_id, request_id, delegated: true }. It returns immediately; the card shows \"Working in sub-agent…\". Pass the question and selected_text to the sub-agent yourself—it cannot fetch them.",
+  "3. Immediately restore the sole listener with open_rabbithole { hole_id }. Skip this only while an ordinary final answer_branch is still blocked: that call is the listener; already_listening confirms one is attached.",
+  "4. When the sub-agent returns, stream or finish the retained request_id normally, omitting delegated. Partials and the final all return immediately; delegated requests may finish in any order and never take the listener.",
+  "5. If the sub-agent fails or is abandoned, call answer_branch with exactly { session_id, request_id, delegated: false } to reclaim it, then answer it yourself. It returns to ordinary Thinking and listener behavior.",
+  "Delegation is live coordination state: it survives canvas reload, not server restart.",
+].join("\n");
+
 function str(description, extra = {}) {
   return { kind: "string", description, ...extra };
 }
@@ -97,7 +107,7 @@ export const toolDefinitions = [
       "For arXiv, prefer the HTML version with base_url when available. " +
       "The canvas opens in the browser and this call BLOCKS until the human acts. " +
       "It returns status='branch_request' when the human selects text and asks a question — answer it " +
-      "with answer_branch. Retain its session_id/request_id to answer it and its hole_id to restore the listener after delegation. " +
+      "with answer_branch. " +
       "A branch_request with EMPTY selected_text is a follow-up question about the " +
       "parent document as a whole (a chat reply beneath it) — answer conversationally in that document's " +
       "context. A branch_request may carry a 'lens' (explain | eli5 | example | deeper) — the question " +
@@ -115,7 +125,8 @@ export const toolDefinitions = [
       "background call owns delivery; do not call again. Reconnecting the agent never requires focus. " +
       "Only when the human explicitly asks to see the canvas, resume with { hole_id, focus: true }; " +
       "a live browser tab is reused and a tab is opened only when none is connected. " +
-      "It returns status='session_closed' with a reason when the human clicks Done or the session otherwise ends.",
+      "It returns status='session_closed' with a reason when the human clicks Done or the session otherwise ends.\n\n" +
+      SUB_AGENT_PROTOCOL,
     input: obj({
       title: str("Document title (required for a new hole)", { optional: true, maxLength: 2000 }),
       content: str("Raw markdown for the starting document", { optional: true, maxLength: 10485760 }),
@@ -159,7 +170,7 @@ export const toolDefinitions = [
       "",
       "Finish streaming by sending the remaining final chunk in a normal call with a short 'title'. Partial chunks concatenate verbatim: include your own spacing/newlines and never repeat text already sent. For an ordinary, never-delegated request, the final call becomes the one background listener and stays blocked until a real canvas event. Never poll or re-attach while it is running. Do not post a host-chat final answer or end the agent turn while this listener should remain active; the pending MCP call is the listener. If the host truly cancels or times out the call, resume once with open_rabbithole { hole_id }; do not re-send content because asks are saved.",
       "",
-      "SUB-AGENT COORDINATION (branch_request only; never convert_request): sub-agents never call Rabbithole directly. Immediately after spawning one for this request, the main coordinator makes a state-only answer_branch call containing exactly session_id, request_id, and delegated=true. Retain those IDs. The call returns immediately, marks the window 'Working in sub-agent…', and removes this request from listener redelivery. Immediately restore the sole listener with open_rabbithole { hole_id }, unless one is already active, so later asks can arrive. When the sub-agent returns, the main coordinator answers the retained request_id normally and omits delegated. Both its partial chunks and final completion return immediately; delegated requests may finish in any order and never take over the listener. Use the state-only delegated=false call only to cancel delegation or reclaim the work; this restores ordinary Thinking and ordinary listener behavior.",
+      SUB_AGENT_PROTOCOL,
     ].join("\n"),
     input: obj({
       session_id: str("Active session ID from open_rabbithole", { maxLength: 200 }),
@@ -179,17 +190,15 @@ export const toolDefinitions = [
       partial: {
         kind: "boolean",
         description:
-          "true = stream this chunk into the pending answer and return immediately; " +
-          "omit/false = finish the answer. An ordinary final answer blocks for the next event; " +
-          "a previously delegated final answer returns immediately",
+          "true streams this normal answer chunk and returns immediately; omit/false finishes it. " +
+          "An ordinary final becomes the listener; a retained delegated final returns immediately (protocol step 4)",
         optional: true,
       },
       delegated: {
         kind: "boolean",
         description:
-          "State-only sub-agent coordination flag for branch requests (conversion requests cannot be delegated). " +
-          "true marks this pending request delegated and returns immediately; false reclaims it into ordinary " +
-          "Thinking/listener behavior. When present, omit title, content, base_url, assets, and partial.",
+          "State-only flag for protocol steps 2 and 5: true delegates; false reclaims. Use only on a branch_request. " +
+          "When present, send exactly session_id, request_id, and delegated; never use it on a convert_request",
         optional: true,
       },
     }),

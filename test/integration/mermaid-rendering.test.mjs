@@ -155,26 +155,28 @@ async function verifyWebApp() {
   const fullscreen = await page.locator(".rh-lightbox").evaluate((overlay) => {
     const svg = overlay.querySelector(".rh-lightbox-diagram");
     const close = overlay.querySelector(".rh-lightbox-close");
-    const plate = overlay.querySelector(".rh-lightbox-plate");
+    const viewport = overlay.querySelector(".rh-lightbox-diagram-viewport");
     const rect = svg.getBoundingClientRect();
     const closeRect = close.getBoundingClientRect();
-    const plateRect = plate.getBoundingClientRect();
-    const plateStyle = getComputedStyle(plate);
-    const insetWidth = parseFloat(plateStyle.paddingLeft) + parseFloat(plateStyle.paddingRight)
-      + parseFloat(plateStyle.borderLeftWidth) + parseFloat(plateStyle.borderRightWidth);
-    const insetHeight = parseFloat(plateStyle.paddingTop) + parseFloat(plateStyle.paddingBottom)
-      + parseFloat(plateStyle.borderTopWidth) + parseFloat(plateStyle.borderBottomWidth);
+    const viewportRect = viewport.getBoundingClientRect();
+    const viewportStyle = getComputedStyle(viewport);
+    const insetWidth = parseFloat(viewportStyle.paddingLeft) + parseFloat(viewportStyle.paddingRight);
+    const insetHeight = parseFloat(viewportStyle.paddingTop) + parseFloat(viewportStyle.paddingBottom);
     const viewBox = svg.viewBox.baseVal;
     return {
       tag: svg.tagName,
       width: rect.width,
       height: rect.height,
-      plateWidth: plateRect.width,
-      plateHeight: plateRect.height,
-      plateContentAspect: (plateRect.width - insetWidth) / (plateRect.height - insetHeight),
+      viewportBoxWidth: viewportRect.width,
+      viewportBoxHeight: viewportRect.height,
+      viewportContentAspect: (viewportRect.width - insetWidth) / (viewportRect.height - insetHeight),
       viewBoxAspect: viewBox.width / viewBox.height,
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
+      fullscreenBackground: getComputedStyle(overlay).backgroundColor,
+      fittedBackground: viewportStyle.backgroundColor,
+      fittedBorderWidth: viewportStyle.borderWidth,
+      fittedBorderRadius: viewportStyle.borderRadius,
       closeGap: closeRect.left - rect.right,
       widthAttr: svg.getAttribute("width"),
       heightAttr: svg.getAttribute("height"),
@@ -184,14 +186,18 @@ async function verifyWebApp() {
   });
   assert.equal(fullscreen.tag.toLowerCase(), "svg");
   assert(
-    Math.abs(fullscreen.plateContentAspect - fullscreen.viewBoxAspect) / fullscreen.viewBoxAspect < 0.01,
-    `fullscreen plate content should match the Mermaid viewBox aspect (${JSON.stringify(fullscreen)})`,
+    Math.abs(fullscreen.viewportContentAspect - fullscreen.viewBoxAspect) / fullscreen.viewBoxAspect < 0.01,
+    `fullscreen fitted viewport should match the Mermaid viewBox aspect (${JSON.stringify(fullscreen)})`,
   );
   assert(
-    fullscreen.plateWidth >= Math.min(fullscreen.viewportWidth * 0.96, fullscreen.viewportWidth - 112) - 1
-      || fullscreen.plateHeight >= Math.min(fullscreen.viewportHeight * 0.92, fullscreen.viewportHeight - 32) - 1,
+    fullscreen.viewportBoxWidth >= Math.min(fullscreen.viewportWidth * 0.96, fullscreen.viewportWidth - 112) - 1
+      || fullscreen.viewportBoxHeight >= Math.min(fullscreen.viewportHeight * 0.92, fullscreen.viewportHeight - 32) - 1,
     `fullscreen Mermaid should scale up to the largest aspect-fitted viewport budget (${JSON.stringify(fullscreen)})`,
   );
+  assert.notEqual(fullscreen.fullscreenBackground, "rgba(0, 0, 0, 0)", "diagram background should cover the fullscreen overlay");
+  assert.equal(fullscreen.fittedBackground, "rgba(0, 0, 0, 0)", "the fitted diagram viewport should not leave behind its own background");
+  assert.equal(fullscreen.fittedBorderWidth, "0px", "fullscreen diagrams should not retain a card border");
+  assert.equal(fullscreen.fittedBorderRadius, "0px", "fullscreen diagrams should not retain rounded card corners");
   assert(fullscreen.closeGap >= 0, "fullscreen close control should not overlap diagram content");
   assert.equal(fullscreen.widthAttr, null);
   assert.equal(fullscreen.heightAttr, null);
@@ -202,29 +208,29 @@ async function verifyWebApp() {
   assert.equal(await page.locator(".rh-lightbox-diagram").evaluate((svg) => svg.style.getPropertyValue("--rh-zoom")), "2");
   const zoomedLayout = await page.locator(".rh-lightbox").evaluate((overlay) => {
     const svg = overlay.querySelector(".rh-lightbox-diagram");
-    const plate = overlay.querySelector(".rh-lightbox-plate");
+    const viewport = overlay.querySelector(".rh-lightbox-diagram-viewport");
     const close = overlay.querySelector(".rh-lightbox-close");
     const svgRect = svg.getBoundingClientRect();
-    const plateRect = plate.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
     const closeRect = close.getBoundingClientRect();
-    const sample = { x: plateRect.left - 2, y: plateRect.top + plateRect.height / 2 };
-    const diagramHitOutsidePlate = document.elementsFromPoint(sample.x, sample.y).some((element) => element === svg || svg.contains(element));
+    const sample = { x: viewportRect.left - 2, y: viewportRect.top + viewportRect.height / 2 };
+    const diagramHitOutsideViewport = document.elementsFromPoint(sample.x, sample.y).some((element) => element === svg || svg.contains(element));
     const closeHit = document.elementFromPoint(closeRect.left + closeRect.width / 2, closeRect.top + closeRect.height / 2);
     return {
-      overflow: getComputedStyle(plate).overflow,
-      svgExceedsPlate: svgRect.left < plateRect.left && svgRect.right > plateRect.right,
-      diagramHitOutsidePlate,
+      overflow: getComputedStyle(viewport).overflow,
+      svgExceedsViewport: svgRect.left < viewportRect.left && svgRect.right > viewportRect.right,
+      diagramHitOutsideViewport,
       closeHit: close === closeHit || close.contains(closeHit),
       closeZ: parseInt(getComputedStyle(close).zIndex, 10),
-      plateZ: parseInt(getComputedStyle(plate).zIndex, 10),
+      viewportZ: parseInt(getComputedStyle(viewport).zIndex, 10),
       closeBackground: getComputedStyle(close).backgroundColor,
       closeShadow: getComputedStyle(close).boxShadow,
     };
   });
-  assert.equal(zoomedLayout.overflow, "visible", "diagram plate should let zoomed content use the fullscreen overlay");
-  assert.equal(zoomedLayout.svgExceedsPlate, true, "2x diagram geometry should exercise the plate clipping boundary");
-  assert.equal(zoomedLayout.diagramHitOutsidePlate, true, "zoomed diagram should paint and remain interactive outside its initial fitted plate");
-  assert(zoomedLayout.closeZ > zoomedLayout.plateZ, `close control must stack above the plate (${JSON.stringify(zoomedLayout)})`);
+  assert.equal(zoomedLayout.overflow, "visible", "fitted viewport should let zoomed content use the fullscreen canvas");
+  assert.equal(zoomedLayout.svgExceedsViewport, true, "2x diagram geometry should exceed its initial fitted viewport");
+  assert.equal(zoomedLayout.diagramHitOutsideViewport, true, "zoomed diagram should paint and remain interactive across the fullscreen canvas");
+  assert(zoomedLayout.closeZ > zoomedLayout.viewportZ, `close control must stack above the diagram (${JSON.stringify(zoomedLayout)})`);
   assert.equal(zoomedLayout.closeHit, true, `close control must remain hit-testable at 2x zoom (${JSON.stringify(zoomedLayout)})`);
   assert(!zoomedLayout.closeBackground.endsWith(", 0)"), "close control should have an opaque theme surface");
   assert.notEqual(zoomedLayout.closeShadow, "none", "close control should retain elevation over diagram content");

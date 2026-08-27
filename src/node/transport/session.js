@@ -96,9 +96,9 @@ export class RabbitHoleSession {
 
     this.pendingByRequest = new Map(); // request_id -> node_id
     this.generationByRequest = new Map(); // request_id -> active MCP generation ingress
-    // Requests whose node was deleted mid-answer: a late answer_branch for one
-    // of these is absorbed gracefully instead of erroring at the agent.
-    this.cancelledRequests = new Set();
+    // Requests whose node was deleted mid-answer: the value records whether a
+    // late final must return immediately instead of taking the listener.
+    this.cancelledRequests = new Map(); // request_id -> was delegated
     // Completed request ids remain idempotent for the lifetime of the live
     // session. A host retry must acknowledge the existing answer, never turn a
     // successful write into a misleading 404.
@@ -661,10 +661,7 @@ export class RabbitHoleSession {
     if (typeof delegated === "boolean") return this.setRequestDelegated(requestId, delegated);
 
     const nonBlocking = this.nonBlockingRequests.has(requestId);
-    if (this.delegatedRequests.delete(requestId)) {
-      const delegatedNodeId = this.pendingByRequest.get(requestId);
-      if (delegatedNodeId) this.broadcast({ type: "node_work_state", node_id: delegatedNodeId, state: "thinking" });
-    }
+    this.delegatedRequests.delete(requestId);
     this.setContextBusy(false);
     this.clearAnswerWatchdog(requestId);
     this.inFlightBranchRequests.delete(requestId);
@@ -672,12 +669,12 @@ export class RabbitHoleSession {
     if (this.convertRequests.has(requestId)) return this.answerConversion({ requestId, content, partial, signal });
 
     // The human deleted this branch while the agent was writing it — absorb the
-    // answer quietly: partials ack, the final call just blocks for the next event.
+    // answer quietly, preserving whether its final owned the listener.
     if (this.cancelledRequests.has(requestId)) {
+      const cancelledNonBlocking = this.cancelledRequests.get(requestId);
       if (partial) return { ok: true, node_id: null, request_id: requestId, partial: true, cancelled: true };
       this.cancelledRequests.delete(requestId);
-      this.nonBlockingRequests.delete(requestId);
-      if (nonBlocking) return { ok: true, node_id: null, request_id: requestId, cancelled: true, completed: true, delegated: true };
+      if (cancelledNonBlocking) return { ok: true, node_id: null, request_id: requestId, cancelled: true, completed: true, delegated: true };
       return this.waitForEvent(signal);
     }
 
@@ -1026,7 +1023,7 @@ export class RabbitHoleSession {
       if (doomed.has(nodeId)) {
         this.pendingByRequest.delete(reqId);
         this.generationByRequest.delete(reqId);
-        this.cancelledRequests.add(reqId);
+        this.cancelledRequests.set(reqId, this.nonBlockingRequests.delete(reqId));
         this.inFlightBranchRequests.delete(reqId);
         this.delegatedRequests.delete(reqId);
         this.clearAnswerWatchdog(reqId);

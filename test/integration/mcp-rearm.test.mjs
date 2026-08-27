@@ -10,7 +10,7 @@ process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole
 const { openRabbithole, answerBranch, sendToRabbithole } = await import("../../src/node/rabbithole.js");
 const { closeAllSessions, getSession } = await import("../../src/node/sessions.js");
 const { defaultFsStore } = await import("../../src/node/fs-store.js");
-const { toolDefinitions } = await import("../../src/node/tools/manifest.js");
+const { SUB_AGENT_PROTOCOL, toolDefinitions } = await import("../../src/node/tools/manifest.js");
 const { RabbitHoleSession } = await import("../../src/node/transport/session.js");
 
 function sleep(ms) {
@@ -436,12 +436,14 @@ async function runProgressKeepaliveFixture() {
     "the final answer call must preserve its re-armed listener");
   assert.match(answerTool.description, /ordinary, never-delegated request/,
     "the tool contract must scope blocking final-answer behavior to ordinary work");
-  assert.match(answerTool.description, /containing exactly session_id, request_id, and delegated=true/,
-    "the tool contract must teach the minimal state-only delegation call");
-  assert.match(answerTool.description, /Both its partial chunks and final completion return immediately/,
-    "the tool contract must prevent a delegated completion from stealing the listener");
-  assert.match(answerTool.description, /delegated requests may finish in any order/,
-    "the tool contract must explicitly allow out-of-order sub-agent completion");
+  assert.equal(openTool.description.includes(SUB_AGENT_PROTOCOL), true,
+    "the open tool must carry the canonical sub-agent protocol");
+  assert.equal(answerTool.description.includes(SUB_AGENT_PROTOCOL), true,
+    "the answer tool must carry the canonical sub-agent protocol");
+  assert.match(answerTool.input.fields.partial.description, /protocol step 4/,
+    "the partial parameter must preserve delegated return behavior");
+  assert.match(answerTool.input.fields.delegated.description, /protocol steps 2 and 5/,
+    "the delegated parameter must point to the canonical state-only calls");
   process.env.RABBITHOLE_PROGRESS_INTERVAL_MS = "10";
   try {
     const openingController = new AbortController();
@@ -775,13 +777,15 @@ async function runDelegatedConcurrencyFixture() {
   await answerBranch({ sessionId: session.id, requestId: "req-b", delegated: true });
 
   const listenForC = session.waitForEvent();
-  const completedB = await answerBranch({
-    sessionId: session.id, requestId: "req-b", title: "B", content: "B finished first.",
+  const partialB = await answerBranch({
+    sessionId: session.id, requestId: "req-b", content: "B finished", partial: true,
   });
-  assert.deepEqual(completedB, {
-    ok: true, node_id: "node-b", request_id: "req-b", completed: true, delegated: true,
-  }, "a delegated completion returns immediately instead of taking the listener lease");
-  assert(session.waiter, "the independent listener remains available after out-of-order delegated completion");
+  assert.equal(partialB.partial, true);
+  assert.equal(session.answerWatchdogs.has("req-b"), true,
+    "a delegated stream keeps request-scoped stall protection while its final remains non-blocking");
+  assert.equal(session.buildHydration().nodes.find((node) => node.id === "node-b")?.delegated, undefined,
+    "answer-start state is truthful on reload without a redundant work-state broadcast");
+  assert(session.waiter, "streaming delegated work leaves the independent listener available");
 
   await session.handleBrowserEvent({
     type: "branch_request", request_id: "req-c", node_id: "node-c", parent_id: session.rootId,
@@ -789,6 +793,15 @@ async function runDelegatedConcurrencyFixture() {
   });
   assert.equal((await listenForC).request_id, "req-c");
   assert.equal(session.answerWatchdogs.has("req-c"), true);
+
+  const completedB = await answerBranch({
+    sessionId: session.id, requestId: "req-b", title: "B", content: " first.",
+  });
+  assert.deepEqual(completedB, {
+    ok: true, node_id: "node-b", request_id: "req-b", completed: true, delegated: true,
+  }, "a delegated completion returns immediately instead of taking the listener lease");
+  assert.equal(session.answerWatchdogs.has("req-c"), true,
+    "finishing one streamed request cannot clear another request's watchdog");
 
   const completedA = await answerBranch({
     sessionId: session.id, requestId: "req-a", title: "A", content: "A finished later.",
@@ -805,10 +818,26 @@ async function runDelegatedConcurrencyFixture() {
   });
   assert.equal(ordinary.status, "cancelled", "ordinary final answers retain the legacy blocking listener contract");
   assert.equal(session.answerWatchdogs.size, 0);
+
+  const listenForD = session.waitForEvent();
+  await session.handleBrowserEvent({
+    type: "branch_request", request_id: "req-d", node_id: "node-d", parent_id: session.rootId,
+    selected_text: "Root", question: "Delete delegated D",
+  });
+  assert.equal((await listenForD).request_id, "req-d");
+  await answerBranch({ sessionId: session.id, requestId: "req-d", delegated: true });
+  await session.handleBrowserEvent({ type: "delete_node", node_id: "node-d" });
+  assert.equal(session.nonBlockingRequests.has("req-d"), false,
+    "browser cancellation moves response mode into its tombstone instead of retaining active non-blocking state");
+  assert.deepEqual(await answerBranch({
+    sessionId: session.id, requestId: "req-d", title: "Deleted D", content: "Late answer.",
+  }), {
+    ok: true, node_id: null, request_id: "req-d", cancelled: true, completed: true, delegated: true,
+  }, "a cancelled delegated final still returns immediately and cannot steal the listener");
   assert.deepEqual(
     session.outboundEvents.filter((event) => event.data.type === "node_work_state").map((event) => [event.data.node_id, event.data.state]),
-    [["node-a", "delegated"], ["node-b", "delegated"], ["node-b", "thinking"], ["node-b", "delegated"], ["node-b", "thinking"], ["node-a", "thinking"]],
-    "work-state events make every lifecycle transition explicit to the UI"
+    [["node-a", "delegated"], ["node-b", "delegated"], ["node-b", "thinking"], ["node-b", "delegated"]],
+    "work-state events cover explicit delegation and reclaim; progress and completion clear delegated UI state"
   );
 
   console.log("ok sub-agent lifecycle: parallel delegation, reclaim, reload, out-of-order completion, and listener isolation");

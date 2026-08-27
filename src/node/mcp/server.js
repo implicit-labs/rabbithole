@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { log, error as logError } from "../logger.js";
 import { buildMcpInputSchema } from "./schema.js";
-import { toolDefinitions } from "../tools/manifest.js";
+import { SUB_AGENT_PROTOCOL, toolDefinitions } from "../tools/manifest.js";
 import { closeAllSessions } from "../sessions.js";
 
 const server = new McpServer(
@@ -32,16 +32,7 @@ const server = new McpServer(
       "   remain active. The pending MCP call is the listener; ending the turn can cancel it.",
       "5. Keep looping only when a real branch_request arrives, until status='session_closed'.",
       "",
-      "Sub-agent exception (branch_request only; never convert_request):",
-      "- The main agent remains the sole Rabbithole coordinator. Sub-agents never call Rabbithole.",
-      "- Immediately after spawning a sub-agent for a request, call answer_branch with exactly",
-      "  { session_id, request_id, delegated: true }; do not include content, title, partial, assets, or base_url.",
-      "- Retain that request's session_id/request_id and immediately restore the sole listener with",
-      "  open_rabbithole { hole_id }, unless a listener is already active. This lets later asks arrive.",
-      "- When the sub-agent returns, the main agent answers the retained request_id normally and omits",
-      "  delegated. Its partial and final calls return immediately; delegated requests may finish in any order.",
-      "- Use the state-only delegated=false call only when cancelling delegation or reclaiming the work.",
-      "  Reclaimed work returns to ordinary Thinking and ordinary listener behavior.",
+      SUB_AGENT_PROTOCOL,
       "A convert_request means the human clicked Create text version. Read pages[].image_path in order,",
       "follow its inline rules, and stream the transcription through answer_branch with that request_id.",
       "The host crops figure: references; never crop or send page images back.",
