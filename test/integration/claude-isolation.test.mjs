@@ -1,3 +1,4 @@
+/** @protects claude isolation capability contracts. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";

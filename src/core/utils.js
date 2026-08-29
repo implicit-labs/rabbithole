@@ -1,3 +1,5 @@
+import { systemClock } from "./clock.js";
+
 /**
  * Shared utility functions.
  */
@@ -36,13 +38,13 @@ export function slugifyTitle(title, { fallback = "" } = {}) {
 
 export function randomUuidOrFallback() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  return `${Math.random().toString(36).slice(2)}${systemClock.now().toString(36)}`;
 }
 
 /** @param {string} prefix */
 export function randomId(prefix) {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${systemClock.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**

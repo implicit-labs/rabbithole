@@ -4,7 +4,8 @@ The Rabbithole page is served as one self-contained HTML document. Static shell
 and CSS live as pure template strings here, while Node-only assembly lives under
 `src/node/html/`.
 
-- `styles.js` contains the inline stylesheet.
+- `../../design/index.canvas.css` is the authored stylesheet entry; the build
+  emits `dist/canvas.css`, which the page assembler inlines.
 - `shell.js` contains the static DOM shell.
 - `icons.js` is the only product-facing icon registry. Curated Ionicons source
   is normalized into `ionicons5.generated.js` by `npm run generate:icons`; the
@@ -60,8 +61,9 @@ Behavior-preserving rules:
   file lazily from its own origin.
 - Frozen exports must not include live transport wiring (`EventSource` or
   `/sse`) or live asset route strings.
-- Do not read browser vendor assets from `node_modules` at runtime; vendor
-  sources are inlined into `dist/` by `build.mjs`.
+- Browser bundles and styles are committed in `dist/`. Large byte-identical
+  vendor runtimes are resolved from declared package dependencies when the
+  local host assembles a self-contained page.
 - After changing the curated Ionicons set or its normalization, run
   `npm run generate:icons`. `npm run check:icons` guards against generated drift.
 - Verify final HTML by extracting the executable inline `<script>` and running
@@ -74,9 +76,8 @@ Web CSP:
   self-only, and permits one hash-pinned inline script that selects the saved or
   system theme before first paint. Inline styles remain allowed for the early
   theme background and the canvas runtime's dynamic positioning/sizing.
-  `connect-src` is pinned to the OpenRouter BYOK provider, GitHub's public
-  repository metadata API for the project star count, plus local OpenAI-compatible
-  endpoints on `localhost` and `127.0.0.1`.
-- Remote custom providers are deliberately not wildcarded. To use one from the
-  static app, edit the generated CSP (or rebuild with that origin added). This
-  keeps the default shipped app from allowing arbitrary key-bearing requests.
+  `connect-src` permits HTTP and HTTPS because a user-selected custom provider
+  can live at any origin. Script execution remains self-only, and provider
+  credentials are sent only to the endpoint selected in browser settings.
+- The fetch proxy uses a separate, narrow server-side hostname allowlist. Its
+  SSRF boundary must never be replaced with the browser's broad connect list.

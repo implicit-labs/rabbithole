@@ -1,13 +1,14 @@
 import { CANVAS_SHELL } from "./html/shell.js";
 import { markdownContainsBlockType } from "./blocks.js";
 import { escapeHtml, serializeForInlineScript } from "./utils.js";
+import { assembleRabbitholePage } from "./html/document.js";
 
-/** @param {import("./contracts/artifact.js").PortableArtifact | null | undefined} projection */
+/** @param {any} projection */
 export function snapshotProjectionUsesMermaid(projection) {
-  return !!projection?.hole?.nodes?.some((node) => markdownContainsBlockType(node?.markdown, "mermaid"));
+  return !!projection?.hole?.nodes?.some((/** @type {any} */ node) => markdownContainsBlockType(node?.markdown, "mermaid"));
 }
 
-/** @param {import("./contracts/artifact.js").PortableArtifact | null | undefined} projection */
+/** @param {any} projection */
 export function snapshotProjectionUsesPdf(projection) {
   return !!projection?.hole?.nodes?.some((/** @type {any} */ node) => node?.extensions?.pdf?.version === 2 && !node.extensions.pdf.converted);
 }
@@ -27,7 +28,7 @@ function mermaidRuntimeCarrier(source) {
  *   frozenClientSource: string,
  *   pdfWorkerSource?: string,
  *   pdfJsSource?: string,
- *   snapshotProjection: import("./contracts/artifact.js").PortableArtifact
+ *   snapshotProjection: any
  * }} options
  */
 export function buildSnapshotHtml({ title, stylesheetText, dompurifySource, mermaidSource = "", pdfJsSource = "", pdfWorkerSource = "", frozenClientSource, snapshotProjection }) {
@@ -40,16 +41,7 @@ export function buildSnapshotHtml({ title, stylesheetText, dompurifySource, merm
   var scriptOpen = lt + "script" + gt;
   var scriptClose = lt + String.fromCharCode(47) + "script" + gt;
   var payloadOpen = lt + 'script type="application/vnd.rabbithole+json" id="rabbithole-portable"' + gt;
-  return "<!DOCTYPE html>\n" +
-    '<html lang="en" data-theme="light">\n' +
-    "<head>\n" +
-    '<meta charset="utf-8">\n' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
-    "<title>" + escapeHtml(title) + "</title>\n" +
-    "<style>\n" + stylesheetText + "\n</style>\n" +
-    "</head>\n" +
-    "<body>\n" +
-    CANVAS_SHELL +
+  const bodyHtml = CANVAS_SHELL +
     (usesMermaid ? "\n" + mermaidRuntimeCarrier(mermaidSource) : "") +
     (usesPdf ? "\n" + pdfJsRuntimeCarrier(pdfJsSource) + "\n" + pdfWorkerRuntimeCarrier(pdfWorkerSource) : "") +
     "\n" + payloadOpen + serializeForInlineScript(snapshotProjection) + scriptClose +
@@ -61,9 +53,8 @@ export function buildSnapshotHtml({ title, stylesheetText, dompurifySource, merm
     "\n  var payload = document.getElementById(\"rabbithole-portable\");\n" +
     "  RabbitholeFrozenClient.startPortableSnapshot(JSON.parse(payload.textContent));\n" +
     "})();\n" +
-    scriptClose + "\n" +
-    "</body>\n" +
-    "</html>";
+    scriptClose;
+  return assembleRabbitholePage({ mode: "frozen", title, stylesheetText, bodyHtml });
 }
 
 /** @param {unknown} source */

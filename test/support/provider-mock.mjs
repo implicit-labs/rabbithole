@@ -19,6 +19,7 @@ export function sse(chunks) {
   return chunks.map((content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`).join("") + "data: [DONE]\n\n";
 }
 
+/** @param {any} page @param {{keyStatus?: (key: string) => number, streams?: string[][], onProviderCall?: ((body: any) => void) | null, providerDelayMs?: number, keyLabel?: string}} [options] */
 export async function routeProvider(page, { keyStatus, streams = [], onProviderCall = null, providerDelayMs = 0, keyLabel = "test key" } = {}) {
   await page.route(LOCAL_MODEL_URL, (route) => route.fulfill({
     status: 200,

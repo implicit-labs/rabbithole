@@ -12,6 +12,7 @@ export function withTimeout(promise, timeoutMs, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+/** @param {{env?: NodeJS.ProcessEnv, maxStderrBytes?: number, earlyExitError?: (result: {code: number | null, signal: NodeJS.Signals | null, stderr: string}) => Error}} [options] */
 export function spawnBridgeProcess({
   env = process.env,
   maxStderrBytes = Infinity,

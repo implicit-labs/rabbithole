@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
+/** @param {string} rootDir @param {{routes?: Record<string, (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, url: URL) => any>, spaFallback?: boolean}} [options] @returns {Promise<import("node:http").Server>} */
 export async function serveStatic(rootDir, { routes = {}, spaFallback = false } = {}) {
   const root = path.resolve(rootDir);
   const server = http.createServer(async (req, res) => {
@@ -34,7 +35,7 @@ export async function serveStatic(rootDir, { routes = {}, spaFallback = false } 
       res.end("Not Found");
     }
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen({ port: 0, host: "127.0.0.1" }, () => resolve()));
   return server;
 }
 

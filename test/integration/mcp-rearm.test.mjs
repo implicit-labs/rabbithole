@@ -1,3 +1,4 @@
+/** @protects mcp rearm capability contracts. */
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
@@ -11,7 +12,7 @@ const { openRabbithole, answerBranch, sendToRabbithole } = await import("../../s
 const { closeAllSessions, getSession } = await import("../../src/node/sessions.js");
 const { defaultFsStore } = await import("../../src/node/fs-store.js");
 const { SUB_AGENT_PROTOCOL, toolDefinitions } = await import("../../src/node/tools/manifest.js");
-const { RabbitHoleSession } = await import("../../src/node/transport/session.js");
+const { RabbitholeSession } = await import("../../src/node/transport/session.js");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,7 +54,7 @@ function useFakeTimeouts() {
   let now = 0;
   let nextId = 1;
 
-  globalThis.setTimeout = (callback, delay = 0, ...args) => {
+  (/** @type {any} */ (globalThis)).setTimeout = (callback, delay = 0, ...args) => {
     const id = nextId++;
     timers.set(id, { at: now + Number(delay), callback: () => callback(...args) });
     return id;
@@ -113,7 +114,7 @@ async function runConnectedCanvasLifetimeFixture() {
   let session;
   let request;
   try {
-    session = new RabbitHoleSession({
+    session = new RabbitholeSession({
       holeId: "connected-canvas-lifetime",
       title: "Connected Canvas Lifetime",
       rootId: "root",
@@ -231,7 +232,7 @@ async function runTransientSseReconnectFixture() {
   let firstRequest;
   let reconnectRequest;
   try {
-    session = new RabbitHoleSession({
+    session = new RabbitholeSession({
       holeId: "transient-sse-reconnect",
       title: "Transient SSE Reconnect",
       rootId: "root",
@@ -353,8 +354,8 @@ async function runZeroIdleTurnsAndSingleListenerFixture() {
     signal: answerController.signal,
   });
   assert.equal(afterAnswer.status, "cancelled");
-  assert.equal(session.pendingByRequest.size, 0);
-  assert.equal(session.inFlightBranchRequests.size, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.nodeId).length, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.inFlight).length, 0);
 
   const duplicate = await answerBranch({
     sessionId: branch.session_id,
@@ -398,7 +399,7 @@ async function runOrphanedWaiterRecoveryFixture() {
   const lostDelivery = await orphaned;
   assert.equal(lostDelivery.request_id, ask.request_id, "the orphaned waiter receives the first delivery");
   assert.equal(session.waiter, null, "delivery clears the orphaned waiter before resolving it");
-  assert.equal(session.inFlightBranchRequests.get(ask.request_id), lostDelivery);
+  assert.equal(session.requests.get(ask.request_id).inFlight, lostDelivery);
   await session.flushSave();
   assert.equal((await defaultFsStore.loadHole(session.holeId)).nodes.find((node) => node.id === ask.node_id)?.status, "pending");
 
@@ -415,8 +416,8 @@ async function runOrphanedWaiterRecoveryFixture() {
   });
   assert.equal(afterAnswer.status, "cancelled");
   assert.equal(session.nodes.get(ask.node_id).markdown, "Recovered.");
-  assert.equal(session.pendingByRequest.size, 0);
-  assert.equal(session.inFlightBranchRequests.size, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.nodeId).length, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.inFlight).length, 0);
   assert.equal(session.waiter, null);
 
   console.log("ok listener recovery: an orphan-delivered ask persists, redelivers, answers, and re-arms once");
@@ -440,9 +441,9 @@ async function runProgressKeepaliveFixture() {
     "the open tool must carry the canonical sub-agent protocol");
   assert.equal(answerTool.description.includes(SUB_AGENT_PROTOCOL), true,
     "the answer tool must carry the canonical sub-agent protocol");
-  assert.match(answerTool.input.fields.partial.description, /protocol step 4/,
+  assert.match(answerTool.input.partial.description, /protocol step 4/,
     "the partial parameter must preserve delegated return behavior");
-  assert.match(answerTool.input.fields.delegated.description, /protocol steps 2 and 5/,
+  assert.match(answerTool.input.delegated.description, /protocol steps 2 and 5/,
     "the delegated parameter must point to the canonical state-only calls");
   process.env.RABBITHOLE_PROGRESS_INTERVAL_MS = "10";
   try {
@@ -612,8 +613,8 @@ async function runSavedAskRequeueFixture() {
   assert.equal(afterLaterAnswer.status, "cancelled");
   assert.equal([...session.nodes.values()].filter((node) => node.status === "pending").length, 0);
   assert.equal(session.nodes.get("saved-child").parent_id, null, "answering a saved standalone ask keeps it disconnected");
-  assert.equal(session.pendingByRequest.size, 0);
-  assert.equal(session.inFlightBranchRequests.size, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.nodeId).length, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.inFlight).length, 0);
 
   const liveAgain = await openRabbithole({ holeId, signal: abortAfter() });
   assert.equal(liveAgain.status, "cancelled");
@@ -720,8 +721,10 @@ async function runDoneNotesDeliveryFixture() {
       noteEntry(session, "done-anchored-note", "Tighten this paragraph.", { on_node_id: session.rootId, on_selected_text: "feedback target" }),
     ],
   }, "Done resolves the blocked agent call with every note in the hole");
-  assert.equal(session.answerWatchdogs.size, 0, "session_closed delivery must not arm the answer watchdog");
-  assert.equal(session.inFlightBranchRequests.size, 0, "session_closed delivery must not enter branch request tracking");
+  assert.equal([...session.requests.records()].filter((record) => record.watchdog).length, 0,
+    "session_closed delivery must not arm the answer watchdog");
+  assert.equal([...session.requests.records()].filter((record) => record.inFlight).length, 0,
+    "session_closed delivery must not enter branch request tracking");
 
   console.log("ok rearm notes: Done delivers all notes without arming branch lifecycle state");
 }
@@ -754,7 +757,8 @@ async function runDelegatedConcurrencyFixture() {
   assert.deepEqual(await answerBranch({ sessionId: session.id, requestId: "req-a", delegated: true }), {
     ok: true, node_id: "node-a", request_id: "req-a", delegated: true,
   });
-  assert.equal(session.answerWatchdogs.has("req-a"), false, "delegated work is owned by the coordinator, not the answer watchdog");
+  assert.equal(!!session.requests.get("req-a").watchdog, false,
+    "delegated work is owned by the coordinator, not the answer watchdog");
   assert.equal(session.buildHydration().nodes.find((node) => node.id === "node-a")?.delegated, true,
     "a live-page reload rehydrates transient delegation state");
 
@@ -781,7 +785,7 @@ async function runDelegatedConcurrencyFixture() {
     sessionId: session.id, requestId: "req-b", content: "B finished", partial: true,
   });
   assert.equal(partialB.partial, true);
-  assert.equal(session.answerWatchdogs.has("req-b"), true,
+  assert.equal(!!session.requests.get("req-b").watchdog, true,
     "a delegated stream keeps request-scoped stall protection while its final remains non-blocking");
   assert.equal(session.buildHydration().nodes.find((node) => node.id === "node-b")?.delegated, undefined,
     "answer-start state is truthful on reload without a redundant work-state broadcast");
@@ -792,7 +796,7 @@ async function runDelegatedConcurrencyFixture() {
     selected_text: "Root", question: "Ordinary C",
   });
   assert.equal((await listenForC).request_id, "req-c");
-  assert.equal(session.answerWatchdogs.has("req-c"), true);
+  assert.equal(!!session.requests.get("req-c").watchdog, true);
 
   const completedB = await answerBranch({
     sessionId: session.id, requestId: "req-b", title: "B", content: " first.",
@@ -800,7 +804,7 @@ async function runDelegatedConcurrencyFixture() {
   assert.deepEqual(completedB, {
     ok: true, node_id: "node-b", request_id: "req-b", completed: true, delegated: true,
   }, "a delegated completion returns immediately instead of taking the listener lease");
-  assert.equal(session.answerWatchdogs.has("req-c"), true,
+  assert.equal(!!session.requests.get("req-c").watchdog, true,
     "finishing one streamed request cannot clear another request's watchdog");
 
   const completedA = await answerBranch({
@@ -808,7 +812,7 @@ async function runDelegatedConcurrencyFixture() {
   });
   assert.equal(completedA.completed, true);
   assert.equal(completedA.delegated, true);
-  assert.equal(session.answerWatchdogs.has("req-c"), true,
+  assert.equal(!!session.requests.get("req-c").watchdog, true,
     "finishing one request cannot clear another request's watchdog");
   assert.equal(session.buildHydration().nodes.some((node) => node.delegated), false,
     "completed delegated work leaves no transient marker behind");
@@ -817,7 +821,7 @@ async function runDelegatedConcurrencyFixture() {
     sessionId: session.id, requestId: "req-c", title: "C", content: "C stays backward compatible.", signal: abortAfter(),
   });
   assert.equal(ordinary.status, "cancelled", "ordinary final answers retain the legacy blocking listener contract");
-  assert.equal(session.answerWatchdogs.size, 0);
+  assert.equal([...session.requests.records()].filter((record) => record.watchdog).length, 0);
 
   const listenForD = session.waitForEvent();
   await session.handleBrowserEvent({
@@ -827,7 +831,7 @@ async function runDelegatedConcurrencyFixture() {
   assert.equal((await listenForD).request_id, "req-d");
   await answerBranch({ sessionId: session.id, requestId: "req-d", delegated: true });
   await session.handleBrowserEvent({ type: "delete_node", node_id: "node-d" });
-  assert.equal(session.nonBlockingRequests.has("req-d"), false,
+  assert.equal(session.requests.get("req-d").nonBlocking, false,
     "browser cancellation moves response mode into its tombstone instead of retaining active non-blocking state");
   assert.deepEqual(await answerBranch({
     sessionId: session.id, requestId: "req-d", title: "Deleted D", content: "Late answer.",

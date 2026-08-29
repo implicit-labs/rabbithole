@@ -1,3 +1,4 @@
+/** @protects web app setup capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -5,7 +6,6 @@ import { extractSnapshotPayload } from "../../src/core/portable-import.js";
 import { serializeForInlineScript } from "../../src/core/utils.js";
 import { MOCK_MODEL, corsHeaders, routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { ROOT, bootWebApp } from "../support/web-app-harness.mjs";
-
 const MOCK_KEY = `sk-or-v1-${"x".repeat(64)}`;
 const BAD_KEY = `sk-or-v1-${"y".repeat(64)}`;
 const PROVIDER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -19,7 +19,6 @@ const GITHUB_REPO_API_URL = "https://api.github.com/repos/shlokkhemani/rabbithol
 const BRIDGE_EVENTS_URL = "http://127.0.0.1:41414/bridge/events";
 const BRIDGE_CHAT_URL = "http://127.0.0.1:41414/v1/chat/completions";
 const BRIDGE_PING_URL = "http://127.0.0.1:41414/bridge/ping";
-
 const app = await bootWebApp();
 const { browser, baseUrl } = app;
 try {
@@ -38,7 +37,6 @@ try {
 } finally {
   await app.close();
 }
-
 async function verifyReducedMotionOverlays() {
   const context = await browser.newContext({ reducedMotion: "reduce" });
   await seedConfiguredOpenRouter(context);
@@ -52,13 +50,11 @@ async function verifyReducedMotionOverlays() {
       const styles = getComputedStyle(card);
       return { opacity: styles.opacity, transform: styles.transform, animationName: styles.animationName };
     }), { opacity: "1", transform: "none", animationName: "none" }, "reduced motion should reveal the composer without relying on its entrance animation");
-
     await page.click("#composer-path-ask");
     await page.fill("#composer-input", "Check reduced motion");
     await page.click("#composer-primary");
     await waitForCanvasText(page, "Usable without animation.");
-    assert.equal(await page.locator(".node.root").evaluate((node) => getComputedStyle(node).opacity), "1", "reduced motion should render the generated root without an entrance transition");
-
+    assert.equal(await page.locator(".card.root").evaluate((node) => getComputedStyle(node).opacity), "1", "reduced motion should render the generated root without an entrance transition");
     await page.click("#t-settings");
     await page.waitForSelector("#settings-sheet");
     assert.equal(await page.locator("#settings-sheet").evaluate((popover) => getComputedStyle(popover).opacity), "1", "reduced motion should leave settings usable when its entrance animation is disabled");
@@ -66,7 +62,6 @@ async function verifyReducedMotionOverlays() {
     await context.close();
   }
 }
-
 async function verifyExistingWebUserUpgrade() {
   const context = await browser.newContext();
   await installBridgeFetchStub(context);
@@ -101,14 +96,12 @@ async function verifyExistingWebUserUpgrade() {
     await page.click("#blank-start-setup");
     await page.waitForSelector("#settings-sheet");
     await page.waitForTimeout(180);
-
     assert.equal(localModelRequests, 1, "opening setup should probe the explicitly chosen Local provider");
     assert.equal(await page.getAttribute('[data-provider="local"]', "aria-checked"), "true", "setup must preserve an explicitly chosen incomplete provider");
     assert.equal(await page.locator("#api-key").count(), 0, "Local setup must not be reset to the OpenRouter key form");
     assert.equal(await page.locator("#local-model-setup").count(), 1);
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "opening setup must not force users into the Local guide");
     assert.deepEqual(await page.locator(".provider-row .provider-copy strong").allTextContents(), ["OpenRouter", "Claude Code", "Codex", "Ollama", "Custom endpoint"]);
-
     await page.route("http://127.0.0.1:41414/bridge/ping", (route) => route.abort());
     await page.click('[data-provider="claude"]');
     await page.waitForSelector('.bridge-surface[data-state="re_pair"] .bridge-command code');
@@ -122,14 +115,12 @@ async function verifyExistingWebUserUpgrade() {
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "failed Local discovery should stay in the Local settings screen");
     assert.equal(await page.locator("#local-model-setup").innerText(), "Set up Local", "the Local screen should offer an explicit setup guide");
     assert.equal(await page.locator("#complete-model-setup").isDisabled(), true, "Local setup cannot finish before a model is connected");
-
     await page.click("#local-model-setup");
     await page.waitForSelector("#ollama-recovery-modal:not([hidden])");
   } finally {
     await context.close();
   }
 }
-
 async function verifyLocalFailureRequiresTroubleshootChoice() {
   const context = await browser.newContext();
   await context.addInitScript(() => localStorage.setItem("rh-web-settings", JSON.stringify({
@@ -151,17 +142,14 @@ async function verifyLocalFailureRequiresTroubleshootChoice() {
     await page.fill("#ask-text", "Explain this");
     await page.keyboard.press("Control+Enter");
     await page.waitForSelector("#web-toast.visible");
-
     assert.equal(await page.locator("#ollama-recovery-modal").count(), 0, "a Local generation failure must not auto-open diagnostics");
     assert.equal(await page.locator("#web-toast [data-notice-action]").innerText(), "Troubleshoot", "a Local failure should offer an explicit troubleshooting choice");
-
     await page.click("#web-toast [data-notice-action]");
     await page.waitForSelector("#ollama-recovery-modal:not([hidden])");
   } finally {
     await context.close();
   }
 }
-
 async function verifyMobileSetupExperience() {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -190,7 +178,6 @@ async function verifyMobileSetupExperience() {
     await page.waitForSelector("#project-menu[hidden]", { state: "attached" });
     await page.click("#blank-start-setup");
     await page.waitForSelector("#settings-sheet");
-
     const initial = await page.locator("#settings-sheet").evaluate((surface) => {
       const input = document.getElementById("api-key");
       const rect = surface.getBoundingClientRect();
@@ -208,7 +195,6 @@ async function verifyMobileSetupExperience() {
     assert(initial.inputHeight >= 44, `mobile API key field must meet the touch target floor (got ${initial.inputHeight}px)`);
     assert.deepEqual(initial.attributes, ["none", "off", "text", "done"], "mobile key entry should disable destructive text transformations and expose a Done key");
     assert(initial.surface.left >= initial.viewport.left && initial.surface.right <= initial.viewport.left + initial.viewport.width, `setup surface must fit the mobile visual viewport (${JSON.stringify(initial)})`);
-
     await page.focus("#api-key");
     const pasteAllowed = await page.locator("#api-key").evaluate((input, key) => {
       const transfer = new DataTransfer();
@@ -224,7 +210,6 @@ async function verifyMobileSetupExperience() {
     assert.equal(pasteAllowed, true, "the key field must not cancel native paste");
     await page.waitForSelector("#api-key-status.valid");
     assert.equal(await page.inputValue("#api-key"), MOCK_KEY, "a pasted OpenRouter key must remain intact");
-
     await page.setViewportSize({ width: 390, height: 430 });
     await page.waitForFunction(() => {
       const surface = document.getElementById("settings-sheet");
@@ -243,7 +228,6 @@ async function verifyMobileSetupExperience() {
     await context.close();
   }
 }
-
 async function verifyThemeBeforeAppRuntime() {
   const cases = [
     { system: "dark", saved: "", expected: "dark", background: "rgb(26, 25, 24)" },
@@ -252,7 +236,7 @@ async function verifyThemeBeforeAppRuntime() {
     { system: "dark", saved: "light", expected: "light", background: "rgb(245, 243, 238)" },
   ];
   for (const testCase of cases) {
-    const context = await browser.newContext({ colorScheme: testCase.system });
+    const context = await browser.newContext({ colorScheme: /** @type {"light" | "dark"} */ (testCase.system) });
     try {
       await context.addInitScript((saved) => {
         if (saved) localStorage.setItem("rh-theme", saved);
@@ -277,7 +261,6 @@ async function verifyThemeBeforeAppRuntime() {
     }
   }
 }
-
 async function verifyLandingAndComposer() {
   const context = await browser.newContext();
   await context.addInitScript(() => {
@@ -295,11 +278,11 @@ async function verifyLandingAndComposer() {
     };
     const createInterval = window.setInterval;
     const clearInterval = window.clearInterval;
-    window.setInterval = (...args) => {
-      const id = createInterval(...args);
+    window.setInterval = /** @type {any} */ ((...args) => {
+      const id = (/** @type {any} */ (createInterval))(...args);
       intervals.add(id);
       return id;
-    };
+    });
     window.clearInterval = (id) => {
       intervals.delete(id);
       return clearInterval(id);
@@ -416,7 +399,6 @@ async function verifyLandingAndComposer() {
   assert.equal(await page.locator(".intent-chip, .composer-subline, .composer-examples").count(), 0, "ambiguous intent controls should be gone");
   assert.equal(await page.locator("#composer-entry").isVisible(), false, "text entry should wait until the user chooses a path");
   assert.equal(await page.locator("#composer-stream, #composer-question").count(), 0, "the composer should not contain a separate answer surface");
-
   await page.click("#composer-path-ask");
   assert.equal(await page.locator("#composer-entry-title").innerText(), "Ask a question");
   assert.equal(await page.locator("#composer-entry-copy").innerText(), "What would you like to understand?");
@@ -442,7 +424,6 @@ async function verifyLandingAndComposer() {
   await page.waitForSelector("#composer-modal[hidden]", { state: "attached" });
   const noHoles = await page.evaluate(() => window.__rabbitholeTest.listStoredHoles());
   assert.equal(noHoles.length, 0, "dismissing the composer must not create an Untitled hole");
-
   await page.waitForSelector("#blank-start:not([hidden])");
   assert.equal(await page.getAttribute("#t-project", "aria-haspopup"), "menu", "the bunny mark should expose the project menu");
   assert.equal(await page.getAttribute("#t-project", "aria-expanded"), "false");
@@ -488,38 +469,32 @@ async function verifyLandingAndComposer() {
   await page.waitForSelector("#composer-modal[hidden]", { state: "attached" });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "blank-start-new", "the N shortcut should restore focus to the visible new-Rabbithole trigger");
   await page.waitForSelector("#blank-start:not([hidden])");
-
   await page.click("#t-new");
   await page.waitForSelector("#composer-modal:not([hidden])");
   await page.keyboard.press("Escape");
   await page.waitForSelector("#composer-modal[hidden]", { state: "attached" });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-new", "Escape should restore focus to the toolbar trigger");
-
   await page.click("#blank-start-new");
   await page.waitForSelector("#composer-modal:not([hidden])");
   await page.locator("#composer-modal").click({ position: { x: 2, y: 2 } });
   await page.waitForSelector("#composer-modal[hidden]", { state: "attached" });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "blank-start-new", "backdrop dismissal should restore focus to its trigger");
-
   const pastedMarkdown = "# First hole\n\nEuler identity $e^{i\\pi}+1=0$.\n";
   const first = await createPastedDocument(page, pastedMarkdown);
   const pastedHole = await page.evaluate(() => window.__rabbitholeTest.readStoredHole());
   assert.equal(pastedHole.title, "First hole", "pasted Markdown should infer its Rabbithole title from the first heading");
   assert.equal(pastedHole.nodes.find((node) => node.id === pastedHole.root_id)?.markdown, pastedMarkdown, "the paste path should preserve Markdown verbatim");
-  await page.waitForSelector(".node.root .node-badge svg");
-  assert.equal(await page.locator(".node.root .node-badge").innerText(), "", "root document badge should use the shared bunny SVG, not emoji");
+  await page.waitForSelector(".card.root .card-badge svg");
+  assert.equal(await page.locator(".card.root .card-badge").innerText(), "", "root document badge should use the shared bunny SVG, not emoji");
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction((id) => window.__rabbitholeTest?.currentHoleId() === id, first);
-
   const second = await createDocument(page, "# Second hole\n\nA second saved document.");
   assert.notEqual(first, second, "creating a second document should open a distinct hole");
   assert.equal(await page.locator(".rail-row").first().getAttribute("data-hole"), second, "a newly created Rabbithole should appear at the top immediately");
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction((id) => window.__rabbitholeTest?.currentHoleId() === id, second);
-
   await page.goto(`${baseUrl}/${first}?path-wins=1`, { waitUntil: "networkidle" });
   await page.waitForFunction((id) => window.__rabbitholeTest?.currentHoleId() === id, first);
-
   await page.evaluate((deletedId) => localStorage.setItem("rh-last-hole", deletedId), second);
   await page.goto(`${baseUrl}/?last=second`, { waitUntil: "networkidle" });
   await page.waitForFunction((id) => window.__rabbitholeTest?.currentHoleId() === id, second);
@@ -586,16 +561,13 @@ async function verifyLandingAndComposer() {
   await page.evaluate((deletedId) => localStorage.setItem("rh-last-hole", deletedId), second);
   await page.goto(`${baseUrl}/?last=deleted`, { waitUntil: "networkidle" });
   await page.waitForFunction((id) => window.__rabbitholeTest?.currentHoleId() === id, first);
-
   await context.close();
 }
-
 async function verifyComboboxCatalogStates() {
   const fixture = { data: [
     { id: MOCK_MODEL, name: "Anthropic: Claude Sonnet 5", pricing: { prompt: "0.000003", completion: "0.000015" } },
     { id: "openai/gpt-5", name: "OpenAI: GPT-5", pricing: { prompt: "0.00000125", completion: "0.00001" } },
   ] };
-
   const delayed = await browser.newContext();
   const delayedPage = await delayed.newPage();
   await delayedPage.route(MODEL_URL, async (route) => {
@@ -631,7 +603,6 @@ async function verifyComboboxCatalogStates() {
   assert.equal(await delayedPage.evaluate(() => document.activeElement?.id), "model-select", "keyboard commit should restore trigger focus");
   assert.equal((await delayedPage.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")))).model, "openai/gpt-5");
   await delayed.close();
-
   const failed = await browser.newContext();
   const failedPage = await failed.newPage();
   let catalogAttempts = 0;
@@ -651,7 +622,6 @@ async function verifyComboboxCatalogStates() {
   await failedPage.waitForSelector(".model-option[data-value='openai/gpt-5']");
   assert.equal(catalogAttempts, 2, "retry should invoke load again and recover");
   await failed.close();
-
   const empty = await browser.newContext();
   const emptyPage = await empty.newPage();
   await emptyPage.route(MODEL_URL, (route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [] }) }));
@@ -663,10 +633,8 @@ async function verifyComboboxCatalogStates() {
   await emptyPage.keyboard.press("Enter");
   assert.equal((await emptyPage.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")))).model, "vendor/exact-model", "empty catalogs should commit free text");
   await empty.close();
-
   await verifyLocalComboboxStates(fixture);
 }
-
 async function verifySetupReadinessInvalidation() {
   const catalog = { data: [
     { id: MOCK_MODEL, name: "Anthropic: Claude Sonnet 5", pricing: { prompt: "0.000003", completion: "0.000015" } },
@@ -680,14 +648,12 @@ async function verifySetupReadinessInvalidation() {
   await page.route(LOCAL_MODEL_URL, (route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [{ id: "llama3.2" }] }) }));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "matching setup fingerprint should unlock creation");
-
   await page.click("#blank-start-setup");
   await page.click('[data-provider="local"]');
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "changing provider should keep New Rabbithole actionable");
   assert.equal(await page.locator("#blank-start-setup").innerText(), "Set up AI", "changing provider should invalidate completed setup");
   await page.click('[data-provider="openrouter"]');
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "returning to the completed provider fingerprint should restore readiness");
-
   await page.click("#model-select");
   await page.waitForSelector(".model-option[data-value='openai/gpt-5']");
   await page.click(".model-option[data-value='openai/gpt-5']");
@@ -699,12 +665,10 @@ async function verifySetupReadinessInvalidation() {
   await page.click(`.model-option[data-value='${MOCK_MODEL}']`);
   assert.equal(await page.locator("#blank-start-new").isDisabled(), false, "restoring the completed model fingerprint should restore readiness");
   await context.close();
-
   const local = await browser.newContext();
   await local.addInitScript(() => localStorage.setItem("rh-web-settings", JSON.stringify({
     preset: "custom",
     base_url: "http://localhost:11434/v1",
-    model: "llama3.2",
     model: "llama3.2",
     session_only: true,
     generation_setup: { version: 1, preset: "custom", base_url: "http://localhost:11434/v1", model: "llama3.2" },
@@ -722,10 +686,8 @@ async function verifySetupReadinessInvalidation() {
   assert.equal(await localPage.locator("#blank-start-new").isDisabled(), false, "changing endpoint should keep New Rabbithole actionable");
   assert.equal(await localPage.locator("#blank-start-setup").innerText(), "Set up AI", "changing endpoint should invalidate completed setup");
   await local.close();
-
   console.log("ok web app: provider, endpoint, and model changes invalidate completed setup fingerprints");
 }
-
 async function verifyLocalComboboxStates(openRouterFixture) {
   const run = async (handler) => {
     const context = await browser.newContext();
@@ -742,7 +704,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
     await switchSettingsToLocal(page);
     return { context, page };
   };
-
   const found = await run((route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [{ id: "nomic-embed-text:latest" }, { id: "llama3.2" }, { id: "qwen3:8b" }, { id: "llava:7b" }] }) }));
   await found.page.waitForFunction(() => document.querySelector(".local-model-section .field-hint")?.textContent.includes("3 installed models"));
   await found.page.waitForFunction(() => document.querySelector("#transcribe-model-status")?.textContent.includes("1 installed vision model"));
@@ -758,7 +719,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   const foundSettings = await found.page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")));
   assert.equal(foundSettings.model, "qwen3:8b"); assert.equal(foundSettings.transcribe_model, "llava:7b");
   await found.context.close();
-
   const none = await run((route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [] }) }));
   await none.page.waitForFunction(() => document.querySelector(".local-model-section .field-hint")?.textContent.includes("No installed models"));
   assert.equal(await none.page.locator("#local-model-setup").innerText(), "Set up Local");
@@ -767,7 +727,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   assert.equal(await none.page.locator("#transcribe-model").isDisabled(), true);
   assert.match(await none.page.locator("#transcribe-model-status").innerText(), /disabled.*no local models/i);
   await none.context.close();
-
   let attempts = 0;
   const failed = await run((route) => {
     attempts += 1;
@@ -783,7 +742,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   assert.equal(attempts, 2);
   assert.equal((await failed.page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")))).model, "recovered:latest");
   await failed.context.close();
-
   const free = await run((route) => route.fulfill({ status: 502, headers: corsHeaders(), body: "failed" }));
   await free.page.waitForSelector("#local-model-setup");
   assert.equal(await free.page.locator("#ollama-recovery-modal").count(), 0, "Local connection errors should remain inline until setup is requested");
@@ -797,7 +755,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   })), { role: "dialog", modal: "true", labelledby: "ollama-recovery-title" }, "Ollama recovery should be a real accessible modal");
   assert.equal(await free.page.locator("#ollama-recovery-card svg, #ollama-recovery-card details, #ollama-recovery-card footer").count(), 0, "recovery should stay concise without diagrams, technical disclosures, or footer copy");
   await free.context.close();
-
   const absentContext = await browser.newContext();
   await absentContext.addInitScript(() => {
     Object.defineProperty(navigator, "permissions", { configurable: true, value: { query: async () => ({ state: "granted" }) } });
@@ -817,8 +774,6 @@ async function verifyLocalComboboxStates(openRouterFixture) {
   assert.doesNotMatch(await absentPage.locator("#ollama-recovery-content").innerText(), /OLLAMA_ORIGINS/, "an unreachable endpoint must not receive origin guidance");
   await absentContext.close();
 }
-
-
 function bridgeModelsFixture(agentId, { includeOpus = true } = {}) {
   if (agentId === "codex") {
     return [
@@ -831,7 +786,6 @@ function bridgeModelsFixture(agentId, { includeOpus = true } = {}) {
     ...(includeOpus ? [{ id: "claude/opus", name: "Opus", images: true, reasoning: { options: ["low", "medium", "high", "xhigh", "max"], default: "medium" } }] : []),
   ];
 }
-
 function bridgeAgentFixture(id, state, options = {}) {
   if (state === "ready") {
     return {
@@ -854,7 +808,6 @@ function bridgeAgentFixture(id, state, options = {}) {
     ...(state === "error" ? { detail: "Live model discovery failed." } : {}),
   };
 }
-
 function bridgeStateFixture(claudeState, codexState = "starting", options = {}) {
   return {
     bridge: "0.4.0",
@@ -864,7 +817,6 @@ function bridgeStateFixture(claudeState, codexState = "starting", options = {}) 
     ],
   };
 }
-
 async function installBridgeFetchStub(context) {
   await context.addInitScript(({ eventsUrl, chatUrl, pingUrl }) => {
     const realFetch = window.fetch.bind(window);
@@ -877,16 +829,13 @@ async function installBridgeFetchStub(context) {
     let pingUp = false;
     let currentState = null;
     let hidden = false;
-
     Object.defineProperty(document, "hidden", {
       configurable: true,
       get: () => hidden,
     });
-
     function authorization(options) {
       return new Headers(options?.headers || {}).get("Authorization") || "";
     }
-
     function push(state) {
       currentState = state;
       const bytes = encoder.encode(`data: ${JSON.stringify(state)}\n\n`);
@@ -894,14 +843,12 @@ async function installBridgeFetchStub(context) {
         try { stream.enqueue(bytes); } catch { streams.delete(stream); }
       }
     }
-
     function closeStreams() {
       for (const stream of [...streams]) {
         streams.delete(stream);
         try { stream.close(); } catch {}
       }
     }
-
     window.__bridgeStub = {
       requests,
       push,
@@ -922,9 +869,8 @@ async function installBridgeFetchStub(context) {
       queueChat(...items) { chatQueue.push(...items); },
       setPing(value) { pingUp = Boolean(value); },
     };
-
     window.fetch = async (input, options = {}) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url === pingUrl) {
         requests.push({ kind: "ping", at: performance.now() });
         if (!pingUp) throw new TypeError("Failed to fetch");
@@ -955,7 +901,7 @@ async function installBridgeFetchStub(context) {
         }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
       }
       if (url === chatUrl) {
-        const body = JSON.parse(options.body || "{}");
+        const body = JSON.parse(typeof options.body === "string" ? options.body : "{}");
         requests.push({ kind: "chat", authorization: authorization(options), body });
         const item = chatQueue.shift() || { text: "Subscription response." };
         if (item.beforeState) {
@@ -975,11 +921,9 @@ async function installBridgeFetchStub(context) {
     };
   }, { eventsUrl: BRIDGE_EVENTS_URL, chatUrl: BRIDGE_CHAT_URL, pingUrl: BRIDGE_PING_URL });
 }
-
 async function pushBridgeState(page, state) {
   await page.evaluate((value) => window.__bridgeStub.push(value), state);
 }
-
 async function verifySubscriptionsPanelStates() {
   const context = await browser.newContext();
   await installBridgeFetchStub(context);
@@ -997,7 +941,6 @@ async function verifySubscriptionsPanelStates() {
       "Bearer paired-token",
       "the state stream must carry bearer authorization",
     );
-
     // Clicking the pairing link is the setup: the panel opens by itself on the
     // live bridge state instead of leaving the user on a silent blank canvas.
     await page.waitForSelector("#settings-sheet");
@@ -1007,7 +950,6 @@ async function verifySubscriptionsPanelStates() {
     assert.match(await page.locator(".bridge-starting").innerText(), /Connecting/);
     assert.equal(await page.locator(".bridge-agent-body [data-state-action]").count(), 0, "starting is calm progress with no fix action");
     assert.equal(await page.locator(".bridge-agent-body .bridge-command").count(), 0, "starting never borrows an error command");
-
     for (const testCase of [
       { state: "missing", command: "npm install -g @anthropic-ai/claude-code" },
       { state: "signed_out", command: "claude /login" },
@@ -1018,7 +960,6 @@ async function verifySubscriptionsPanelStates() {
       assert.equal(await page.locator(".bridge-agent-body [data-state-action]").count(), 1, `${testCase.state} must expose exactly one action`);
       assert.equal(await page.locator(".bridge-agent-body .bridge-command code").innerText(), testCase.command);
     }
-
     // Neither CLI on the machine: each agent row shows its own install path,
     // and the unselected row says "Not installed" from the list itself.
     await pushBridgeState(page, bridgeStateFixture("missing", "missing"));
@@ -1030,7 +971,6 @@ async function verifySubscriptionsPanelStates() {
       "Not installed",
       "the other agent's absence reads from its row, no switch-click needed",
     );
-
     // One CLI installed: the working agent's row is selected, the absent one
     // stays in the list as an invitation whose body is the install path.
     await pushBridgeState(page, bridgeStateFixture("ready", "missing"));
@@ -1044,7 +984,6 @@ async function verifySubscriptionsPanelStates() {
     assert.match(await page.locator(".bridge-agent-body").innerText(), /notices by itself — no restart needed/, "the missing-agent body promises the self-healing the bridge actually does");
     await page.click('[data-provider="claude"]');
     await page.waitForSelector('.bridge-surface[data-state="ready"]');
-
     const readyState = bridgeStateFixture("ready", "ready");
     await pushBridgeState(page, readyState);
     await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
@@ -1056,7 +995,6 @@ async function verifySubscriptionsPanelStates() {
     assert.equal(await page.locator("#complete-model-setup").innerText(), "Done", "the completed panel offers Done, not a redundant Finish setup");
     assert.equal(await page.locator('[data-provider-item="claude"] .provider-copy strong').innerText(), "Claude Code", "the row names tools, never plan tiers");
     assert.equal(await page.locator(".bridge-plan-badge").count(), 0, "plan badges stay out of the list — the toast said it once");
-
     await page.evaluate(() => {
       window.__bridgeMutationCount = 0;
       window.__bridgeReadyHost = document.querySelector("#bridge-surface");
@@ -1078,14 +1016,12 @@ async function verifySubscriptionsPanelStates() {
     await page.waitForTimeout(60);
     assert.equal(await page.evaluate(() => window.__bridgeMutationCount), 0, "an identical complete state must not mutate the DOM");
     assert.equal(await page.evaluate(() => document.querySelector("#bridge-surface") === window.__bridgeReadyHost), true, "the ready host must retain identity");
-
     await page.click("#bridge-model");
     await page.waitForSelector(".combobox-surface");
     await pushBridgeState(page, bridgeStateFixture("signed_out", "ready"));
     await page.waitForSelector('.bridge-surface[data-state="signed_out"]');
     assert.equal(await page.locator(".combobox-surface").count(), 0, "transition disposal must remove the combobox popup before its host");
     assert.equal(await page.locator(".bridge-agent-body [data-state-action]").evaluate((button) => document.activeElement === button), true, "focus falls back to the new state's sole action");
-
     await pushBridgeState(page, readyState);
     await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
     await page.locator('[data-provider="codex"]').focus();
@@ -1093,7 +1029,6 @@ async function verifySubscriptionsPanelStates() {
     await pushBridgeState(page, changedPlanState);
     await page.waitForFunction(() => document.activeElement?.dataset?.provider === "codex");
     assert.equal(await page.locator('[data-provider-item="claude"] .provider-copy strong').innerText(), "Claude Code", "a plan change alone must not alter the row");
-
     const beforeAgentSignOut = await page.evaluate(() => ({
       claudeChip: document.querySelector('[data-provider-item="claude"] .provider-chip').textContent,
       codexChip: document.querySelector('[data-provider-item="codex"] .provider-chip').textContent,
@@ -1115,7 +1050,6 @@ async function verifySubscriptionsPanelStates() {
     assert.equal(afterAgentSignOut.body, beforeAgentSignOut.body, "a background-agent sign-out must not change the selected agent body");
     assert.equal(afterAgentSignOut.focusedId, "bridge-model", "focus returns to the equivalent selected-agent control");
     assert.equal(afterAgentSignOut.popupCount, 0, "transition disposal leaves no orphan combobox popup");
-
     await pushBridgeState(page, readyState);
     await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
     const loadTimeOrigin = await page.evaluate(() => performance.timeOrigin);
@@ -1140,7 +1074,6 @@ async function verifySubscriptionsPanelStates() {
       true,
       "the bearer token must never appear in a state-stream URL",
     );
-
     await page.evaluate(() => window.__bridgeStub.setHidden(true));
     const hiddenRequestsBeforeKill = await page.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").length);
     await page.evaluate(() => window.__bridgeStub.kill());
@@ -1158,7 +1091,6 @@ async function verifySubscriptionsPanelStates() {
       `acceptance H bridge_down_ms=${bridgeDownLatencyMs.toFixed(1)} reconnect_without_reload=true `
       + "agent_rows_changed=codex-only focus=bridge-model orphan_popups=0 hidden_resume=immediate",
     );
-
     await page.evaluate(() => window.__bridgeStub.denyNextConnection());
     await page.click('[data-provider="openrouter"]');
     await page.click('[data-provider="claude"]');
@@ -1185,7 +1117,6 @@ async function verifySubscriptionsPanelStates() {
     await page.waitForSelector('.bridge-surface[data-state="ready"] #bridge-model');
     stored = await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-settings")));
     assert.equal(stored.providers.subscriptions.token, "fresh-token", "manual re-pair updates only the provider token");
-
     await page.click("#bridge-model");
     await page.click('.model-option[data-value="claude/opus"]');
     await page.evaluate((freshState) => window.__bridgeStub.queueChat(
@@ -1210,7 +1141,6 @@ async function verifySubscriptionsPanelStates() {
     await context.close();
   }
 }
-
 /*
  * The terminal's pairing link opens a fresh tab, so the tab that was sitting
  * on the "waiting to pair" panel must advance by itself via the storage event
@@ -1227,11 +1157,9 @@ async function verifyCrossTabPairing() {
     await pageA.waitForSelector("#settings-sheet");
     await pageA.click('[data-provider="claude"]');
     await pageA.waitForSelector('.bridge-surface[data-state="re_pair"]');
-
     const pageB = await context.newPage();
     await pageB.goto(`${baseUrl}/#bridge=linked-token`, { waitUntil: "domcontentloaded" });
     await pageB.waitForSelector("#settings-sheet");
-
     await pageA.waitForSelector('.bridge-surface[data-state="starting"], .bridge-surface[data-state="ready"]', { timeout: 5_000 });
     assert.equal(
       await pageA.evaluate(() => window.__bridgeStub.requests.filter((request) => request.kind === "events").at(-1)?.authorization),
@@ -1243,7 +1171,6 @@ async function verifyCrossTabPairing() {
     await context.close();
   }
 }
-
 async function openFreshSettings(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.keyboard.press("Escape");
@@ -1254,7 +1181,6 @@ async function openFreshSettings(page) {
   await page.click('[data-settings-section="model"]');
   await page.waitForSelector("#settings-panel");
 }
-
 async function openFreshSetup(page) {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.click("#blank-start-setup");
@@ -1262,11 +1188,9 @@ async function openFreshSetup(page) {
   assert.equal(await page.getAttribute("#blank-start-setup", "aria-expanded"), "true", "setup trigger must expose the open first-run surface");
   assert.equal(await page.getAttribute("#blank-start-setup", "aria-controls"), "settings-sheet", "setup trigger must control only the live surface");
 }
-
 async function switchSettingsToLocal(page) {
   await page.click('[data-provider="local"]');
 }
-
 async function verifyAskKeyUxAndRail() {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -1278,7 +1202,6 @@ async function verifyAskKeyUxAndRail() {
       "Attention compares tokens, scores their relevance, and mixes information according to those scores.",
     ]],
   });
-
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.click("#blank-start-setup");
   assert.equal(await page.getAttribute("#api-key-toggle", "aria-pressed"), "false");
@@ -1300,10 +1223,10 @@ async function verifyAskKeyUxAndRail() {
   await page.click("#composer-path-ask");
   await page.fill("#composer-input", "Explain the attention mechanism");
   await page.click("#composer-primary");
-  await page.waitForSelector(".node .doc-content[data-node-id] .loading");
-  const rootIdWhileLoading = await page.getAttribute(".node .doc-content[data-node-id]", "data-node-id");
-  assert.equal(await page.locator(".node").count(), 1, "the first answer should begin in the real root node");
-  assert.match(await page.locator(".node .loading-status").innerText(), /Thinking/, "the root should use the regular pending-node loading state");
+  await page.waitForSelector(".card .doc-content[data-node-id] .loading");
+  const rootIdWhileLoading = await page.getAttribute(".card .doc-content[data-node-id]", "data-node-id");
+  assert.equal(await page.locator(".card").count(), 1, "the first answer should begin in the real root node");
+  assert.match(await page.locator(".card .loading-status").innerText(), /Thinking/, "the root should use the regular pending-node loading state");
   assert.equal(await page.locator("#composer-modal").isVisible(), false, "the composer should close before the root begins streaming");
   assert(!/creating (?:the )?(?:root|first)|creating your starting point/i.test(await page.locator("body").innerText()), "root creation status copy should be absent");
   await waitForCanvasText(page, "Attention compares tokens");
@@ -1380,17 +1303,17 @@ async function verifyAskKeyUxAndRail() {
     "Escape with the rail focused must close only the rail, never disturb the canvas"
   );
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-web-api-keys") || "{}").openrouter), MOCK_KEY, "remembered key should stay in this browser's provider-key map");
-  await page.click('.node-btn[aria-label="Collapse card"]');
-  assert.equal(await page.locator(".node").first().evaluate((node) => node.classList.contains("collapsed")), true, "real UI mutation should collapse the document immediately");
+  await page.click('.card-btn[aria-label="Collapse card"]');
+  assert.equal(await page.locator(".card").first().evaluate((node) => node.classList.contains("collapsed")), true, "real UI mutation should collapse the document immediately");
   const mutationSnapshot = JSON.parse(extractSnapshotPayload(await page.evaluate(() => window.__rabbitholeTest.exportSnapshot())));
   assert.equal(mutationSnapshot.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.collapsed, true,
     `immediate snapshot export must flush the canonical document mutation (root=${rootIdWhileLoading}, nodes=${JSON.stringify(mutationSnapshot.hole.nodes)})`);
-  assert.equal(await page.locator(".node.collapsed .node-font-btn").count(), 0, "collapsed cards should keep text size in the shared menu, not inline controls");
+  assert.equal(await page.locator(".card.collapsed .card-font-btn").count(), 0, "collapsed cards should keep text size in the shared menu, not inline controls");
   const mutationPortable = await page.evaluate(() => window.__rabbitholeTest.exportPortable());
   assert.equal(mutationPortable.hole.nodes.find((node) => node.id === rootIdWhileLoading)?.font_scale, 1,
     "an unchanged card should preserve its default per-node font scale");
   const persistedViewBeforeLiveChange = await page.evaluate(async () => (await window.__rabbitholeTest.readStoredHole()).view_state);
-  await page.dblclick(`.node[data-id="${rootIdWhileLoading}"] .node-head`);
+  await page.dblclick(`.card[data-id="${rootIdWhileLoading}"] .card-head`);
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
   const snapshotHtml = await page.evaluate(() => window.__rabbitholeTest.exportSnapshot());
   const liveViewSnapshot = JSON.parse(extractSnapshotPayload(snapshotHtml));
@@ -1425,7 +1348,6 @@ async function verifyAskKeyUxAndRail() {
   assert.match(snapshotHtml, /startPortableSnapshot\(JSON\.parse\(payload\.textContent\)\)/, "bootstrap should derive hydration from inert DOM text");
   const rawJson = JSON.stringify(hole);
   assert(!rawJson.includes(MOCK_KEY), "IndexedDB hole record must not contain provider key");
-
   await page.evaluate(() => document.getElementById("reader-restore").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
@@ -1497,9 +1419,7 @@ async function verifyAskKeyUxAndRail() {
   assert.equal(await page.getAttribute("#t-settings", "aria-controls"), null, "closed settings must not reference a dead surface");
   assert.equal(await page.evaluate(() => document.activeElement?.id), "t-settings", "settings Escape should restore its trigger after the Select child closes first");
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "nested Escapes must not reach the canvas shortcut");
-
   await context.close();
-
   const sessionContext = await browser.newContext();
   const sessionPage = await sessionContext.newPage();
   await routeProvider(sessionPage, {
@@ -1521,7 +1441,6 @@ async function verifyAskKeyUxAndRail() {
   assert.equal(await sessionPage.evaluate(() => JSON.parse(localStorage.getItem("rh-web-api-keys") || "{}").openrouter), undefined, "opting out of remember must keep the provider-key map clean");
   await sessionContext.close();
 }
-
 async function createDocument(page, markdown) {
   const previous = await page.evaluate(() => window.__rabbitholeTest?.currentHoleId?.() || "");
   await page.evaluate((value) => window.__rabbitholeTest.createDocument(value), markdown);
@@ -1529,10 +1448,9 @@ async function createDocument(page, markdown) {
     const id = window.__rabbitholeTest?.currentHoleId?.();
     return id && id !== oldId;
   }, previous);
-  await page.waitForSelector(".node .doc-content[data-node-id]");
+  await page.waitForSelector(".card .doc-content[data-node-id]");
   return page.evaluate(() => window.__rabbitholeTest.currentHoleId());
 }
-
 async function createPastedDocument(page, markdown) {
   const previous = await page.evaluate(() => window.__rabbitholeTest?.currentHoleId?.() || "");
   await page.click("#blank-start-new");
@@ -1543,24 +1461,21 @@ async function createPastedDocument(page, markdown) {
     const id = window.__rabbitholeTest?.currentHoleId?.();
     return id && id !== oldId;
   }, previous);
-  await page.waitForSelector(".node .doc-content[data-node-id]");
+  await page.waitForSelector(".card .doc-content[data-node-id]");
   return page.evaluate(() => window.__rabbitholeTest.currentHoleId());
 }
-
 async function ensureRailOpen(page) {
   if (await page.getAttribute("#t-rail", "aria-expanded") !== "true") {
     await page.click("#t-rail");
   }
   await page.waitForSelector("#web-rail.open");
 }
-
 async function waitForCanvasText(page, text) {
-  await page.locator(".node", { hasText: text }).first().waitFor();
+  await page.locator(".card", { hasText: text }).first().waitFor();
 }
-
 async function selectText(page, needle) {
   await page.evaluate((text) => {
-    const root = document.querySelector(".node .doc-content[data-node-id]");
+    const root = document.querySelector(".card .doc-content[data-node-id]");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {

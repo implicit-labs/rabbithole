@@ -1,4 +1,4 @@
-/** @typedef {import("../../../src/core/contracts/generation.js").Brain} Brain */
+/** @typedef {import("../../../src/core/contracts/generation.js").Provider} Provider */
 /** @typedef {import("../../../src/core/contracts/generation.js").GenerationEvent} GenerationEvent */
 
 /** @type {GenerationEvent[]} */
@@ -7,7 +7,7 @@ export const generationEventFixtures = [
   { type: "title", title: "Typed generation" },
 ];
 
-/** @type {Brain} */
+/** @type {Provider} */
 export const brainFixture = {
   async *answerBranch(_context, _signal) {
     yield generationEventFixtures[0];

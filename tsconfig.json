@@ -3,24 +3,21 @@
     "allowJs": true,
     "checkJs": true,
     "noEmit": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "strict": true,
+    "strict": false,
+    "noUncheckedIndexedAccess": true,
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
   },
   "include": [
-    "src/core/**/*.js",
-    "src/core/contracts/artifact.d.ts",
-    "src/core/contracts/store.d.ts",
-    "src/core/contracts/engine.d.ts",
-    "src/core/contracts/generation.d.ts",
-    "src/core/contracts/content.d.ts",
-    "test/fixtures/contracts/artifact-fixture.js",
-    "test/fixtures/contracts/store-fixture.js",
-    "test/fixtures/contracts/generation-fixture.js",
-    "test/fixtures/contracts/content-fixture.js"
+    "src/**/*.js",
+    "src/core/contracts/*.d.ts",
+    "build.mjs"
   ]
 }

@@ -1,3 +1,4 @@
+/** @protects mcp markdown wire capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -362,7 +363,7 @@ async function runMarkdownWireFixture() {
     created_at: session.nodes.get("anchored-wire-note").created_at,
   };
   const notesRequestId = "req-notes-wire";
-  const notesNodeId = "node-notes-wire";
+  const notesNodeId = "card-notes-wire";
   await postEvent(session, {
     type: "branch_request",
     request_id: notesRequestId,
@@ -385,7 +386,7 @@ async function runMarkdownWireFixture() {
   }), session);
 
   const noteThreadRequestId = "req-note-thread-wire";
-  const noteThreadNodeId = "node-note-thread-wire";
+  const noteThreadNodeId = "card-note-thread-wire";
   await postEvent(session, {
     type: "branch_request",
     request_id: noteThreadRequestId,
@@ -472,7 +473,7 @@ try {
   await fs.writeFile(path.join(process.env.RABBITHOLE_DIR, "future-mcp.json"), JSON.stringify({ schema_version: 3 }));
   await assert.rejects(
     () => openRabbithole({ holeId: "future-mcp" }),
-    (error) => error?.message === NEWER_SCHEMA_MESSAGE,
+    (/** @type {any} */ error) => error?.message === NEWER_SCHEMA_MESSAGE,
   );
   console.log("ok MCP markdown wire: resume refuses newer schemas with the update-to-open message");
 } finally {

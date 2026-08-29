@@ -1,8 +1,8 @@
 import { AUTHORING_VOCABULARY_V1, normalizePromptText } from "./authoring-v1.js";
-import { lensLabel, truncate } from "../model.js";
+import { lensLabel, truncate } from "../hole/lens.js";
 
 const ANSWERING_SYSTEM_PROMPT_V1 = [
-  "You are the web Brain for Rabbithole, a branching-document canvas.",
+  "You are the web Provider for Rabbithole, a branching-document canvas.",
   "Write a focused markdown answer to the human's question using the supplied parent document and lineage context.",
   "",
   "The first line of every answer MUST be exactly: TITLE: <short node title>",
@@ -21,7 +21,7 @@ const DEFAULT_TOKEN_BUDGET = 12000;
 
 /** @typedef {Record<string, any>} AnswerContext */
 
-/** @param {AnswerContext} context @param {{ tokenBudget?: number }} [options] */
+/** @param {AnswerContext} context @param {{ tokenBudget?: number }} [options] @returns {Array<{role: string, content: any}>} */
 export function buildAnswerMessages(context, { tokenBudget = DEFAULT_TOKEN_BUDGET } = {}) {
   let packed = packBranchContext(context, { tokenBudget });
   const attachments = imageAttachments(context);
@@ -30,6 +30,7 @@ export function buildAnswerMessages(context, { tokenBudget = DEFAULT_TOKEN_BUDGE
       packed = `${attachments.length === 1 ? "Pasted image" : "Pasted images"}: attached. Use ${attachments.length === 1 ? "it" : "them"} as part of the human's question.\n${packed}`;
     } else {
       const attachment = attachments[0];
+      if (!attachment) throw new Error("Image attachment list unexpectedly became empty");
       const label = attachment.source === "parent_crop" ? "Parent clip image" : "Selection region image";
       packed = `${label}: attached (page ${attachment.page}). Trust the image over extracted text for math, tables, and figures.\n${packed}`;
     }

@@ -1,3 +1,4 @@
+/** @protects pdf node conversion capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -76,11 +77,15 @@ function abortAfter(ms) {
 
   const done = await answerBranch({ sessionId: session.id, requestId: request.request_id, content: "![Euler](figure:page-001:0.2,0.2,0.5,0.3)", signal: abortAfter(150) });
   assert.equal(done.status, "cancelled");
+  for (const page of request.pages) {
+    await assert.rejects(fs.access(page.image_path), { code: "ENOENT" },
+      "answering a conversion must release every request-owned page render");
+  }
 
   const node = session.nodes.get(session.rootId);
   assert.match(node.markdown, /# Clean Document\n\nFirst half and second half\./);
   assert.match(node.markdown, /!\[Euler\]\(asset:fig-p001-1\.png\)/, "figure refs must materialize into lossless source crops");
-  const pdf = node.extensions.pdf;
+  const pdf = node.source;
   assert.equal(pdf.converted, true);
   assert.equal(pdf.converting, false);
   assert.equal(pdf.pages.length, 2, "conversion must preserve the page stash");
@@ -88,7 +93,7 @@ function abortAfter(ms) {
   assert.equal(pdf.original_markdown, original, "conversion must stash the original body");
   assert((await defaultFsStore.listAssets(session.holeId)).includes("fig-p001-1.png"));
   session.close("test_done");
-  await session.savingChain;
+  await session.saveChain.flush();
 }
 
 // ---- agent disconnect mid-run restores the native document ----------------
@@ -101,14 +106,14 @@ function abortAfter(ms) {
   session.setAgentAttached(false, "stalled");
   const node = session.nodes.get(session.rootId);
   assert.equal(node.markdown, original, "disconnect mid-run must restore the original body");
-  assert.equal(node.extensions.pdf.converting, false);
-  assert.equal(node.extensions.pdf.convert_request, false);
-  assert.equal(session.convertRequests.size, 0);
+  assert.equal(node.source.converting, false);
+  assert.equal(node.source.convert_request, false);
+  assert.equal([...session.requests.records()].filter((record) => record.conversion).length, 0);
   // Asks are usable again after the restore.
   const branch = await session.handleBrowserEvent({ type: "branch_request", request_id: "after-restore", node_id: "after-restore-child", parent_id: session.rootId, selected_text: "Attention", question: "?", position: { x: 0, y: 0 } });
   assert.equal(branch.ok, true);
   session.close("test_done");
-  await session.savingChain;
+  await session.saveChain.flush();
 }
 
 // ---- a convert nobody was listening for survives as a saved request -------
@@ -122,9 +127,9 @@ function abortAfter(ms) {
   await session.flushSave();
   // Simulate a hard crash: the streamed body and converting flags are on disk
   // and no orderly close ever runs a restore.
-  session.convertRequests.clear();
+  for (const record of session.requests.records()) record.conversion = null;
   session.close("simulated_crash");
-  await session.savingChain;
+  await session.saveChain.flush();
 
   const resumed = await openRabbithole({ holeId, signal: abortAfter(4000) });
   assert.equal(resumed.status, "convert_request", "resume must surface the saved conversion");
@@ -136,7 +141,7 @@ function abortAfter(ms) {
 
   const finished = await answerBranch({ sessionId: resumed.session_id, requestId: resumed.request_id, content: "# Converted After Resume\n\nAll pages.", signal: abortAfter(150) });
   assert.equal(finished.status, "cancelled");
-  assert.equal(revived.nodes.get(revived.rootId).extensions.pdf.converted, true);
+  assert.equal(revived.nodes.get(revived.rootId).source.converted, true);
   await closeAllSessions("test_done");
   const persisted = await defaultFsStore.loadHole(holeId);
   const persistedRoot = persisted.nodes.find((n) => n.id === persisted.root_id);

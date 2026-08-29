@@ -1,7 +1,7 @@
 import katex from "katex";
 import { encodeBase64Utf8 } from "../../src/core/markdown.js";
 import { createMarkdownRenderer } from "../../src/core/markdown-renderer.js";
-import { OpenAICompatibleBrain } from "../../src/web/brain/openai-compatible.js";
+import { OpenAICompatibleProvider } from "../../src/web/provider/openai-compatible.js";
 
 const REQUIRED_ENV = ["EVAL_BASE_URL", "EVAL_API_KEY", "EVAL_MODEL"];
 const missing = REQUIRED_ENV.filter((name) => !process.env[name]);
@@ -11,7 +11,7 @@ if (missing.length) {
   process.exit(0);
 }
 
-const brain = new OpenAICompatibleBrain({
+const provider = new OpenAICompatibleProvider({
   baseUrl: process.env.EVAL_BASE_URL,
   apiKey: process.env.EVAL_API_KEY,
   model: process.env.EVAL_MODEL,
@@ -53,7 +53,7 @@ async function runAsk(ask) {
   let body = "";
   let title = "";
   try {
-    for await (const event of brain.answerBranch({ ...ask.context, fallbackTitle: ask.name }, controller.signal)) {
+    for await (const event of provider.answerBranch({ ...ask.context, fallbackTitle: ask.name }, controller.signal)) {
       if (event.type === "title") title = event.title;
       if (event.type === "text") body += event.delta;
     }

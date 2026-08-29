@@ -1,3 +1,4 @@
+/** @protects bridge failure modes capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -165,7 +166,7 @@ try {
   )).trim());
   assert.equal(maxActive, 2, "Codex concurrency recorder must observe both live turns");
   codexAbort.abort();
-  await assert.rejects(slowCodex, (error) => error?.name === "AbortError");
+  await assert.rejects(slowCodex, (/** @type {any} */ error) => error?.name === "AbortError");
 
   signedOutBridge = await createBridge({
     port: 0,

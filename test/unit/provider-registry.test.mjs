@@ -1,8 +1,10 @@
+/** @protects provider registry capability contracts. */
 import assert from "node:assert/strict";
-import { PROVIDERS, providerFor, defaultBrainSettings, settingsForProvider } from "../../src/web/brain/provider-registry.js";
+import { PROVIDERS, providerFor, defaultProviderSettings, settingsForProvider } from "../../src/web/provider/provider-registry.js";
+import { migrateSettings } from "../../src/web/settings/migrate.js";
 
 /* The Local preset shipped as id "custom". Saved settings and holes still carry that value. */
-assert.equal(providerFor("custom").id, "local", "legacy Local settings must keep resolving to Local");
+assert.equal(migrateSettings({ preset: "custom" }).value.preset, "local", "legacy Local settings migrate once at the storage boundary");
 assert.equal(providerFor("local").id, "local");
 assert.equal(providerFor("custom_endpoint").id, "custom_endpoint");
 assert.equal(providerFor("nonsense").id, "openrouter", "unknown providers fall back to the recommended one");
@@ -19,7 +21,7 @@ assert.equal(PROVIDERS.custom_endpoint.requires_base_url, true);
 assert.equal(PROVIDERS.custom_endpoint.base_url, "", "the custom endpoint must not ship a guessed URL");
 assert.equal(PROVIDERS.local.base_url, "http://localhost:11434/v1", "Local keeps its Ollama default");
 
-const defaults = defaultBrainSettings();
+const defaults = defaultProviderSettings();
 assert.equal(defaults.preset, "openrouter", "first run still lands on OpenRouter");
 
 /* Switching providers must not discard what was typed into the other ones. */
@@ -67,12 +69,13 @@ assert.deepEqual(settings.agents.codex, {
 }, "each agent keeps its own model and reasoning");
 
 /* A legacy slot keyed by the old id has to land in the Local slot, not vanish. */
-const legacy = settingsForProvider("local", {
+const legacyInput = migrateSettings({
   preset: "openrouter",
   base_url: "https://openrouter.ai/api/v1",
   model: "anthropic/claude-sonnet-5",
   providers: { custom: { base_url: "http://127.0.0.1:11434/v1", model: "qwen3", transcribe_model: "qwen3" } },
-});
+}).value;
+const legacy = settingsForProvider("local", legacyInput);
 assert.equal(legacy.base_url, "http://127.0.0.1:11434/v1", "a legacy per-provider slot migrates to Local");
 assert.equal(legacy.model, "qwen3");
 

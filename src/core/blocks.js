@@ -9,7 +9,7 @@ function normalizedType(value) {
   return String(value || "").toLowerCase();
 }
 
-/** @param {BlockTypeDescriptor} descriptor */
+/** @param {any} descriptor @returns {BlockTypeDescriptor} */
 export function registerBlockType(descriptor) {
   if (!descriptor || typeof descriptor !== "object") throw new TypeError("Block type descriptor must be an object");
   const type = normalizedType(descriptor.type);
@@ -43,8 +43,8 @@ export function parseBlockInfo(info) {
   const type = normalizedType(parts[0]);
   let id = null;
   for (let i = 1; i < parts.length; i += 1) {
-    const match = /^id=([^\s]+)$/i.exec(parts[i]);
-    if (match && BLOCK_ID_PATTERN.test(match[1])) id = match[1];
+    const match = /^id=([^\s]+)$/i.exec(parts[i] ?? "");
+    if (match && BLOCK_ID_PATTERN.test(match[1] ?? "")) id = match[1] ?? null;
   }
   return { type, id };
 }
@@ -78,7 +78,7 @@ export function normalizeBlockIds(markdown, { idFactory = defaultBlockIdFactory 
     const line = ending ? wholeLine.slice(0, -ending.length) : wholeLine;
     if (active) {
       const close = /^( {0,3})(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[2][0] === active.char && close[2].length >= active.width) active = null;
+      if (close && close[2]?.[0] === active.char && close[2].length >= active.width) active = null;
       output.push(wholeLine);
       continue;
     }
@@ -87,9 +87,9 @@ export function normalizeBlockIds(markdown, { idFactory = defaultBlockIdFactory 
       output.push(wholeLine);
       continue;
     }
-    const marker = open[2];
-    const info = open[3].trim();
-    active = { char: marker[0], width: marker.length };
+    const marker = open[2] ?? "";
+    const info = (open[3] ?? "").trim();
+    active = { char: marker[0] ?? "", width: marker.length };
     const parsed = parseBlockInfo(info);
     if (!getBlockType(parsed.type)) {
       output.push(wholeLine);
@@ -127,15 +127,15 @@ export function markdownContainsBlockType(markdown, targetType) {
   for (const line of lines) {
     if (active) {
       const close = /^( {0,3})(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[2][0] === active.char && close[2].length >= active.width) active = null;
+      if (close && close[2]?.[0] === active.char && close[2].length >= active.width) active = null;
       continue;
     }
     const open = /^( {0,3})(`{3,}|~{3,})([^\r\n]*)$/.exec(line);
     if (!open) continue;
-    const marker = open[2];
-    const parsed = parseBlockInfo(open[3]);
+    const marker = open[2] ?? "";
+    const parsed = parseBlockInfo(open[3] ?? "");
     if (parsed.type === target) return true;
-    active = { char: marker[0], width: marker.length };
+    active = { char: marker[0] ?? "", width: marker.length };
   }
   return false;
 }
@@ -143,7 +143,7 @@ export function markdownContainsBlockType(markdown, targetType) {
 registerBlockType({
   type: "show",
   version: 1,
-  parse(source) { return String(source ?? ""); },
+  parse(/** @type {unknown} */ source) { return String(source ?? ""); },
   toPlainText() { return ""; },
   security: "sanitize-html",
 });
@@ -151,8 +151,8 @@ registerBlockType({
 registerBlockType({
   type: "mermaid",
   version: 1,
-  parse(source) { return String(source ?? ""); },
-  toPlainText(source) { return String(source ?? ""); },
+  parse(/** @type {unknown} */ source) { return String(source ?? ""); },
+  toPlainText(/** @type {unknown} */ source) { return String(source ?? ""); },
   security: "sanitize-html",
 });
 
@@ -184,6 +184,6 @@ registerBlockType({
   type: "check",
   version: 1,
   parse: parseCheck,
-  toPlainText(model) { return [model.question, ...model.options].join("\n"); },
+  toPlainText(/** @type {any} */ model) { return [model.question, ...model.options].join("\n"); },
   security: "sanitize-html",
 });

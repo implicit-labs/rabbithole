@@ -1,3 +1,4 @@
+/** @protects bridge http capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
@@ -19,6 +20,7 @@ const codexArgsRecord = path.join(temporaryRoot, "codex-args.ndjson");
 await fs.mkdir(path.join(home, ".codex"), { recursive: true });
 await fs.writeFile(path.join(home, ".codex", "auth.json"), "{}\n");
 
+/** @param {any} bridge @param {{method?: string, pathname?: string, headers?: Record<string, any>, body?: any}} [options] */
 function request(bridge, {
   method = "GET",
   pathname = "/v1/models",

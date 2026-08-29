@@ -1,3 +1,4 @@
+/** @protects pdf ingest staging capability contracts. */
 import assert from "node:assert/strict";
 import { ingestPdfToStoredHole } from "../../src/web/ingest/pdf.js";
 

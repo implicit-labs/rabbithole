@@ -1,10 +1,11 @@
+/** @protects filesystem store capability contracts. */
 import fs from "node:fs/promises";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { assertRabbitholeStore } from "../../src/core/store.js";
 import { FsStore } from "../../src/node/fs-store.js";
-import { RabbitHoleSession } from "../../src/node/transport/session.js";
+import { RabbitholeSession } from "../../src/node/transport/session.js";
 import { runStoreContract } from "../support/store-contract.mjs";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
@@ -16,7 +17,7 @@ await runStoreContract(store, {
   readRawHole: async (holeId) => JSON.parse(await fs.readFile(path.join(process.env.RABBITHOLE_DIR, `${holeId}.json`), "utf8")),
   writeRawHole: async (holeId, fixture) => fs.writeFile(path.join(process.env.RABBITHOLE_DIR, `${holeId}.json`), JSON.stringify(fixture, null, 2), "utf8"),
   makeDeleteHost: async ({ root, childA, childB }) => {
-    const session = new RabbitHoleSession({
+    const session = new RabbitholeSession({
       holeId: "gc-hole",
       title: "GC Hole",
       rootId: "root",
@@ -29,14 +30,14 @@ await runStoreContract(store, {
       deleteNode: (nodeId) => session.handleDeleteNode({ node_id: nodeId }),
       close: async () => {
         session.close("filesystem_store_test_complete");
-        await session.savingChain;
+        await session.saveChain.flush();
       },
     };
   },
 });
 
 {
-  const session = new RabbitHoleSession({
+  const session = new RabbitholeSession({
     holeId: "mcp-note-create",
     title: "MCP note create",
     rootId: "root",

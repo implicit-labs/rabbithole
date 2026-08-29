@@ -1,7 +1,8 @@
+/** @protects model endpoint capability contracts. */
 import assert from "node:assert/strict";
-import { addressSpaceOf, fetchOpenAICompatibleModels, isHttpUrl } from "../../src/web/brain/model-endpoint.js";
-import { discoverLocalModels } from "../../src/web/brain/local-model-catalog.js";
-import { streamOpenAICompatible } from "../../src/web/brain/openai-compatible.js";
+import { addressSpaceOf, fetchOpenAICompatibleModels, isHttpUrl } from "../../src/web/provider/model-endpoint.js";
+import { discoverLocalModels } from "../../src/web/provider/local-model-catalog.js";
+import { streamOpenAICompatible } from "../../src/web/provider/openai-compatible.js";
 
 assert.equal(isHttpUrl("https://api.example.com/v1"), true);
 assert.equal(isHttpUrl("http://localhost:11434/v1"), true);

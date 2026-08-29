@@ -1,3 +1,4 @@
+/** @protects content blocks capability contracts. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
@@ -114,6 +115,7 @@ function runCheckDescriptorGoldens() {
   const model = descriptor.parse('{"question":"Which is <larger>?","options":["1 & 1","2"],"answer":1,"explanation":"Because 2 > 1."}');
   assert.deepEqual(model, { question: "Which is <larger>?", options: ["1 & 1", "2"], answer: 1, explanation: "Because 2 > 1." });
   assert.equal(descriptor.toPlainText(model), "Which is <larger>?\n1 & 1\n2");
+  /** @type {Array<[string, RegExp]>} */
   const rejections = [
     ["{", /valid JSON/], ["[]", /JSON object/], ['{"options":["a","b"],"answer":0}', /question/],
     ['{"question":"Q","answer":0}', /options/], ['{"question":"Q","options":["a"],"answer":0}', /2-6/],
@@ -189,6 +191,7 @@ class MiniElement {
     this.className = "";
     this.classList = new MiniClassList(this);
     this.shadowRoot = null;
+    this.host = null;
   }
   setAttribute(name, value) {
     const stringValue = String(value);
@@ -312,8 +315,8 @@ function createVisualHarness() {
       return Buffer.from(String(value || ""), "base64").toString("binary");
     },
   };
-  globalThis.window = context.window;
-  globalThis.document = context.document;
+  (/** @type {any} */ (globalThis)).window = context.window;
+  (/** @type {any} */ (globalThis)).document = context.document;
   globalThis.Uint8Array = context.Uint8Array;
   globalThis.TextDecoder = context.TextDecoder;
   globalThis.atob = context.atob;

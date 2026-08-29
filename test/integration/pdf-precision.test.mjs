@@ -1,3 +1,4 @@
+/** @protects pdf precision capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -45,10 +46,10 @@ try {
   await page.waitForSelector("#composer-path-file");
   const sourceBytes = await readAttentionPdf();
   await dropPdf(page, sourceBytes);
-  await page.waitForSelector(`.node .rh-pdf-page[data-page='${ATTENTION_PDF_PAGE_COUNT}']`);
-  await page.waitForFunction(() => [...document.querySelectorAll(".node .rh-pdf-textlayer span")].some((element) => element.textContent === "Attention Is All You Need"));
+  await page.waitForSelector(`.card .rh-pdf-page[data-page='${ATTENTION_PDF_PAGE_COUNT}']`);
+  await page.waitForFunction(() => [...document.querySelectorAll(".card .rh-pdf-textlayer span")].some((element) => element.textContent === "Attention Is All You Need"));
   await page.waitForFunction(() => {
-    const canvas = document.querySelector(".node .rh-pdf-canvas-generation canvas");
+    const canvas = document.querySelector(".card .rh-pdf-canvas-generation canvas");
     return !!canvas && canvas.width > 0 && canvas.height > 0;
   });
 
@@ -69,12 +70,12 @@ try {
   assert.match(root.markdown, /The dominant sequence transduction models/);
 
   const scrollContract = await page.evaluate(() => {
-    const body = document.querySelector(".node .node-body");
-    const pdfScroll = document.querySelector(".node .rh-pdf-scroll");
-    const toolbar = document.querySelector(".node .rh-pdf-toolbar");
-    const region = toolbar.querySelector(".rh-pdf-region-actions .node-btn");
+    const body = document.querySelector(".card .card-body");
+    const pdfScroll = document.querySelector(".card .rh-pdf-scroll");
+    const toolbar = document.querySelector(".card .rh-pdf-toolbar");
+    const region = toolbar.querySelector(".rh-pdf-region-actions .card-btn");
     const zoom = toolbar.querySelector(".rh-pdf-zoom-controls");
-    const convert = toolbar.querySelector(".rh-pdf-document-actions .node-btn");
+    const convert = toolbar.querySelector(".rh-pdf-document-actions .card-btn");
     const rect = (element) => element.getBoundingClientRect().toJSON();
     return {
       bodyClass: body.className,
@@ -107,20 +108,20 @@ try {
     "the PDF zoom cluster must be geometrically centered in the toolbar");
   await page.mouse.move(scrollContract.pdfRect.x + scrollContract.pdfRect.width / 2, scrollContract.pdfRect.y + scrollContract.pdfRect.height / 2);
   await page.mouse.wheel(0, 420);
-  await page.waitForFunction(() => document.querySelector(".node .rh-pdf-scroll").scrollTop > 300);
+  await page.waitForFunction(() => document.querySelector(".card .rh-pdf-scroll").scrollTop > 300);
   const trackpadResult = await page.evaluate(() => ({
-    bodyTop: document.querySelector(".node .node-body").scrollTop,
-    pdfTop: document.querySelector(".node .rh-pdf-scroll").scrollTop,
-    toolbarTop: document.querySelector(".node .rh-pdf-toolbar").getBoundingClientRect().top,
+    bodyTop: document.querySelector(".card .card-body").scrollTop,
+    pdfTop: document.querySelector(".card .rh-pdf-scroll").scrollTop,
+    toolbarTop: document.querySelector(".card .rh-pdf-toolbar").getBoundingClientRect().top,
     world: document.querySelector("#world").style.transform,
   }));
   assert.equal(trackpadResult.bodyTop, 0, "trackpad scrolling over a PDF must never move the outer card body");
   assert(trackpadResult.pdfTop > 300, "trackpad scrolling over a PDF must move its pages");
   assert(Math.abs(trackpadResult.toolbarTop - scrollContract.toolbarRect.top) <= 0.5, "the PDF toolbar must remain pinned while its pages scroll");
   assert.equal(trackpadResult.world, scrollContract.world, "reading the PDF must never pan or zoom the canvas");
-  await page.evaluate(() => { document.querySelector(".node .rh-pdf-scroll").scrollTop = 0; });
+  await page.evaluate(() => { document.querySelector(".card .rh-pdf-scroll").scrollTop = 0; });
 
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #tb-document .rh-pdf-reader-toolbar");
   await page.waitForFunction(() => document.querySelector("#reader-main .rh-pdf-canvas-generation[data-ready='true'] canvas"));
@@ -154,7 +155,7 @@ try {
       railDisplay: getComputedStyle(rail).display,
       railCount: document.querySelectorAll("#margin-notes .side-item").length,
       inlineToolbar: !!pdf.querySelector(".rh-pdf-toolbar"),
-      canvasZoom: document.querySelector(".node .rh-pdf-scroll").dataset.zoom,
+      canvasZoom: document.querySelector(".card .rh-pdf-scroll").dataset.zoom,
     };
   });
   assert.match(readerContract.mainClass, /\bpdf-reader-viewport\b/, "a standalone Reader PDF must opt into the full reader viewport");
@@ -189,7 +190,7 @@ try {
   const readerTrackpad = await page.evaluate(() => ({
     readerTop: document.querySelector("#reader-main").scrollTop,
     pdfTop: document.querySelector("#reader-main .rh-pdf-scroll").scrollTop,
-    canvasTop: document.querySelector(".node .rh-pdf-scroll").scrollTop,
+    canvasTop: document.querySelector(".card .rh-pdf-scroll").scrollTop,
     world: document.querySelector("#world").style.transform,
   }));
   assert.equal(readerTrackpad.readerTop, 0, "trackpad reading must not move a hidden outer Reader scroll");
@@ -221,21 +222,21 @@ try {
   });
   assert(readerOverflowWidth.pageWidth > readerOverflowWidth.clientWidth, "Reader must never fit an intentionally zoomed page back down to its viewport");
   assert(readerOverflowWidth.scrollWidth > readerOverflowWidth.clientWidth, "Reader must expose horizontal scrolling once the enlarged paper exceeds the window");
-  assert.equal(await page.locator(".node .rh-pdf-zoom-value").textContent(), "100%", "Reader zoom must remain local to the Reader PDF instance");
+  assert.equal(await page.locator(".card .rh-pdf-zoom-value").textContent(), "100%", "Reader zoom must remain local to the Reader PDF instance");
   await page.click("#tb-document .rh-pdf-zoom-value");
   await page.evaluate(() => document.getElementById("reader-restore").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body.mode-canvas");
   const restoredCanvas = await page.evaluate(() => ({
     documentChrome: getComputedStyle(document.querySelector("#tb-document")).display,
-    canvasToolbarParent: document.querySelector(".node .rh-pdf-toolbar").parentElement.className,
+    canvasToolbarParent: document.querySelector(".card .rh-pdf-toolbar").parentElement.className,
   }));
   assert.equal(restoredCanvas.documentChrome, "none", "Reader PDF controls must disappear completely in Canvas mode");
   assert.match(restoredCanvas.canvasToolbarParent, /\bdoc-content\b/, "Canvas must retain its own in-card PDF toolbar");
 
   const zoomContinuity = await page.evaluate(async () => {
-    const pdfScroll = document.querySelector(".node .rh-pdf-scroll");
-    const firstPage = document.querySelector('.node .rh-pdf-page[data-page="1"]');
+    const pdfScroll = document.querySelector(".card .rh-pdf-scroll");
+    const firstPage = document.querySelector('.card .rh-pdf-page[data-page="1"]');
     const worldBefore = document.querySelector("#world").style.transform;
     const gaps = [], unreadyInsertions = [];
     const titleSpan = [...firstPage.querySelectorAll(".rh-pdf-textlayer span")].find((element) => element.textContent === "Attention Is All You Need");
@@ -280,10 +281,10 @@ try {
       unreadyInsertions,
       observerRecords,
       settled,
-      label: document.querySelector(".node .rh-pdf-zoom-value").textContent,
+      label: document.querySelector(".card .rh-pdf-zoom-value").textContent,
       maxGenerations,
       titleSpanPreserved: titleSpan === [...firstPage.querySelectorAll(".rh-pdf-textlayer span")].find((element) => element.textContent === "Attention Is All You Need"),
-      loadedTextPages: [...document.querySelectorAll(".node .rh-pdf-page")].filter((element) => element.querySelector(".rh-pdf-textlayer span")).length,
+      loadedTextPages: [...document.querySelectorAll(".card .rh-pdf-page")].filter((element) => element.querySelector(".rh-pdf-textlayer span")).length,
       worldBefore,
       worldAfter: document.querySelector("#world").style.transform,
     };
@@ -300,8 +301,8 @@ try {
 
   await setPdfZoom(page, 5);
   const tiledScroll = await page.evaluate(async () => {
-    const scroll = document.querySelector(".node .rh-pdf-scroll");
-    const firstPage = document.querySelector('.node .rh-pdf-page[data-page="1"]');
+    const scroll = document.querySelector(".card .rh-pdf-scroll");
+    const firstPage = document.querySelector('.card .rh-pdf-page[data-page="1"]');
     for (let frame = 0; frame < 240; frame++) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const generation = firstPage.querySelector(".rh-pdf-canvas-generation[data-ready='true']");
@@ -336,7 +337,7 @@ try {
   const singleClick = await page.evaluate(() => ({ ask: document.querySelector("#ask").classList.contains("visible"), collapsed: getSelection().isCollapsed }));
   assert.deepEqual(singleClick, { ask: false, collapsed: true }, "one click must place no selection and open no ask surface");
 
-  const pointerSpan = page.locator('.node .rh-pdf-page[data-page="1"] .rh-pdf-textlayer span').filter({ hasText: /^Attention Is All You Need$/ });
+  const pointerSpan = page.locator('.card .rh-pdf-page[data-page="1"] .rh-pdf-textlayer span').filter({ hasText: /^Attention Is All You Need$/ });
   const pointerSpanCount = await pointerSpan.count();
   assert.equal(pointerSpanCount, 1, "the source text layer must contain one title item, not duplicate race output");
   const pointerDrag = await nativeRangeRect(page, "Attention Is All You Need", 0, 9);
@@ -348,7 +349,7 @@ try {
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", "Real pointer target");
   await page.click('#ask .ask-commit[data-commit="ask"]');
-  await page.waitForFunction(() => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= 1);
+  await page.waitForFunction(() => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= 1);
   const pointerState = await portableState(page);
   const pointerChild = pointerState.hole.nodes.find((node) => node.origin?.question === "Real pointer target");
   assert.equal(await page.locator("#tb-document .rh-pdf-convert").count(), 0, "creating a branch in Canvas must retire the hidden Reader conversion action too");
@@ -412,11 +413,11 @@ try {
     { text: "convolutional neural networks that include an encoder and a decoder. The best", start: 0, end: 13 },
   ]);
   assert(multiAlignment.horizontalEdgeError <= 0.75, `every persisted abstract-line quad must match the native selection horizontally (error ${multiAlignment.horizontalEdgeError}px)`);
-  const multiMark = page.locator(`.node .rh-pdf-mark[data-child="${multi.id}"]`).first();
+  const multiMark = page.locator(`.card .rh-pdf-mark[data-child="${multi.id}"]`).first();
   const multiPolygon = multiMark.locator("polygon").first();
   await multiPolygon.dispatchEvent("mouseover");
   await page.waitForFunction(({ multiId, unrelatedId }) => {
-    const marks = [...document.querySelectorAll(".node .rh-pdf-mark[data-child]")];
+    const marks = [...document.querySelectorAll(".card .rh-pdf-mark[data-child]")];
     const group = marks.filter((mark) => mark.dataset.child === multiId);
     const unrelated = marks.find((mark) => mark.dataset.child === unrelatedId);
     const fills = group.flatMap((mark) => [...mark.querySelectorAll("polygon")].map((polygon) => getComputedStyle(polygon).fill));
@@ -424,7 +425,7 @@ try {
     return fills.length >= 2 && fills.every((fill) => fill === fills[0]) && fills[0] !== normal;
   }, { multiId: multi.id, unrelatedId: pointerChild.id });
   const multiHover = await page.evaluate(({ multiId, unrelatedId }) => {
-    const marks = [...document.querySelectorAll(".node .rh-pdf-mark[data-child]")];
+    const marks = [...document.querySelectorAll(".card .rh-pdf-mark[data-child]")];
     const group = marks.filter((mark) => mark.dataset.child === multiId);
     const unrelated = marks.find((mark) => mark.dataset.child === unrelatedId);
     return {
@@ -441,19 +442,19 @@ try {
   assert.notEqual(multiHover.fills[0], multiHover.unrelatedFill,
     `an unrelated PDF mark must retain its normal fill: ${JSON.stringify(multiHover)}`);
   await multiPolygon.dispatchEvent("mouseout");
-  assert.equal(await page.locator(`.node .rh-pdf-mark[data-child="${multi.id}"].mark-hover`).count(), 0,
+  assert.equal(await page.locator(`.card .rh-pdf-mark[data-child="${multi.id}"].mark-hover`).count(), 0,
     "leaving the multi-line PDF mark must clear its logical-group hover state");
 
   await setPdfZoom(page, 1.3);
   const desiredBounds = [108, 486, 504, 735];
-  await page.locator('.node .rh-pdf-box-toggle').evaluate((element) => element.click());
-  await drawPdfBounds(page, 4, desiredBounds);
+  await page.locator('.card .rh-pdf-box-toggle').evaluate((element) => element.click());
+  await drawPdfBounds(page, 4, /** @type {[number, number, number, number]} */ (desiredBounds));
   await page.waitForSelector("#ask.visible");
-  await page.locator('.node .rh-pdf-zoom-control[aria-label="Zoom PDF in"]').evaluate((element) => {
+  await page.locator('.card .rh-pdf-zoom-control[aria-label="Zoom PDF in"]').evaluate((element) => {
     element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 91, pointerType: "mouse", button: 0, buttons: 1 }));
     element.click();
   });
-  await page.waitForFunction(() => Math.abs(Number(document.querySelector(".node .rh-pdf-scroll")?.dataset.zoom) - 1.625) < 0.0001);
+  await page.waitForFunction(() => Math.abs(Number(document.querySelector(".card .rh-pdf-scroll")?.dataset.zoom) - 1.625) < 0.0001);
   const toolbarZoomPending = await pendingRegionBounds(page);
   assert.equal(toolbarZoomPending.askVisible, true, "PDF zoom controls must not dismiss an uncommitted region");
   for (let index = 0; index < 4; index++) assert(Math.abs(toolbarZoomPending.bounds[index] - desiredBounds[index]) <= 0.35, `pending CropBox coordinate ${index} drifted after toolbar zoom: ${toolbarZoomPending.bounds[index]} vs ${desiredBounds[index]}`);
@@ -465,7 +466,7 @@ try {
   }
   await page.fill("#ask-text", "Crop box exact region");
   await page.click('#ask .ask-commit[data-commit="ask"]');
-  await page.waitForFunction(() => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= 6);
+  await page.waitForFunction(() => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= 6);
   const regionState = await portableState(page);
   const region = regionState.hole.nodes.find((node) => node.origin?.question === "Crop box exact region");
   const regionAnchor = region.origin.anchor.pdf;
@@ -491,7 +492,7 @@ try {
   assert.equal(pdfNote.origin.anchor.pdf.kind, "text");
   assert.equal(pdfNote.status, "answered");
   assert.equal(answerBodies.length, answerCountBeforeNote, "PDF notes must not invoke the model provider");
-  assert.equal(await page.locator(`.node .rh-pdf-mark.mark-ready.mark-note[data-child="${pdfNote.id}"]`).count(), 1,
+  assert.equal(await page.locator(`.card .rh-pdf-mark.mark-ready.mark-note[data-child="${pdfNote.id}"]`).count(), 1,
     "a PDF note should paint an SVG mark-note group immediately");
   assert.equal(pdfNote.extensions?.note?.docked, true, "a PDF note docks onto the page it marks");
   assert.equal(pdfNote.size, null, "a docked PDF note takes no canvas geometry");
@@ -499,7 +500,7 @@ try {
   // Docked notes are not branches: the rail lists cards, the margin lists notes.
   const expectedReaderBranches = noteState.hole.nodes
     .filter((node) => node.parent_id === root.id && node.origin?.kind !== "note").length;
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("body:not(.mode-canvas) #reader-rail");
   await page.waitForFunction((count) => document.querySelectorAll("#margin-notes .side-item").length === count, expectedReaderBranches);
@@ -547,19 +548,19 @@ try {
 }
 
 async function setPdfZoom(page, zoom) {
-  await page.locator(".node .rh-pdf-zoom-value").evaluate((element) => element.click());
-  await page.waitForFunction(() => document.querySelector(".node .rh-pdf-zoom-value")?.textContent === "100%");
+  await page.locator(".card .rh-pdf-zoom-value").evaluate((element) => element.click());
+  await page.waitForFunction(() => document.querySelector(".card .rh-pdf-zoom-value")?.textContent === "100%");
   if (zoom !== 1) await page.evaluate((target) => {
-    const scroll = document.querySelector(".node .rh-pdf-scroll");
+    const scroll = document.querySelector(".card .rh-pdf-scroll");
     scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -Math.log(target) * 100 }));
   }, zoom);
-  await page.waitForFunction((label) => document.querySelector(".node .rh-pdf-zoom-value")?.textContent === label, `${Math.round(zoom * 100)}%`);
-  await page.waitForFunction((target) => Math.abs(Number(document.querySelector(".node .rh-pdf-scroll")?.dataset.zoom) - target) < 0.0001, zoom);
+  await page.waitForFunction((label) => document.querySelector(".card .rh-pdf-zoom-value")?.textContent === label, `${Math.round(zoom * 100)}%`);
+  await page.waitForFunction((target) => Math.abs(Number(document.querySelector(".card .rh-pdf-scroll")?.dataset.zoom) - target) < 0.0001, zoom);
 }
 
 async function wheelPdfZoom(page, zoom) {
   await page.evaluate((target) => {
-    const scroll = document.querySelector(".node .rh-pdf-scroll");
+    const scroll = document.querySelector(".card .rh-pdf-scroll");
     const current = Number(scroll.dataset.zoom || 1);
     const rect = scroll.getBoundingClientRect();
     scroll.dispatchEvent(new WheelEvent("wheel", {
@@ -571,12 +572,12 @@ async function wheelPdfZoom(page, zoom) {
       clientY: rect.top + rect.height / 2,
     }));
   }, zoom);
-  await page.waitForFunction((target) => Math.abs(Number(document.querySelector(".node .rh-pdf-scroll")?.dataset.zoom) - target) < 0.0001, zoom);
+  await page.waitForFunction((target) => Math.abs(Number(document.querySelector(".card .rh-pdf-scroll")?.dataset.zoom) - target) < 0.0001, zoom);
 }
 
 async function pendingRegionBounds(page) {
   return page.evaluate(() => {
-    const draft = document.querySelector(".node .rh-pdf-box-draft.settled");
+    const draft = document.querySelector(".card .rh-pdf-box-draft.settled");
     const pdfPage = draft?.closest(".rh-pdf-page");
     if (!draft || !pdfPage?._pdfViewport) throw new Error("Pending PDF region is missing");
     const viewport = pdfPage._pdfViewport, pageRect = pdfPage.getBoundingClientRect(), draftRect = draft.getBoundingClientRect();
@@ -594,7 +595,7 @@ async function pendingRegionBounds(page) {
 // Returns the node count a single commit should reach.
 async function selectAndFill(page, itemText, start, end, text) {
   const picked = await page.evaluate(({ itemText, start, end }) => {
-    const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
+    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
     if (!span?.firstChild) throw new Error(`Text item not found: ${itemText}`);
     span.scrollIntoView({ block: "center", inline: "center" });
     const range = document.createRange(); range.setStart(span.firstChild, start); range.setEnd(span.firstChild, end);
@@ -604,14 +605,14 @@ async function selectAndFill(page, itemText, start, end, text) {
   assert.equal(picked, itemText.slice(start, end));
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", text);
-  return await page.locator(".node").count() + 1;
+  return await page.locator(".card").count() + 1;
 }
 
 async function selectAndAsk(page, itemText, start, end, question) {
   const expected = await selectAndFill(page, itemText, start, end, question);
   await page.click('#ask .ask-commit[data-commit="ask"]');
-  await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
-  await page.waitForFunction((count) => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= count, expected - 1);
+  await page.waitForFunction((count) => document.querySelectorAll(".card").length >= count, expected);
+  await page.waitForFunction((count) => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }
 
 // A note about a PDF selection docks onto the PDF's own card: an SVG mark-note
@@ -619,14 +620,14 @@ async function selectAndAsk(page, itemText, start, end, question) {
 async function selectAndNote(page, itemText, start, end, markdown) {
   const before = await selectAndFill(page, itemText, start, end, markdown) - 1;
   await page.click('#ask .ask-commit[data-commit="note"]');
-  await page.waitForSelector(".node .rh-pdf-mark.mark-note");
-  await page.waitForSelector(".node .note-dot");
-  assert.equal(await page.locator(".node").count(), before, "a docked PDF note must not spawn a card");
+  await page.waitForSelector(".card .rh-pdf-mark.mark-note");
+  await page.waitForSelector(".card .note-dot");
+  assert.equal(await page.locator(".card").count(), before, "a docked PDF note must not spawn a card");
 }
 
 async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, lastOffset, question }) {
   const picked = await page.evaluate(({ firstText, firstOffset, lastText, lastOffset }) => {
-    const spans = [...document.querySelectorAll(".node .rh-pdf-textlayer span")];
+    const spans = [...document.querySelectorAll(".card .rh-pdf-textlayer span")];
     const first = spans.find((element) => element.textContent === firstText);
     const last = spans.find((element) => element.textContent === lastText);
     if (!first?.firstChild || !last?.firstChild) throw new Error("Multi-line PDF text items were not found");
@@ -643,10 +644,10 @@ async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, last
   assert.match(picked, /convolutional$/);
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", question);
-  const expected = await page.locator(".node").count() + 1;
+  const expected = await page.locator(".card").count() + 1;
   await page.click('#ask .ask-commit[data-commit="ask"]');
-  await page.waitForFunction((count) => document.querySelectorAll(".node").length >= count, expected);
-  await page.waitForFunction((count) => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= count, expected - 1);
+  await page.waitForFunction((count) => document.querySelectorAll(".card").length >= count, expected);
+  await page.waitForFunction((count) => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }
 
 async function portableState(page) {
@@ -655,10 +656,10 @@ async function portableState(page) {
 
 async function selectionMarkAlignment(page, childId, itemText, start, end) {
   return page.evaluate(({ childId, itemText, start, end }) => {
-    const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
+    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
     const range = document.createRange(); range.setStart(span.firstChild, start); range.setEnd(span.firstChild, end);
     const selected = range.getBoundingClientRect();
-    const marked = document.querySelector(`.node [data-child="${childId}"] polygon`).getBoundingClientRect();
+    const marked = document.querySelector(`.card [data-child="${childId}"] polygon`).getBoundingClientRect();
     const horizontal = [Math.abs(selected.left - marked.left), Math.abs(selected.right - marked.right)];
     const vertical = [Math.abs(selected.top - marked.top), Math.abs(selected.bottom - marked.bottom)];
     return { horizontalEdgeError: Math.max(...horizontal), verticalInkAdjustment: Math.max(...vertical), selected: { x: selected.x, y: selected.y, width: selected.width, height: selected.height }, marked: { x: marked.x, y: marked.y, width: marked.width, height: marked.height } };
@@ -667,7 +668,7 @@ async function selectionMarkAlignment(page, childId, itemText, start, end) {
 
 async function nativeRangeRect(page, itemText, start, end) {
   return page.evaluate(({ itemText, start, end }) => {
-    const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
+    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
     if (!span?.firstChild) throw new Error(`Text item not found: ${itemText}`);
     span.scrollIntoView({ block: "center", inline: "center" });
     const range = document.createRange(); range.setStart(span.firstChild, start); range.setEnd(span.firstChild, end);
@@ -678,13 +679,13 @@ async function nativeRangeRect(page, itemText, start, end) {
 
 async function multiSelectionMarkAlignment(page, childId, selections) {
   return page.evaluate(({ childId, selections }) => {
-    const spans = [...document.querySelectorAll(".node .rh-pdf-textlayer span")];
+    const spans = [...document.querySelectorAll(".card .rh-pdf-textlayer span")];
     const expected = selections.map(({ text, start, end }) => {
       const span = spans.find((element) => element.textContent === text);
       const range = document.createRange(); range.setStart(span.firstChild, start); range.setEnd(span.firstChild, end);
       return range.getBoundingClientRect();
     });
-    const marked = [...document.querySelectorAll(`.node [data-child="${childId}"] polygon`)].map((polygon) => polygon.getBoundingClientRect());
+    const marked = [...document.querySelectorAll(`.card [data-child="${childId}"] polygon`)].map((polygon) => polygon.getBoundingClientRect());
     if (marked.length !== expected.length) throw new Error(`Expected ${expected.length} polygons, found ${marked.length}`);
     const horizontal = expected.flatMap((selected, index) => {
       const mark = marked[index];
@@ -695,10 +696,10 @@ async function multiSelectionMarkAlignment(page, childId, selections) {
 }
 
 async function drawPdfBounds(page, pageNumber, [x0, y0, x1, y1]) {
-  await page.locator(`.node .rh-pdf-page[data-page="${pageNumber}"]`).scrollIntoViewIfNeeded();
-  await page.waitForFunction((number) => !!document.querySelector(`.node .rh-pdf-page[data-page="${number}"]`)?._pdfViewport, pageNumber);
+  await page.locator(`.card .rh-pdf-page[data-page="${pageNumber}"]`).scrollIntoViewIfNeeded();
+  await page.waitForFunction((number) => !!document.querySelector(`.card .rh-pdf-page[data-page="${number}"]`)?._pdfViewport, pageNumber);
   return page.evaluate(({ pageNumber, x0, y0, x1, y1 }) => {
-    const element = document.querySelector(`.node .rh-pdf-page[data-page="${pageNumber}"]`);
+    const element = document.querySelector(`.card .rh-pdf-page[data-page="${pageNumber}"]`);
     const viewport = element._pdfViewport, rect = element.getBoundingClientRect();
     const toClient = ([x, y]) => ({ x: rect.left + x * rect.width / viewport.width, y: rect.top + y * rect.height / viewport.height });
     const start = toClient(viewport.convertToViewportPoint(x0, y1)), end = toClient(viewport.convertToViewportPoint(x1, y0));

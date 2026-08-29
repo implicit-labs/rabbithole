@@ -1,3 +1,4 @@
+/** @protects clipboard image capability contracts. */
 import assert from "node:assert/strict";
 import { extractNodeAssetRefs } from "../../src/core/assets.js";
 import {

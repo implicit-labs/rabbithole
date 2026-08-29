@@ -1,6 +1,6 @@
-import { providerFor } from "../brain/provider-registry.js";
+import { providerFor } from "../provider/provider-registry.js";
 import { getApiKey } from "./credential-store.js";
-import { loadSettings, saveSettings } from "./preferences-store.js";
+import { loadSettings, saveSettings } from "./settings.js";
 
 const SETUP_VERSION = 1;
 

@@ -1,3 +1,4 @@
+/** @protects pdf ingestion capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -51,7 +52,7 @@ assert.equal(opened.status, "cancelled");
 const session = getSession(opened.session_id);
 const holeId = session.holeId;
 const root = session.nodes.get(session.rootId);
-const pdf = root.extensions.pdf;
+const pdf = root.source;
 assert.equal(pdf.version, 2);
 assert.equal(pdf.source.asset, `pdf-${pdf.source.sha256}.pdf`);
 assert.deepEqual(await fs.readFile(await resolveAsset(holeId, pdf.source.asset)), sourceBytes, "the stored PDF must be byte-identical to the input");

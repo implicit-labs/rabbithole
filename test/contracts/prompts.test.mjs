@@ -1,3 +1,4 @@
+/** @protects prompts capability contracts. */
 import assert from "node:assert/strict";
 import { buildAnswerMessages } from "../../src/core/prompts/answering-v1.js";
 import { AUTHORING_VOCABULARY_V1 } from "../../src/core/prompts/authoring-v1.js";

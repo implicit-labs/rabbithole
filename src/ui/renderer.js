@@ -1,11 +1,8 @@
-import {
-  MARKDOWN_RENDERER_SENTINEL,
-  createMarkdownRenderer
-} from "../core/markdown-renderer.js";
+import { createMarkdownRenderer, MARKDOWN_RENDERER_SENTINEL } from "../core/markdown-renderer.js";
 
-var assetData = null;
-var assetNames = null;
-var utf8Encoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
+let assetData = null;
+let assetNames = null;
+const utf8Encoder = typeof TextEncoder === "function" ? new TextEncoder() : null;
 
 export function setRendererAssetData(data) {
   assetData = data && typeof data === "object" ? data : null;
@@ -17,14 +14,14 @@ export function registerRendererAssetName(name) {
 }
 
 function browserEncodeBase64Utf8(value) {
-  var source = String(value == null ? "" : value);
+  const source = String(value == null ? "" : value);
   if (utf8Encoder) {
-    var bytes = utf8Encoder.encode(source);
-    var chunks = [];
-    for (var i = 0; i < bytes.length; i += 8192) {
-      var end = Math.min(i + 8192, bytes.length);
-      var part = "";
-      for (var j = i; j < end; j++) part += String.fromCharCode(bytes[j]);
+    const bytes = utf8Encoder.encode(source);
+    const chunks = [];
+    for (let i = 0; i < bytes.length; i += 8192) {
+      const end = Math.min(i + 8192, bytes.length);
+      let part = "";
+      for (let j = i; j < end; j++) part += String.fromCharCode(bytes[j]);
       chunks.push(part);
     }
     return btoa(chunks.join(""));
@@ -33,7 +30,7 @@ function browserEncodeBase64Utf8(value) {
 }
 
 function liveAssetUrl(name) {
-  var slash = String.fromCharCode(47);
+  const slash = String.fromCharCode(47);
   return slash + "assets" + slash + name;
 }
 
@@ -42,9 +39,9 @@ export function resolveAssetUrl(name) {
   return liveAssetUrl(name);
 }
 
-var markdownRenderer = createMarkdownRenderer({
+const markdownRenderer = createMarkdownRenderer({
   encodeBase64: browserEncodeBase64Utf8,
-  resolveAssetUrl: resolveAssetUrl
+  resolveAssetUrl: resolveAssetUrl,
 });
 
 function renderMarkdownToHtml(markdown, options) {
@@ -56,23 +53,23 @@ export function renderMarkdownForSurface(markdown, options) {
 }
 
 function renderNodeMarkdown(node) {
-  return renderMarkdownToHtml(node && node.md, {
+  return renderMarkdownToHtml(node && node.markdown, {
     baseUrl: (node && node.base_url) || null,
-    assetNames: assetNames
+    assetNames: assetNames,
   });
 }
 
 export function refreshNodeHtml(node) {
   if (!node) return "";
   node.html = renderNodeMarkdown(node);
-  node._htmlFor = node.md;
+  node._htmlFor = node.markdown;
   node._plainFor = null;
   return node.html;
 }
 
 export function ensureNodeHtml(node) {
   if (!node) return "";
-  return node._htmlFor === node.md ? node.html : refreshNodeHtml(node);
+  return node._htmlFor === node.markdown ? node.html : refreshNodeHtml(node);
 }
 
 if (typeof window !== "undefined") {

@@ -1,17 +1,6 @@
-const PRODUCTION_ORIGINS = new Set(["https://rabbithole.ing"]);
+import { isAllowedBrowserOrigin } from "../shared/http-guard.js";
 
-export function isAllowedOrigin(origin) {
-  if (typeof origin !== "string") return false;
-  if (PRODUCTION_ORIGINS.has(origin)) return true;
-  try {
-    const url = new URL(origin);
-    if (url.protocol !== "http:") return false;
-    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return false;
-    return url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
+export const isAllowedOrigin = isAllowedBrowserOrigin;
 
 export function applyCors(req, res) {
   const origin = req.headers.origin;

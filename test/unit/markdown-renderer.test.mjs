@@ -1,3 +1,4 @@
+/** @protects markdown renderer capability contracts. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
@@ -12,7 +13,7 @@ process.env.RABBITHOLE_NO_BROWSER = "1";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-markdown-renderer-"));
 
 const KATEX_CSS_SENTINEL = ".katex .katex-version::after";
-const CODE_COPY_CSS_SENTINEL = ".md .code-copy { position: absolute; top: 7px; right: 7px;";
+const CODE_COPY_CSS_SENTINEL = ".md .code-copy{position:absolute;top:7px;right:7px;";
 const CODE_COPY_MARKUP_SENTINEL = '<span class="ic-check" hidden>';
 
 function count(haystack, needle) {

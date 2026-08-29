@@ -1,5 +1,6 @@
+/** @protects ollama diagnostics capability contracts. */
 import assert from "node:assert/strict";
-import { diagnoseOllama, ollamaUrls } from "../../src/web/brain/ollama-diagnostics.js";
+import { diagnoseOllama, ollamaUrls } from "../../src/web/provider/ollama-diagnostics.js";
 import { OLLAMA_ORIGIN_COMMANDS } from "../../src/web/settings/ollama-recovery.js";
 
 const originalFetch = globalThis.fetch;
@@ -36,7 +37,7 @@ try {
   };
   const ready = await diagnoseOllama("http://localhost:11434/v1", { requestPermission: true });
   assert.equal(ready.status, "ready");
-  assert.deepEqual(ready.models, [{ id: "gemma3:4b", name: "gemma3:4b", capabilities: ["completion", "vision"], vision: true }]);
+  assert.deepEqual(ready.models, [{ id: "gemma3:4b", name: "gemma3:4b", vision: true, reasoning: null, capabilities: ["completion", "vision"] }]);
   assert.deepEqual(ollamaUrls("http://localhost:11434/v1/"), {
     openAiBase: "http://localhost:11434/v1",
     version: "http://localhost:11434/api/version",

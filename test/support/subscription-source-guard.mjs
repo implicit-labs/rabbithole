@@ -40,7 +40,7 @@ export async function assertNoDeletedSubscriptionMechanisms({ root = ROOT } = {}
     file: path.relative(root, file),
     source: await fs.readFile(file, "utf8"),
   })));
-  const codexBridge = sources.find(({ file }) => file === "src/node/bridge/codex.js");
+  const codexBridge = sources.find(({ file }) => file === "src/node/bridge/agents/codex.js");
   assert.match(
     codexBridge?.source || "",
     /class CodexAppServer[\s\S]*?model\/list/,

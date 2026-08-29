@@ -1,3 +1,4 @@
+/** @protects hole id capability contracts. */
 import assert from "node:assert/strict";
 import {
   createWhimsicalHoleId,

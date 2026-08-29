@@ -1,13 +1,13 @@
 import { escapeHtml } from "../../core/utils.js";
 import { openDialog } from "../../ui/primitives/dialog.js";
-import { localVisionModels } from "../brain/pdf-transcription.js";
+import { localVisionModels } from "../provider/pdf-transcription.js";
 import {
   diagnoseOllama,
   pullOllamaModel,
   RECOMMENDED_OLLAMA_MODEL,
   RECOMMENDED_OLLAMA_MODEL_SIZE,
   verifyOllamaModel,
-} from "../brain/ollama-diagnostics.js";
+} from "../provider/ollama-diagnostics.js";
 
 const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download/mac";
 export const OLLAMA_ORIGIN_COMMANDS = `launchctl setenv OLLAMA_ORIGINS "https://rabbithole.ing"
@@ -18,6 +18,7 @@ const STEPS = ["browser", "ollama", "access", "model"];
 const STEP_LABELS = { browser: "Browser", ollama: "Ollama", access: "Site access", model: "Model" };
 const SUCCESS_DWELL_MS = 1100;
 
+/** @param {{onResolved?: (result: any) => any}} [options] */
 export function createOllamaRecoveryDialog({ onResolved } = {}) {
   let overlay = null;
   let dialog = null;
@@ -39,7 +40,7 @@ export function createOllamaRecoveryDialog({ onResolved } = {}) {
     overlay.innerHTML = `<section id="ollama-recovery-card" class="ollama-recovery-card" tabindex="-1" aria-labelledby="ollama-recovery-title">
       <header class="ollama-recovery-header">
         <h1 id="ollama-recovery-title">Connect Ollama</h1>
-        <button class="ollama-recovery-close" type="button" aria-label="Close Ollama setup">×</button>
+        <${BUTTON_TAG} class="ollama-recovery-close" type="button" aria-label="Close Ollama setup">×</button>
       </header>
       <div class="ollama-recovery-steps" aria-label="Ollama setup progress"></div>
       <div id="ollama-recovery-content" class="ollama-recovery-content" aria-live="polite"></div>
@@ -190,7 +191,7 @@ export function createOllamaRecoveryDialog({ onResolved } = {}) {
       ${modelCardHtml({ name: RECOMMENDED_OLLAMA_MODEL, size: RECOMMENDED_OLLAMA_MODEL_SIZE, meta: "Text and vision" })}
       <div class="ollama-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Downloading ${escapeHtml(RECOMMENDED_OLLAMA_MODEL)}"><span></span></div>
       <div class="ollama-progress-meta"><span class="ollama-progress-status">Preparing…</span><span class="ollama-progress-percent"></span></div>
-      <div class="ollama-recovery-actions"><button id="ollama-cancel-download" class="ollama-secondary" type="button">Cancel</button></div>
+      <div class="ollama-recovery-actions"><${BUTTON_TAG} id="ollama-cancel-download" class="ollama-secondary" type="button">Cancel</button></div>
     </div>`);
     stage?.querySelector("#ollama-cancel-download")?.addEventListener("click", () => {
       downloadController?.abort();
@@ -262,13 +263,14 @@ export function createOllamaRecoveryDialog({ onResolved } = {}) {
     setStage(`<div class="ollama-recovery-stage ollama-recovery-checking"><span class="ollama-spinner" aria-hidden="true"></span><h2>${escapeHtml(title)}</h2>${note ? `<p class="ollama-checking-note">${escapeHtml(note)}</p>` : ""}</div>`);
   }
 
+  /** @param {{step: string, completeThrough?: string, tone?: string, title: string, copy: string, code?: string, model?: any, primary?: any, secondary?: any}} state */
   function renderState({ step, completeThrough = "", tone = "", title, copy, code, model, primary, secondary }) {
     if (!overlay) return;
     renderSteps(step, completeThrough);
     const stage = setStage(`<div class="ollama-recovery-stage"${tone ? ` data-tone="${escapeHtml(tone)}"` : ""}><h2>${escapeHtml(title)}</h2><p>${escapeHtml(copy)}</p>
       ${model ? modelCardHtml(model) : ""}
       ${code ? `<div class="ollama-command"><code>${code.split("\n").map((line) => `<span class="ollama-command-line">${escapeHtml(line)}</span>`).join("")}</code></div>` : ""}
-      <div class="ollama-recovery-actions">${primary ? `<button id="ollama-primary-action" class="web-primary" type="button"><span class="ollama-btn-label">${escapeHtml(primary.label)}</span></button>` : ""}${secondary ? (secondary.href ? `<a class="ollama-secondary" href="${escapeHtml(secondary.href)}" target="_blank" rel="noreferrer">${escapeHtml(secondary.label)}</a>` : `<button id="ollama-secondary-action" class="ollama-secondary" type="button">${escapeHtml(secondary.label)}</button>`) : ""}</div></div>`);
+      <div class="ollama-recovery-actions">${primary ? `<${BUTTON_TAG} id="ollama-primary-action" class="web-primary" type="button"><span class="ollama-btn-label">${escapeHtml(primary.label)}</span></button>` : ""}${secondary ? (secondary.href ? `<a class="ollama-secondary" href="${escapeHtml(secondary.href)}" target="_blank" rel="noreferrer">${escapeHtml(secondary.label)}</a>` : `<${BUTTON_TAG} id="ollama-secondary-action" class="ollama-secondary" type="button">${escapeHtml(secondary.label)}</button>`) : ""}</div></div>`);
     if (primary) stage?.querySelector("#ollama-primary-action")?.addEventListener("click", (event) => primary.action(event.currentTarget));
     if (secondary?.action) stage?.querySelector("#ollama-secondary-action")?.addEventListener("click", (event) => secondary.action(event.currentTarget));
   }
@@ -362,3 +364,4 @@ async function copyText(value) {
   area.value = value; area.style.position = "fixed"; area.style.opacity = "0";
   document.body.append(area); area.select(); document.execCommand("copy"); area.remove();
 }
+import { BUTTON_TAG } from "../../core/html/markup.js";

@@ -1,5 +1,6 @@
+/** @protects model notes capability contracts. */
 import assert from "node:assert/strict";
-import { BRANCH_FOLLOWUP, branchTypeOfNode, collectRelevantNotes } from "../../src/core/model.js";
+import { BRANCH_FOLLOWUP, branchTypeOfNode, collectRelevantNotes } from "../../src/core/hole/ask.js";
 
 const nodes = new Map([
   ["root", { id: "root", parent_id: null }],

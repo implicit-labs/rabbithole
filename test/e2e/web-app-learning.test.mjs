@@ -1,3 +1,4 @@
+/** @protects web app learning capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -13,6 +14,7 @@ const KEY_URL = "https://openrouter.ai/api/v1/key";
 const MODEL_URL = "https://openrouter.ai/api/v1/models";
 const LOCAL_MODEL_URL = "http://localhost:11434/v1/models";
 const NOTICE_SOURCE = (await fs.readFile(path.join(ROOT, "src/ui/primitives/notice.js"), "utf8"))
+  .replace('import { systemClock } from "../../core/clock.js";', "const systemClock = { now: () => Date.now() };")
   .replace("export function wireNotice", "window.wireNotice = function wireNotice");
 
 const app = await bootWebApp();
@@ -37,39 +39,39 @@ async function verifyBranchContentSizing() {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => !!window.__rabbitholeTest);
   await createDocument(page, "# Sizing root\n\nAsk two follow-ups from here.");
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("#composer-text:visible");
 
   await page.fill("#composer-text", "Give me a brief answer");
   await page.click('#composer-actions [data-commit="ask"]');
-  const shortCard = page.locator(".node:not(.root)", { hasText: "Brief answer" });
+  const shortCard = page.locator(".card:not(.root)", { hasText: "Brief answer" });
   await shortCard.waitFor({ state: "attached" });
   await page.evaluate(() => document.getElementById("reader-restore").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await shortCard.waitFor();
-  const shortSize = await shortCard.evaluate((el) => ({ height: el.offsetHeight, cap: parseFloat(el.style.maxHeight), bodyClient: el.querySelector(".node-body").clientHeight, bodyScroll: el.querySelector(".node-body").scrollHeight }));
+  const shortSize = await shortCard.evaluate((el) => ({ height: el.offsetHeight, cap: parseFloat(el.style.maxHeight), bodyClient: el.querySelector(".card-body").clientHeight, bodyScroll: el.querySelector(".card-body").scrollHeight }));
   assert.equal(shortSize.cap, 460, "a branch should retain the saved/default height as its cap");
   assert(shortSize.height < shortSize.cap, `short branch should hug its content (${shortSize.height}px < ${shortSize.cap}px)`);
   assert(shortSize.bodyScroll <= shortSize.bodyClient + 1, "a short branch should not create an empty scrolling viewport");
 
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForSelector("#composer-text:visible");
   await page.fill("#composer-text", "Give me a long answer");
   await page.click('#composer-actions [data-commit="ask"]');
-  const longCard = page.locator(".node:not(.root)", { hasText: "Long answer" });
+  const longCard = page.locator(".card:not(.root)", { hasText: "Long answer" });
   await longCard.waitFor({ state: "attached" });
   await page.evaluate(() => document.getElementById("reader-restore").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await longCard.waitFor();
   await page.waitForFunction(() => {
-    const cards = Array.from(document.querySelectorAll(".node:not(.root)"));
+    const cards = Array.from(document.querySelectorAll(".card:not(.root)"));
     const card = cards.find((el) => el.textContent.includes("Long answer"));
-    const body = card?.querySelector(".node-body");
+    const body = card?.querySelector(".card-body");
     return !!body && body.scrollHeight > body.clientHeight + 1;
   });
-  const longSize = await longCard.evaluate((el) => ({ height: el.offsetHeight, cap: parseFloat(el.style.maxHeight), bodyClient: el.querySelector(".node-body").clientHeight, bodyScroll: el.querySelector(".node-body").scrollHeight }));
+  const longSize = await longCard.evaluate((el) => ({ height: el.offsetHeight, cap: parseFloat(el.style.maxHeight), bodyClient: el.querySelector(".card-body").clientHeight, bodyScroll: el.querySelector(".card-body").scrollHeight }));
   assert.equal(longSize.height, longSize.cap, "a long branch should stop growing at its saved/default height");
   assert(longSize.bodyScroll > longSize.bodyClient + 1, "content beyond the branch cap should remain scrollable");
 
@@ -309,7 +311,7 @@ async function createDocument(page, markdown) {
     const id = window.__rabbitholeTest?.currentHoleId?.();
     return id && id !== oldId;
   }, previous);
-  await page.waitForSelector(".node .doc-content[data-node-id]");
+  await page.waitForSelector(".card .doc-content[data-node-id]");
   return page.evaluate(() => window.__rabbitholeTest.currentHoleId());
 }
 
@@ -321,12 +323,12 @@ async function ensureRailOpen(page) {
 }
 
 async function waitForCanvasText(page, text) {
-  await page.locator(".node", { hasText: text }).first().waitFor();
+  await page.locator(".card", { hasText: text }).first().waitFor();
 }
 
 async function selectText(page, needle) {
   await page.evaluate((text) => {
-    const root = document.querySelector(".node .doc-content[data-node-id]");
+    const root = document.querySelector(".card .doc-content[data-node-id]");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {

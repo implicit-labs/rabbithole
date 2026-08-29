@@ -1,3 +1,4 @@
+/** @protects data boundaries capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -258,7 +259,7 @@ console.log("ok data boundaries: future format_version is clearly refused");
 
 await assert.rejects(
   () => importRabbitholeFile(new FsStore(), portable(validHole({ schema_version: 3 }))),
-  (error) => error?.message === NEWER_SCHEMA_MESSAGE,
+  (/** @type {any} */ error) => error?.message === NEWER_SCHEMA_MESSAGE,
 );
 console.log("ok data boundaries: future schema_version is legibly refused");
 
@@ -344,8 +345,8 @@ const snapshot = (payload, before = "", after = "") =>
   const storage = new Map();
   const previousWindow = globalThis.window;
   const previousLocalStorage = globalThis.localStorage;
-  globalThis.window = {};
-  globalThis.localStorage = {
+  (/** @type {any} */ (globalThis)).window = {};
+  (/** @type {any} */ (globalThis)).localStorage = {
     getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, String(value)),
   };
@@ -399,7 +400,7 @@ console.log("ok data boundaries: snapshot and portable imports enforce inert ext
   assert.equal((await exactStore.getAsset(accepted.hole_id, "limit.png")).byteLength, MAX_ASSET_BYTES);
   const originalAtob = globalThis.atob;
   let atobCalled = false;
-  globalThis.atob = (...args) => { atobCalled = true; return originalAtob(...args); };
+  globalThis.atob = (value) => { atobCalled = true; return originalAtob(value); };
   await assert.rejects(
     async () => importRabbitholeFile(await newStore(), portable(validHole({ hole_id: "asset-over" }), { "limit.png": over })),
     /exceeds 20 MB/,

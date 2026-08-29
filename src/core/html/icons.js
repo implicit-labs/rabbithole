@@ -109,9 +109,9 @@ const ICON_DEFINITIONS = Object.freeze({
   info: ionicon(ICON_SELECTIONS.info, 13),
 });
 
-/** @param {keyof typeof ICON_DEFINITIONS} name @param {{ size?: number }=} options */
+/** @param {string} name @param {{ size?: number }=} options */
 export function iconSvg(name, options = {}) {
-  const definition = ICON_DEFINITIONS[name];
+  const definition = ICON_DEFINITIONS[/** @type {keyof typeof ICON_DEFINITIONS} */ (name)];
   if (!definition) throw new Error(`Unknown Rabbithole icon: ${name}`);
   const size = options.size ?? definition.size;
   if (size !== null && (!Number.isFinite(size) || size <= 0)) throw new Error("Icon size must be a positive number");

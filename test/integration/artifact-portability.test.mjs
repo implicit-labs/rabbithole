@@ -1,3 +1,4 @@
+/** @protects artifact portability capability contracts. */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -95,9 +96,9 @@ try {
 
   const pdfBytes = await readAttentionPdf();
   await dropPdf(page, pdfBytes);
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
   await page.waitForFunction(() => {
-    const canvas = document.querySelector(".node .rh-pdf-canvas-generation canvas");
+    const canvas = document.querySelector(".card .rh-pdf-canvas-generation canvas");
     return !!canvas && canvas.width > 0 && canvas.height > 0;
   });
 
@@ -135,9 +136,9 @@ try {
   const importPage = await fresh.newPage();
   await importPage.goto(baseUrl, { waitUntil: "networkidle" });
   await importPage.setInputFiles("#file-md", shareExportPath);
-  await importPage.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
+  await importPage.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
   await importPage.waitForFunction(() => {
-    const canvas = document.querySelector(".node .rh-pdf-canvas-generation canvas");
+    const canvas = document.querySelector(".card .rh-pdf-canvas-generation canvas");
     return !!canvas && canvas.width > 0 && canvas.height > 0;
   });
 
@@ -189,7 +190,7 @@ async function assertShellPolish(page) {
 }
 
 async function waitForCanvasText(page, text) {
-  await page.locator(".node", { hasText: text }).first().waitFor();
+  await page.locator(".card", { hasText: text }).first().waitFor();
 }
 
 async function ensureRailOpen(page) {

@@ -1,3 +1,4 @@
+/** @protects bridge catalog capability contracts. */
 import assert from "node:assert/strict";
 import {
   BRIDGE_AGENT_COMMANDS,
@@ -13,7 +14,7 @@ import {
   parseBridgeFrame,
   planLabel,
   reasoningLabel,
-} from "../../src/web/brain/bridge-catalog.js";
+} from "../../src/web/provider/bridge-catalog.js";
 
 assert.equal(bridgeRootUrl("http://127.0.0.1:41414/v1"), "http://127.0.0.1:41414");
 assert.equal(bridgeRootUrl("http://127.0.0.1:41414/v1/"), "http://127.0.0.1:41414");
@@ -88,7 +89,7 @@ assert.deepEqual(bridgeModelsForAgent(ready, "claude")[0], {
   id: "claude/sonnet",
   name: "Sonnet",
   agent: "claude",
-  images: true,
+  vision: true,
   reasoning: { options: ["low", "medium", "future"], default: "future" },
 });
 assert.equal(bridgeAgent(normalizeBridgeState({
@@ -100,8 +101,8 @@ assert.equal(parseBridgeFrame(":heartbeat\n\n"), null);
 const realFetch = globalThis.fetch;
 try {
   const encoder = new TextEncoder();
-  let request = null;
-  globalThis.fetch = async (url, options) => {
+  let request = /** @type {any} */ (null);
+  (/** @type {any} */ (globalThis)).fetch = async (url, options) => {
     request = { url: String(url), options };
     const payload = `data: ${JSON.stringify(ready)}\n\n:heartbeat\n\n`;
     return {
@@ -126,7 +127,7 @@ try {
   assert.equal(frames.length, 1);
   assert.equal(bridgeAgent(frames[0], "claude").models[0].id, "claude/sonnet");
 
-  globalThis.fetch = async () => ({ status: 401, ok: false });
+  (/** @type {any} */ (globalThis)).fetch = async () => ({ status: 401, ok: false });
   assert.deepEqual(
     await consumeBridgeEvents("http://127.0.0.1:41414/v1", "old-token"),
     { reason: "unauthorized" },
@@ -136,7 +137,7 @@ try {
 }
 
 /* Pairing input takes whatever the terminal let the user grab. */
-const { pairingFromInput } = await import("../../src/web/brain/bridge-catalog.js");
+const { pairingFromInput } = await import("../../src/web/provider/bridge-catalog.js");
 const hex = "a".repeat(64);
 assert.deepEqual(pairingFromInput(`https://rabbithole.ing/#bridge=${hex}`), { token: hex });
 assert.deepEqual(pairingFromInput(`  https://rabbithole.ing/#bridge=${hex}&bridge_port=41500 `), { token: hex, port: 41500 });
@@ -150,14 +151,14 @@ assert.equal(pairingFromInput("two words"), null);
 /* The ping probe answers up/down and never throws. */
 const pingFetch = globalThis.fetch;
 try {
-  const { pingBridge } = await import("../../src/web/brain/bridge-catalog.js");
+  const { pingBridge } = await import("../../src/web/provider/bridge-catalog.js");
   let pingUrl = "";
-  globalThis.fetch = async (url) => { pingUrl = url; return { ok: true }; };
+  (/** @type {any} */ (globalThis)).fetch = async (url) => { pingUrl = url; return { ok: true }; };
   assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), true);
   assert.equal(pingUrl, "http://127.0.0.1:41414/bridge/ping");
-  globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  (/** @type {any} */ (globalThis)).fetch = async () => { throw new TypeError("Failed to fetch"); };
   assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), false);
-  globalThis.fetch = async () => ({ ok: false, status: 403 });
+  (/** @type {any} */ (globalThis)).fetch = async () => ({ ok: false, status: 403 });
   assert.equal(await pingBridge("http://127.0.0.1:41414/v1"), false);
 } finally {
   globalThis.fetch = pingFetch;

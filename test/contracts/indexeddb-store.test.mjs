@@ -1,3 +1,4 @@
+/** @protects indexeddb store capability contracts. */
 import assert from "node:assert/strict";
 import { assertRabbitholeStore } from "../../src/core/store.js";
 import { IdbStore } from "../../src/web/store/idb-store.js";
@@ -7,7 +8,13 @@ import { runStoreContract } from "../support/store-contract.mjs";
 import "fake-indexeddb/auto";
 
 if (typeof globalThis.FileReader !== "function") {
-  globalThis.FileReader = class {
+  (/** @type {any} */ (globalThis)).FileReader = class {
+    constructor() {
+      this.result = null;
+      this.error = null;
+      this.onload = null;
+      this.onerror = null;
+    }
     readAsDataURL(blob) {
       blob.arrayBuffer().then((buffer) => {
         this.result = `data:${blob.type || "application/octet-stream"};base64,${Buffer.from(buffer).toString("base64")}`;

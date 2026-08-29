@@ -1,3 +1,4 @@
+/** @protects enter composition capability contracts. */
 import assert from "node:assert/strict";
 import { routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { bootWebApp } from "../support/web-app-harness.mjs";
@@ -31,7 +32,7 @@ async function verifyEnterCompositionAndNewlines() {
   ]);
   try {
     await createDocument(documentPage.page, "# Enter handling\n\nEuler identity lets us test selection and follow-up inputs.");
-    await documentPage.page.locator(".node .doc-content", { hasText: "Euler identity" }).first().waitFor();
+    await documentPage.page.locator(".card .doc-content", { hasText: "Euler identity" }).first().waitFor();
     await verifySelectionCommitKeys(documentPage.page, () => documentPage.providerCalls);
     await verifyReaderComposer(documentPage.page, () => documentPage.providerCalls);
     await verifyCardComposer(documentPage.page, () => documentPage.providerCalls);
@@ -78,7 +79,7 @@ async function verifyPendingRootStandaloneComposer() {
     const pendingRoot = session.nodes.get("root");
     pendingRoot.markdown = "A partial answer that is still streaming.";
     session.broadcast({ type: "node_progress", node_id: "root", markdown: pendingRoot.markdown });
-    await page.locator('.node[data-id="root"] .doc-content', { hasText: "still streaming" }).waitFor();
+    await page.locator('.card[data-id="root"] .doc-content', { hasText: "still streaming" }).waitFor();
     await selectText(page, "partial answer");
     await page.waitForSelector("#ask.visible");
     assert.equal(await page.locator("#ask-text").isEnabled(), true,
@@ -109,19 +110,19 @@ async function verifyPendingRootStandaloneComposer() {
     "the streamed selection note must preserve its selected-text anchor");
     pendingRoot.markdown += " More text arrived.";
     session.broadcast({ type: "node_progress", node_id: "root", markdown: pendingRoot.markdown });
-    await page.locator('.node[data-id="root"] .doc-content', { hasText: "More text arrived" }).waitFor();
+    await page.locator('.card[data-id="root"] .doc-content', { hasText: "More text arrived" }).waitFor();
     assert.equal(await page.locator(`mark[data-child="${streamingNoteId}"].mark-note`).count(), 1,
       "later stream chunks must preserve the saved note anchor");
 
-    await page.locator('.node[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
-    assert.equal(await page.locator('.node[data-id="selected-attachment"] .origin-quote').innerText(), "“What is shown?”",
+    await page.locator('.card[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
+    assert.equal(await page.locator('.card[data-id="selected-attachment"] .origin-quote').innerText(), "“What is shown?”",
       "a selection ask must quote its raw query while retaining attachment thumbnails");
 
-    const sourceCard = page.locator('.node[data-id="selected-attachment"]');
+    const sourceCard = page.locator('.card[data-id="selected-attachment"]');
     await sourceCard.locator(".nc-handle").evaluate((button) => button.click());
     await sourceCard.locator(".nc-inner textarea").fill("Persisted MCP follow-up note");
     await sourceCard.locator(".nc-inner textarea").press("Enter");
-    const persistedCard = page.locator(".node-note", { hasText: "Persisted MCP follow-up note" });
+    const persistedCard = page.locator(".card-note", { hasText: "Persisted MCP follow-up note" });
     await persistedCard.waitFor();
     const persistedId = await persistedCard.getAttribute("data-id");
     let persistedNode = null;
@@ -136,18 +137,18 @@ async function verifyPendingRootStandaloneComposer() {
 
     let point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
-    let draft = page.locator(".node.note-draft");
+    let draft = page.locator(".card.note-draft");
     let editor = draft.locator(".note-editor");
     await editor.fill("Note while the root is pending");
     assert.deepEqual(await draft.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => button.disabled)), [false, true],
       "a pending root must disable only standalone Ask, not Note");
     assert.equal(await editor.getAttribute("placeholder"), "Ask or note…", "the pending root must keep the standalone live placeholder");
     await draft.locator('[data-commit="note"]').click();
-    await page.locator(".node-note .doc-content", { hasText: "Note while the root is pending" }).waitFor();
+    await page.locator(".card-note .doc-content", { hasText: "Note while the root is pending" }).waitFor();
 
     point = await findCanvasBackground(page);
     await page.mouse.dblclick(point.x, point.y);
-    draft = page.locator(".node.note-draft");
+    draft = page.locator(".card.note-draft");
     editor = draft.locator(".note-editor");
     await editor.fill("Ask after root answer");
     assert.equal(await draft.locator('[data-commit="ask"]').isDisabled(), true);
@@ -157,14 +158,14 @@ async function verifyPendingRootStandaloneComposer() {
     session.broadcast({ type: "node_answered", node_id: "root", parent_id: null, title: "Answered root",
       markdown: answeredRoot.markdown, origin: null, base_url: null, base_url_source: null });
     await page.waitForFunction(() => {
-      const ask = document.querySelector('.node.note-draft [data-commit="ask"]');
+      const ask = document.querySelector('.card.note-draft [data-commit="ask"]');
       return ask && !ask.disabled;
     });
     assert.equal(await draft.locator('[data-commit="ask"]').isDisabled(), false,
       "node_answered must refresh and unlock an open standalone Ask draft");
 
     session.close("done");
-    await page.waitForFunction(() => document.querySelector(".node.note-draft .note-editor")?.placeholder === "Session ended");
+    await page.waitForFunction(() => document.querySelector(".card.note-draft .note-editor")?.placeholder === "Session ended");
     assert.equal(await editor.getAttribute("placeholder"), "Session ended",
       "an uncommitted standalone draft must not claim it was saved when the session closes");
     console.log("ok enter composition: pending root Note/Ask lock, node_answered refresh, selected-text thumbnails, and honest closed copy");
@@ -227,12 +228,12 @@ async function verifySelectionCommitKeys(page, calls) {
   assert.equal(await page.inputValue("#ask-text"), "line one\nline two", "Shift+Enter should insert a newline in the selection ask composer");
   await page.keyboard.press("Control+Enter");
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
-  await page.locator(".node:not(.root)", { hasText: "Selection Enter completed." }).waitFor();
+  await page.locator(".card:not(.root)", { hasText: "Selection Enter completed." }).waitFor();
   assert.equal(calls(), 1, "Cmd/Ctrl+Enter should submit the selection ask once");
 }
 
 async function verifyReaderComposer(page, calls) {
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
   await assertComposerAtRest(page, "#composer-actions",
@@ -242,10 +243,10 @@ async function verifyReaderComposer(page, calls) {
   assert.equal(calls(), 1, "IME Enter must not submit the reader follow-up composer");
 
   await page.fill("#composer-text", "");
-  const blankCount = await page.locator(".node").count();
+  const blankCount = await page.locator(".card").count();
   await page.press("#composer-text", "Enter");
   await page.press("#composer-text", "Control+Enter");
-  assert.equal(await page.locator(".node").count(), blankCount, "blank reader Enter variants must be inert");
+  assert.equal(await page.locator(".card").count(), blankCount, "blank reader Enter variants must be inert");
   assert.equal(calls(), 1, "blank reader Enter variants must not call the provider");
 
   await page.fill("#composer-text", "line one");
@@ -258,7 +259,7 @@ async function verifyReaderComposer(page, calls) {
   await page.keyboard.press("Enter");
   // A whole-document follow-up note is a visible child window, including when
   // it is submitted from the expanded reader.
-  const readerNote = page.locator(".node-note", { hasText: "line one\nline two" }).last();
+  const readerNote = page.locator(".card-note", { hasText: "line one\nline two" }).last();
   await readerNote.waitFor({ state: "attached" });
   const readerNoteId = await readerNote.getAttribute("data-id");
   assert.deepEqual(await storedNote(page, readerNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: false, size: { w: 420, h: 460 } },
@@ -289,26 +290,26 @@ async function verifyCardComposer(page, calls) {
   await page.evaluate(() => document.getElementById("reader-restore").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
-  await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
-  const selector = ".node.root .nc-inner textarea";
-  await assertComposerAtRest(page, ".node.root .nc-inner .ask-actions",
+  await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
+  const selector = ".card.root .nc-inner textarea";
+  await assertComposerAtRest(page, ".card.root .nc-inner .ask-actions",
     "an empty card composer should rest on the four lenses with the commit pair hidden");
   await page.fill(selector, "composing card");
   assert.equal((await dispatchComposingEnter(page, selector)).defaultPrevented, false);
   assert.equal(calls(), 3, "IME Enter must not submit the card follow-up composer");
 
   await page.fill(selector, "");
-  const blankCount = await page.locator(".node").count();
+  const blankCount = await page.locator(".card").count();
   await page.press(selector, "Enter");
   await page.press(selector, "Control+Enter");
-  assert.equal(await page.locator(".node").count(), blankCount, "blank card Enter variants must be inert");
+  assert.equal(await page.locator(".card").count(), blankCount, "blank card Enter variants must be inert");
   assert.equal(calls(), 3, "blank card Enter variants must not call the provider");
 
   await page.fill(selector, "   ");
   await page.press(selector, "1");
   assert.equal(await page.inputValue(selector), "   1", "a lens key must type normally unless the editor is exactly empty");
   await page.fill(selector, "   ");
-  await page.locator('.node.root .nc-inner .lens[data-lens="explain"]').evaluate((button) => button.click());
+  await page.locator('.card.root .nc-inner .lens[data-lens="explain"]').evaluate((button) => button.click());
   assert.equal(calls(), 3, "a lens click must be inert when the editor contains whitespace");
   await page.fill(selector, "");
 
@@ -317,9 +318,9 @@ async function verifyCardComposer(page, calls) {
   // assertion cannot pass on flip parity.
   await page.focus(selector);
   await page.keyboard.type("a");
-  const dimA = await page.locator(".node.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
+  const dimA = await page.locator(".card.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
   await page.keyboard.type("b");
-  const dimB = await page.locator(".node.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
+  const dimB = await page.locator(".card.root .nc-inner").evaluate((el) => el.classList.contains("disabled"));
   assert.equal(dimA || dimB, false, "a live card composer must not dim while typing");
   await page.fill(selector, "");
 
@@ -331,30 +332,30 @@ async function verifyCardComposer(page, calls) {
   await page.keyboard.press("Enter");
   // The same on the canvas: the card composer's Note commit creates a visible
   // child note window attached to the card it was written from.
-  const cardNote = page.locator(".node-note", { hasText: "line one\nline two" }).last();
+  const cardNote = page.locator(".card-note", { hasText: "line one\nline two" }).last();
   await cardNote.waitFor();
   const cardNoteId = await cardNote.getAttribute("data-id");
   assert.deepEqual(await storedNote(page, cardNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: false, size: { w: 420, h: 460 } },
     "card Enter should persist a visible child note window");
-  assert.equal(await page.locator(`.node[data-id="${cardNoteId}"]`).count(), 1, "the persisted follow-up note should remain visible on the canvas");
+  assert.equal(await page.locator(`.card[data-id="${cardNoteId}"]`).count(), 1, "the persisted follow-up note should remain visible on the canvas");
   assert.equal(calls(), 3, "plain Enter should save a card note without calling the provider");
 
-  await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
+  await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
   await page.fill(selector, "Card command ask");
   await page.keyboard.press("Control+Enter");
-  await page.locator(".node:not(.root)", { hasText: "Card Enter completed." }).waitFor();
+  await page.locator(".card:not(.root)", { hasText: "Card Enter completed." }).waitFor();
   assert.equal(calls(), 4, "Cmd/Ctrl+Enter should submit the card ask once");
 
-  await page.locator(".node.root .nc-handle").evaluate((button) => button.click());
-  await page.locator('.node.root .nc-inner .lens[data-lens="eli5"]').evaluate((button) => button.click());
-  await page.locator(".node:not(.root)", { hasText: "Card lens completed." }).waitFor();
+  await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
+  await page.locator('.card.root .nc-inner .lens[data-lens="eli5"]').evaluate((button) => button.click());
+  await page.locator(".card:not(.root)", { hasText: "Card lens completed." }).waitFor();
   assert.equal(calls(), 5, "an empty-box card lens tap should submit one whole-document lens ask");
 }
 
 async function verifyStandaloneComposer(page, calls) {
   let point = await findCanvasBackground(page);
   await page.mouse.dblclick(point.x, point.y);
-  const selector = ".node.note-draft .note-editor";
+  const selector = ".card.note-draft .note-editor";
   await page.waitForSelector(selector);
   const actionParity = await page.evaluate(() => {
     const signature = (root) => Array.from(root.querySelectorAll(".ask-commit")).map((button) => ({
@@ -365,10 +366,10 @@ async function verifyStandaloneComposer(page, calls) {
       hint: button.querySelector("kbd")?.textContent,
     }));
     return {
-      card: signature(document.querySelector(".node.root .node-composer")),
-      standalone: signature(document.querySelector(".node.note-draft .nc-inner")),
-      standaloneLenses: document.querySelectorAll(".node.note-draft .lens").length,
-      disabled: Array.from(document.querySelectorAll(".node.note-draft .ask-commit")).map((button) => button.disabled),
+      card: signature(document.querySelector(".card.root .card-composer")),
+      standalone: signature(document.querySelector(".card.note-draft .nc-inner")),
+      standaloneLenses: document.querySelectorAll(".card.note-draft .lens").length,
+      disabled: Array.from(document.querySelectorAll(".card.note-draft .ask-commit")).map((button) => button.disabled),
     };
   });
   assert.deepEqual(actionParity.standalone.map(({ title, hint, ...action }) => action),
@@ -392,10 +393,10 @@ async function verifyStandaloneComposer(page, calls) {
   assert.equal(calls(), 5, "IME and Alt+Enter must not submit the standalone composer");
 
   await page.fill(selector, "");
-  const blankCount = await page.locator(".node").count();
+  const blankCount = await page.locator(".card").count();
   await page.press(selector, "Enter");
   await page.press(selector, "Control+Enter");
-  assert.equal(await page.locator(".node").count(), blankCount, "blank standalone Enter variants must be inert");
+  assert.equal(await page.locator(".card").count(), blankCount, "blank standalone Enter variants must be inert");
   assert.equal(calls(), 5, "blank standalone Enter variants must not call the provider");
 
   await page.fill(selector, "line one");
@@ -404,19 +405,19 @@ async function verifyStandaloneComposer(page, calls) {
   await page.keyboard.type("line two");
   assert.equal(await page.inputValue(selector), "line one\nline two",
     "Shift+Enter should insert a newline in the standalone composer");
-  assert.equal(await page.locator(".node.note-draft").count(), 1,
+  assert.equal(await page.locator(".card.note-draft").count(), 1,
     "Shift+Enter must leave the standalone draft uncommitted");
   assert.equal(calls(), 5, "Shift+Enter must not call the provider or commit the standalone draft");
   await page.keyboard.press("Enter");
-  await page.locator(".node-note", { hasText: "line one" }).last().waitFor();
-  await page.waitForFunction(() => !document.querySelector(".node.note-draft"));
+  await page.locator(".card-note", { hasText: "line one" }).last().waitFor();
+  await page.waitForFunction(() => !document.querySelector(".card.note-draft"));
   assert.equal(calls(), 5, "plain Enter should save a standalone note without calling the provider");
 
   point = await findCanvasBackground(page);
   await page.mouse.dblclick(point.x, point.y);
   await page.waitForSelector(selector);
   await page.fill(selector, "Standalone command ask");
-  const draft = await page.locator(".node.note-draft").evaluate((card) => {
+  const draft = await page.locator(".card.note-draft").evaluate((card) => {
     card.__enterStandaloneIdentity = true;
     const rect = card.getBoundingClientRect();
     return {
@@ -429,9 +430,9 @@ async function verifyStandaloneComposer(page, calls) {
     };
   });
   await page.keyboard.press("Control+Enter");
-  const askCard = page.locator(`.node[data-id="${draft.id}"]`);
+  const askCard = page.locator(`.card[data-id="${draft.id}"]`);
   await page.waitForFunction((id) => {
-    const card = document.querySelector(`.node[data-id="${id}"]`);
+    const card = document.querySelector(`.card[data-id="${id}"]`);
     return card && !card.classList.contains("note-draft") && card.textContent.includes("Thinking");
   }, draft.id);
   assert.deepEqual(await askCard.evaluate((card) => {
@@ -521,7 +522,7 @@ async function createDocument(page, markdown) {
 
 async function selectText(page, text) {
   await page.evaluate((targetText) => {
-    const root = document.querySelector(".node .doc-content[data-node-id]");
+    const root = document.querySelector(".card .doc-content[data-node-id]");
     if (!root) throw new Error("No document content to select");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
@@ -547,7 +548,7 @@ async function findCanvasBackground(page) {
     for (let y = innerHeight - 70; y >= 90; y -= 70) {
       for (let x = innerWidth - 70; x >= 70; x -= 70) {
         const target = document.elementFromPoint(x, y);
-        if (target && viewport.contains(target) && !target.closest(".node")) return { x, y };
+        if (target && viewport.contains(target) && !target.closest(".card")) return { x, y };
       }
     }
     throw new Error("No empty canvas point found");

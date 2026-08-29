@@ -5,9 +5,9 @@ import { createPortableProjection } from "./portable-projection.js";
 /** @typedef {import("./contracts/artifact.js").PortableArtifact} PortableArtifact */
 
 /**
- * @param {PersistedHole} hole
+ * @param {any} hole
  * @param {PersistedHole["view_state"]} viewState
- * @param {Record<string, string>} assets
+ * @param {any} assets
  * @returns {PortableArtifact}
  */
 export function createSnapshotProjection(hole, viewState, assets) {

@@ -186,6 +186,7 @@ const bridgeDirectory = path.join(temporaryRoot, "bridge-data");
 const cachePath = path.join(bridgeDirectory, "codex-models.json");
 const cacheExistedBefore = await fs.access(cachePath).then(() => true, () => false);
 
+/** @type {NodeJS.ProcessEnv} */
 const bridgeEnv = { ...process.env, RABBITHOLE_DIR: bridgeDirectory };
 delete bridgeEnv.RABBITHOLE_BRIDGE_CLAUDE_BIN;
 delete bridgeEnv.RABBITHOLE_BRIDGE_CODEX_BIN;

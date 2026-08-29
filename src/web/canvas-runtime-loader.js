@@ -4,7 +4,7 @@ let warmScheduled = false;
 
 function versionedAssetUrl(name) {
   const url = new URL(name, document.baseURI);
-  const app = document.querySelector('script[type="module"][src*="app.js"]');
+  const app = /** @type {HTMLScriptElement | null} */ (document.querySelector('script[type="module"][src*="app.js"]'));
   if (app?.src) {
     const version = new URL(app.src, document.baseURI).searchParams.get("v");
     if (version) url.searchParams.set("v", version);
@@ -14,7 +14,7 @@ function versionedAssetUrl(name) {
 
 function loadDompurify() {
   if (window.DOMPurify?.sanitize) return Promise.resolve();
-  let existing = document.querySelector('script[data-rabbithole-canvas-runtime="dompurify"]');
+  let existing = /** @type {HTMLScriptElement | null} */ (document.querySelector('script[data-rabbithole-canvas-runtime="dompurify"]'));
   if (existing && existing.dataset.rabbitholeCanvasRuntimeState !== "loading") {
     existing.remove();
     existing = null;
@@ -46,7 +46,7 @@ function loadDompurify() {
 }
 
 function loadKatexStyles() {
-  let existing = document.querySelector('link[data-rabbithole-canvas-runtime="katex"]');
+  let existing = /** @type {HTMLLinkElement | null} */ (document.querySelector('link[data-rabbithole-canvas-runtime="katex"]'));
   if (existing?.sheet) return Promise.resolve();
   if (existing && existing.dataset.rabbitholeCanvasRuntimeState !== "loading") {
     existing.remove();

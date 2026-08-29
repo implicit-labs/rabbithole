@@ -23,11 +23,11 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
-      # CI is the only net for check:types; local `npm test` does not run it.
       - run: npm run check:types
       - run: npm run build
       - run: npm run check:dist
       - run: npm run check:purity
+      - run: npm run check:docs
       - run: npm run test:unit
       # Build the deployable site once here so deploy-pages.yml can download
       # the exact verified bytes instead of rebuilding them.

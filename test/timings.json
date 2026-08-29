@@ -1,0 +1,14 @@
+{
+  "canvas-edge-scroll.test.mjs": { "ms": 2500, "browsers": [] },
+  "cross-host-journey.test.mjs": { "ms": 5500, "browsers": [] },
+  "enter-composition.test.mjs": { "ms": 3500, "browsers": [] },
+  "reducer-browser-parity.test.mjs": { "ms": 1500, "browsers": [] },
+  "selection-popover.test.mjs": { "ms": 1300, "browsers": [] },
+  "ui-primitives-browsers.test.mjs": { "ms": 12000, "browsers": ["firefox", "webkit"] },
+  "web-app-branching.test.mjs": { "ms": 18000, "browsers": [] },
+  "web-app-learning.test.mjs": { "ms": 9000, "browsers": [] },
+  "web-app-mobile.test.mjs": { "ms": 21000, "browsers": ["webkit"] },
+  "web-app-notes.test.mjs": { "ms": 36000, "browsers": [] },
+  "web-app-setup.test.mjs": { "ms": 42000, "browsers": [] },
+  "web-app-sharing.test.mjs": { "ms": 22000, "browsers": [] }
+}

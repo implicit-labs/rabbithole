@@ -3,9 +3,10 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { systemClock } from "../../core/clock.js";
 
-import { ClaudeBackend } from "./claude.js";
-import { CodexBackend } from "./codex.js";
+import { ClaudeBackend } from "./agents/claude.js";
+import { CodexBackend } from "./agents/codex.js";
 import { applyCors, isAllowedOrigin } from "./cors.js";
 import { openEventStream } from "./events.js";
 import {
@@ -21,10 +22,13 @@ import { readOrCreateBridgeToken, tokenMatches } from "./token.js";
 import {
   closeServerGracefully,
   parseRequestBody,
-} from "../transport/http.js";
+} from "../shared/http.js";
+import { assertHttpRequest } from "../shared/http-guard.js";
+import { errorCode, errorStatusCode } from "../shared/errno.js";
+import { AGENT_TURN_DEADLINE_MS } from "../shared/deadline.js";
 
 const HOST = "127.0.0.1";
-const REQUEST_TIMEOUT_MS = 300_000;
+const REQUEST_TIMEOUT_MS = AGENT_TURN_DEADLINE_MS;
 const BRIDGE_MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 function sendJson(res, statusCode, body) {
@@ -72,14 +76,17 @@ function hasMessageContent(messages) {
   });
 }
 
+/** @param {unknown} error */
 function requestError(error) {
   if (error instanceof BridgeError) return error;
-  if (typeof error?.statusCode === "number") {
-    return new BridgeError(error.message, "turn_failed", error.statusCode);
+  const statusCode = errorStatusCode(error);
+  if (statusCode !== undefined) {
+    return new BridgeError(error instanceof Error ? error.message : String(error), "turn_failed", statusCode);
   }
   return bridgeError(error);
 }
 
+/** @param {{port?: number, env?: NodeJS.ProcessEnv, version?: string, logger?: {warn?: (...args: any[]) => void}, newToken?: boolean, stateRefreshMs?: number, codexConfigSuffix?: string}} [options] */
 export async function createBridge({
   port = 41414,
   env = process.env,
@@ -216,7 +223,7 @@ export async function createBridge({
 
       const stream = body.stream === true;
       const id = completionId();
-      const created = Math.floor(Date.now() / 1000);
+      const created = Math.floor(systemClock.now() / 1000);
       const result = await backend.generate({
         model: route.model,
         messages: body.messages,
@@ -289,32 +296,30 @@ export async function createBridge({
 
   const server = http.createServer(async (req, res) => {
     try {
+      const url = new URL(req.url || "/", `http://${HOST}:${actualPort}`);
       const allowedHosts = new Set([
         `${HOST}:${actualPort}`,
         `localhost:${actualPort}`,
       ]);
-      if (!allowedHosts.has(req.headers.host)) {
-        throw new BridgeError("Request Host is forbidden.", "forbidden_host", 403);
-      }
-
       const origin = req.headers.origin;
-      if (origin !== undefined && !isAllowedOrigin(origin)) {
-        throw new BridgeError("Request Origin is forbidden.", "forbidden_origin", 403);
-      }
+      const publicRoute = req.method === "OPTIONS"
+        || (req.method === "GET" && url.pathname === "/bridge/ping");
+      assertHttpRequest(req, {
+        allowedHosts,
+        isAllowedOrigin,
+        requireOrigin: req.method === "OPTIONS",
+        ...(publicRoute ? {} : { authorize: (authorization) => tokenMatches(token, authorization) }),
+        error: (message, code, statusCode) => new BridgeError(message, code, statusCode),
+      });
 
       // Browser preflights cannot carry the bearer value. The Origin gate is
       // therefore the terminal authorization for OPTIONS only.
       if (req.method === "OPTIONS") {
-        if (origin === undefined || !isAllowedOrigin(origin)) {
-          throw new BridgeError("Request Origin is forbidden.", "forbidden_origin", 403);
-        }
         applyCors(req, res);
         res.writeHead(204);
         res.end();
         return;
       }
-
-      const url = new URL(req.url || "/", `http://${HOST}:${actualPort}`);
 
       // Pre-pairing liveness probe. An unpaired page can't read any authed
       // response (401 carries no ACAO header, so it fails identically to
@@ -328,9 +333,6 @@ export async function createBridge({
         return;
       }
 
-      if (!tokenMatches(token, req.headers.authorization)) {
-        throw new BridgeError("Unauthorized.", "unauthorized", 401);
-      }
       applyCors(req, res);
 
       let body;
@@ -380,13 +382,15 @@ export async function createBridge({
         server.once("error", reject);
         server.listen(port, HOST, () => {
           server.removeListener("error", reject);
-          actualPort = server.address().port;
+          const address = server.address();
+          if (!address || typeof address === "string") return reject(new Error("Bridge address unavailable"));
+          actualPort = address.port;
           resolve();
         });
       });
     } catch (error) {
       await close();
-      if (error?.code === "EADDRINUSE") {
+      if (errorCode(error) === "EADDRINUSE") {
         throw new BridgeError(
           `Port ${port} is already in use.`,
           "turn_failed",
@@ -412,7 +416,7 @@ export async function createBridge({
     for (const controller of activeControllers) controller.abort(shutdownError);
     await Promise.allSettled([claude.close(), codex.close()]);
     if (server.listening) {
-      await new Promise((resolve) => closeServerGracefully(server, { onClosed: resolve }));
+      await new Promise((resolve) => closeServerGracefully(server, { onClosed: () => resolve(undefined) }));
     }
     await Promise.allSettled([
       fs.rm(claudeCwd, { recursive: true, force: true }),

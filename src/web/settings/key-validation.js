@@ -1,4 +1,4 @@
-import { providerFor } from "../brain/provider-registry.js";
+import { providerFor } from "../provider/provider-registry.js";
 
 const OPENROUTER_KEY_CHECK_URL = "https://openrouter.ai/api/v1/key";
 
@@ -53,10 +53,9 @@ async function validateOpenRouterKey(key) {
     headers: { Authorization: `Bearer ${key}` },
   });
   if (!response.ok) {
-    const error = new Error(response.status === 401 || response.status === 403
+    const error = Object.assign(new Error(response.status === 401 || response.status === 403
       ? "That key was rejected by OpenRouter."
-      : `OpenRouter returned HTTP ${response.status}.`);
-    error.status = response.status;
+      : `OpenRouter returned HTTP ${response.status}.`), { status: response.status });
     throw error;
   }
   let json = {};

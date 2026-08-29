@@ -14,7 +14,7 @@ const ASSET_REF_RE = /\basset:([a-z0-9][a-z0-9_-]*\.[a-z0-9]+)/gi;
 function getAssetExtension(name) {
   const match = ASSET_NAME_RE.exec(String(name ?? ""));
   if (!match) return null;
-  const ext = match[2];
+  const ext = match[2] ?? "";
   return ALLOWED_EXTENSIONS.has(ext) ? ext : null;
 }
 
@@ -94,7 +94,7 @@ export function resolveAssetMarkdownImageUrl(raw, { assetNames = null, resolveAs
   const match = ASSET_URL_RE.exec(String(raw ?? ""));
   if (!match) return undefined;
 
-  const name = match[1];
+  const name = match[1] ?? "";
   // PDF sources share the binary blob store, but they are documents rather
   // than Markdown images. Keeping that distinction here prevents a source PDF
   // from accidentally becoming a broken <img> if its asset name is mentioned.
@@ -107,7 +107,7 @@ export function resolveAssetMarkdownImageUrl(raw, { assetNames = null, resolveAs
 function extractAssetRefsFromMarkdown(markdown) {
   const refs = new Set();
   for (const match of String(markdown ?? "").matchAll(ASSET_REF_RE)) {
-    const name = match[1].toLowerCase();
+    const name = (match[1] ?? "").toLowerCase();
     if (isValidImageAssetName(name)) refs.add(name);
   }
   return refs;
@@ -123,13 +123,13 @@ export function extractNodeAssetRefs(node) {
       try { refs.add(validateImageAssetName(name)); } catch {}
     }
   }
-  const pages = node?.extensions?.pdf?.pages;
+  const pages = (node?.source ?? node?.extensions?.pdf)?.pages;
   if (Array.isArray(pages)) {
     for (const page of pages) {
       try { refs.add(validateAssetName(page?.asset)); } catch {}
     }
   }
-  try { refs.add(validateAssetName(node?.extensions?.pdf?.source?.asset)); } catch {}
+  try { refs.add(validateAssetName((node?.source ?? node?.extensions?.pdf)?.source?.asset)); } catch {}
   return refs;
 }
 

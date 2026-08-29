@@ -5,14 +5,15 @@ import { chromium } from "playwright";
 import { ensureWebDist } from "./build.mjs";
 import { routeProvider, seedConfiguredOpenRouter } from "./provider-mock.mjs";
 import { serveStatic } from "./static-server.mjs";
-import { collectSubtreeIds } from "../../src/core/model.js";
-import { createHoleState, reduceHoleEvent } from "../../src/core/reducer.js";
+import { collectSubtreeIds } from "../../src/core/hole/tree.js";
+import { createHoleState, reduceHoleEvent } from "../../src/core/hole/reduce.js";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const WEB_DIST = path.join(ROOT, "web/dist");
 const FIXTURES = ["02-math-heavy.rabbithole", "04-assets-png-svg.rabbithole"];
 const STREAM_CHUNKS = Array.from({ length: 40 }, (_, i) => `${i ? " " : "# Budget stream\n\n"}token-${i}`);
 
+/** @type {Array<{id: string, description: string, unit: string, tolerance: number, rationale: string, floor?: number}>} */
 export const budgetDefinitions = [
   ["bundle_client_bytes", "Built live client bundle size", "bytes", 0.05, "Exact file size after a deterministic build."],
   ["bundle_frozen_client_bytes", "Built frozen client bundle size", "bytes", 0.05, "Exact file size after a deterministic build."],
@@ -31,8 +32,16 @@ export const budgetDefinitions = [
   ["pdf_save_latency_ms", "JSON clone/serialize latency for a representative native PDF save", "ms", 4, "Minimum of repeated 20-save loops with a 20ms floor absorbs timer noise.", 20],
   ["owned_stream_reducer_ms", "One hundred owned-state stream updates in a 20,000-node hole", "ms", 4, "Minimum of repeated runs; a 10ms floor catches accidental whole-Map cloning while absorbing timer noise.", 10],
   ["subtree_collect_ms", "Collect all descendants in a 20,000-node ternary tree", "ms", 4, "Minimum of repeated runs; a 25ms floor catches repeated whole-graph scans while absorbing timer noise.", 25],
-].map(([id, description, unit, tolerance, rationale, floor]) => ({ id, description, unit, tolerance, rationale, ...(floor ? { floor } : {}) }));
+].map(([id, description, unit, tolerance, rationale, floor]) => ({
+  id: String(id),
+  description: String(description),
+  unit: String(unit),
+  tolerance: Number(tolerance),
+  rationale: String(rationale),
+  ...(floor ? { floor: Number(floor) } : {}),
+}));
 
+/** @param {{samples?: number, onSample?: (id: string, value: number, sample: number, total: number) => void}} [options] */
 export async function measureBudgets({ samples = 3, onSample = () => {} } = {}) {
   assert(samples >= 3, "budget measurements require at least three samples");
   ensureWebDist();

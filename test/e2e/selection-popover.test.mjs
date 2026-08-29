@@ -1,3 +1,4 @@
+/** @protects selection popover capability contracts. */
 import assert from "node:assert/strict";
 import { bootWebApp } from "../support/web-app-harness.mjs";
 
@@ -14,9 +15,9 @@ try {
     "",
     "The final paragraph should open the selection popover too.",
   ].join("\n")));
-  await page.waitForSelector(".node.root .doc-content p:nth-of-type(2)");
+  await page.waitForSelector(".card.root .doc-content p:nth-of-type(2)");
 
-  const paragraphs = page.locator(".node.root .doc-content p");
+  const paragraphs = page.locator(".card.root .doc-content p");
   await paragraphs.nth(0).click({ clickCount: 3, position: { x: 36, y: 10 } });
   await page.waitForSelector("#ask.visible");
 
@@ -29,8 +30,8 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
   await page.evaluate(() => {
-    const paragraphText = document.querySelector(".node.root .doc-content p:last-child").firstChild;
-    const controlText = document.querySelector(".node.root .nc-handle").lastChild;
+    const paragraphText = document.querySelector(".card.root .doc-content p:last-child").firstChild;
+    const controlText = document.querySelector(".card.root .nc-handle").lastChild;
     const range = document.createRange();
     range.setStart(paragraphText, 0);
     range.setEnd(controlText, controlText.length);

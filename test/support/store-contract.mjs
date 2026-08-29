@@ -69,7 +69,7 @@ async function runHoleContract(store, hooks) {
 async function runNewerSchemaRefusalContract(store, hooks) {
   const future = { ...hole({ hole_id: "future-hole" }), schema_version: 3, updated_at: "2026-01-01T00:00:00.000Z" };
   await hooks.writeRawHole("future-hole", future);
-  await assert.rejects(() => store.loadHole("future-hole"), (error) => error?.message === NEWER_SCHEMA_MESSAGE);
+  await assert.rejects(() => store.loadHole("future-hole"), (/** @type {any} */ error) => error?.message === NEWER_SCHEMA_MESSAGE);
   console.log("ok store contract: newer schema is refused with the update-to-open message");
 }
 

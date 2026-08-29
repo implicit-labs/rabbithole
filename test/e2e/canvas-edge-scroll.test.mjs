@@ -1,3 +1,4 @@
+/** @protects canvas edge scroll capability contracts. */
 import assert from "node:assert/strict";
 import { routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { bootWebApp } from "../support/web-app-harness.mjs";
@@ -25,7 +26,7 @@ async function verifyEdgeScrollCarriesTheCard() {
     await createDocument(page, "# Edge scroll\n\nA card must be draggable past the edge of what is on screen.");
     await page.waitForFunction(() => document.body.classList.contains("mode-canvas"));
 
-    const head = page.locator(".node.root .node-head").first();
+    const head = page.locator(".card.root .card-head").first();
     const start = await head.boundingBox();
     await settleCamera(page);
     const before = await readCanvasState(page);
@@ -101,7 +102,7 @@ async function verifyEdgeScrollCarriesTheCard() {
 function readCanvasState(page) {
   return page.evaluate(() => {
     const matrix = new DOMMatrixReadOnly(getComputedStyle(document.getElementById("world")).transform);
-    const card = document.querySelector(".node.root");
+    const card = document.querySelector(".card.root");
     return { viewX: matrix.m41, viewY: matrix.m42, nodeX: parseFloat(card.style.left), nodeY: parseFloat(card.style.top) };
   });
 }
@@ -126,5 +127,5 @@ async function createDocument(page, markdown) {
     const id = window.__rabbitholeTest?.currentHoleId?.();
     return id && id !== oldId;
   }, previous);
-  await page.waitForSelector(".node .doc-content[data-node-id]");
+  await page.waitForSelector(".card .doc-content[data-node-id]");
 }

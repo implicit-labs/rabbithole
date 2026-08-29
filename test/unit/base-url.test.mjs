@@ -1,3 +1,4 @@
+/** @protects base url capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -8,7 +9,7 @@ import {
   inferBaseUrlFromFrontmatter,
   normalizeBaseUrl,
 } from "../../src/core/base-url.js";
-import { RabbitHoleSession } from "../../src/node/transport/session.js";
+import { RabbitholeSession } from "../../src/node/transport/session.js";
 import { toolDefinitions } from "../../src/node/tools/manifest.js";
 
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-base-url-"));
@@ -176,7 +177,7 @@ async function runSessionLifecycleFixture() {
     read: true,
     created_at: new Date().toISOString(),
   };
-  const session = new RabbitHoleSession({
+  const session = new RabbitholeSession({
     holeId: "base-url-session",
     title: "Base URL Session",
     rootId: "root",
@@ -240,7 +241,7 @@ async function runSessionLifecycleFixture() {
     );
   } finally {
     session.close("base_url_test_complete");
-    await session.savingChain;
+    await session.saveChain.flush();
   }
 
   console.log("ok base urls: child inheritance, streaming fallback, frontmatter upgrade");

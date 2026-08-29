@@ -1,3 +1,4 @@
+/** @protects ui primitives browsers capability contracts. */
 import assert from "node:assert/strict";
 import path from "node:path";
 import { chromium, firefox, webkit } from "playwright";
@@ -141,7 +142,7 @@ async function verifyNotice(page, engine) {
 async function verifyFormPrimitivesAndButtons(page, engine) {
   await reset(page, '<div id="root"></div>');
   const buttonContracts = await page.evaluate(async (base) => {
-    const { buttonMarkup, iconButtonMarkup } = await import(base + "/src/core/html/button-markup.js");
+    const { buttonMarkup, iconButtonMarkup } = await import(base + "/src/core/html/markup.js");
     let iconError = ""; try { iconButtonMarkup({ svgIconHtml: "<svg></svg>" }); } catch (error) { iconError = error.message; }
     document.getElementById("root").innerHTML = buttonMarkup({ label: "Save" }) + iconButtonMarkup({ ariaLabel: "Close", svgIconHtml: "<svg></svg>" });
     return { types: Array.from(document.querySelectorAll("button"), (el) => el.type), name: document.querySelectorAll("button")[1].getAttribute("aria-label"), iconError };

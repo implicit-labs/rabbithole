@@ -14,6 +14,7 @@ const commit = process.env.BUDGET_COMMIT || gitCommit();
 const budgets = budgetDefinitions.map((definition) => {
   const baseline = round(measured[definition.id].value);
   return {
+    ...priorById.get(definition.id),
     ...definition,
     baseline,
     ceiling: round(Math.max(baseline * (1 + definition.tolerance), definition.floor ?? 0)),

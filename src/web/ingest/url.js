@@ -5,6 +5,7 @@ import { ingestPdfToStoredHole } from "./pdf.js";
 const URL_FETCH_CAP_BYTES = 25 * 1024 * 1024;
 const PASTE_FALLBACK = "Try another link or open a PDF file instead.";
 
+/** @param {any} [options] */
 export async function openUrlToStoredHole({ rawUrl, store, title = "", proxyBaseUrl = "", onProgress = null } = {}) {
   const inputUrl = normalizeInputUrl(rawUrl);
   const preferred = preferredHtmlUrl(inputUrl) || inputUrl;
@@ -39,6 +40,7 @@ export async function openUrlToStoredHole({ rawUrl, store, title = "", proxyBase
   return { hole, result: { title: holeTitle, url: fetched.url.href, via: fetched.via } };
 }
 
+/** @param {URL} url @param {any} [options] */
 async function fetchWithProxyFallback(url, { proxyBaseUrl, capBytes, onProgress } = {}) {
   try {
     return await fetchUrl(url, { capBytes, via: "direct" });
@@ -50,15 +52,17 @@ async function fetchWithProxyFallback(url, { proxyBaseUrl, capBytes, onProgress 
     try {
       return await fetchUrl(proxyUrl(proxyBaseUrl, url), { capBytes, via: "proxy", finalUrl: url });
     } catch (proxyErr) {
-      if (proxyErr?.status === 400) {
+      const statusCode = proxyErr && typeof proxyErr === "object" && "status" in proxyErr ? proxyErr.status : undefined;
+      if (statusCode === 400) {
         throw new Error(`This site isn't supported by the link relay yet — arXiv links work best. ${PASTE_FALLBACK}`);
       }
-      const status = proxyErr?.status ? ` (HTTP ${proxyErr.status})` : "";
+      const status = statusCode ? ` (HTTP ${statusCode})` : "";
       throw new Error(`That page couldn't be fetched right now${status}. ${PASTE_FALLBACK}`);
     }
   }
 }
 
+/** @param {URL} url @param {any} [options] */
 async function fetchUrl(url, { capBytes, via, finalUrl = null } = {}) {
   const response = await fetch(url.href, {
     method: "GET",
@@ -66,8 +70,7 @@ async function fetchUrl(url, { capBytes, via, finalUrl = null } = {}) {
     headers: { Accept: "text/html,application/pdf;q=0.9,text/plain;q=0.5,*/*;q=0.1" },
   });
   if (!response.ok) {
-    const err = new Error(`HTTP ${response.status} ${response.statusText}`.trim());
-    err.status = response.status;
+    const err = Object.assign(new Error(`HTTP ${response.status} ${response.statusText}`.trim()), { status: response.status });
     throw err;
   }
   const contentType = response.headers.get("content-type") || "";
@@ -139,7 +142,7 @@ function htmlToMarkdown(html, baseUrl) {
     doc.querySelector("#content") ||
     doc.body;
   if (!root) return { title, markdown: "" };
-  const clone = root.cloneNode(true);
+  const clone = /** @type {Element} */ (root.cloneNode(true));
   clone.querySelectorAll("script,style,noscript,template,nav,header,footer,form,iframe,svg").forEach((el) => el.remove());
 
   const blocks = [];

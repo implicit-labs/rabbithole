@@ -1,6 +1,7 @@
+/** @protects ui card presentation capability contracts. */
 import assert from "node:assert/strict";
 import { nextOrder } from "../../src/ui/core.js";
-import { raiseCard } from "../../src/ui/canvas-view.js";
+import { raiseCard } from "../../src/ui/canvas/index.js";
 
 const firstOrder = nextOrder();
 const firstCard = { style: { transform: "translate(12px, 8px) scale(0.5)", opacity: "0.05" } };

@@ -1,3 +1,4 @@
+/** @protects mermaid rendering capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -52,7 +53,7 @@ async function verifySelfContainedMcpPage() {
   await page.goto(session.url, { waitUntil: "load" });
   // The inline diagram contract below describes the reader column — expand the
   // current card into the reader first (canvas is the landing surface).
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas") && !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => !!document.querySelector("#reader-main .viz-mermaid")?.shadowRoot?.querySelector("svg"));
   assert(requests.some((url) => url.startsWith(session.url)), "MCP request capture must observe the canvas");
@@ -95,7 +96,7 @@ async function verifyWebApp() {
   }
   // The inline diagram contract describes the reader column — expand the
   // current card into the reader first (canvas is the landing surface).
-  await page.evaluate(() => document.querySelector(".node.current [aria-label='Expand document']").click());
+  await page.evaluate(() => document.querySelector(".card.current [aria-label='Expand document']").click());
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas") && !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => !!document.querySelector("#reader-main .viz-mermaid")?.shadowRoot?.querySelector("svg"));
   assert.equal(requests.filter((url) => /\/mermaid\.js(?:\?|$)/.test(url)).length, 1, "all live diagrams should share one lazy runtime load");

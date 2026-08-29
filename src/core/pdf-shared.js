@@ -10,9 +10,9 @@ const FIGURE_REF_RE = /!\[([^\]\n]*)\]\(figure:page-(\d{1,6}):([^\s)]+)\)/g;
 export function parseFigureRefs(markdown) {
   const source = String(markdown || ""), refs = [];
   for (const match of source.matchAll(FIGURE_REF_RE)) {
-    const values = match[3].split(",").map(Number);
+    const values = (match[3] ?? "").split(",").map(Number);
     const rect = values.length === 4 && values.every(Number.isFinite) ? { x: values[0], y: values[1], w: values[2], h: values[3] } : null;
-    refs.push({ raw: match[0], caption: match[1], page: Number(match[2]), rect, index: match.index });
+    refs.push({ raw: match[0], caption: match[1] ?? "", page: Number(match[2]), rect, index: match.index });
   }
   return refs;
 }
@@ -63,7 +63,7 @@ function parsePagesRange(pages) {
   const value = String(pages).trim();
   const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(value);
   if (!match) throw new Error(`pages must be a single page or range like "3" or "1-20"; got ${JSON.stringify(pages)}`);
-  const start = Number.parseInt(match[1], 10);
+  const start = Number.parseInt(match[1] ?? "", 10);
   const end = match[2] ? Number.parseInt(match[2], 10) : start;
   if (start < 1 || end < 1 || end < start) {
     throw new Error(`pages must be a positive ascending range; got ${JSON.stringify(pages)}`);
@@ -118,7 +118,7 @@ export function pdfSourceAssetName(digest) {
 
 /** @param {PdfTextItem} item @returns {TextGeometry} */
 function getTextItemGeometry(item) {
-  const [a, b, c, d, e, f] = item.transform;
+  const [a, b, c, d, e, f] = /** @type {[number, number, number, number, number, number]} */ (item.transform);
   const height = Math.hypot(c, d) || item.height || Math.hypot(a, b) || 1;
   return {
     str: item.str,
@@ -304,7 +304,8 @@ export async function extractPdfPageLines(page) {
 /** @param {any} page @param {number} [pageNumber] */
 export function pdfPageMetadata(page, pageNumber = page?.pageNumber) {
   const view = Array.from(page?.view || [], Number);
-  if (view.length !== 4 || !view.every(Number.isFinite) || !(view[2] > view[0]) || !(view[3] > view[1])) {
+  const [x0, y0, x1, y1] = view;
+  if (view.length !== 4 || !view.every(Number.isFinite) || x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined || !(x1 > x0) || !(y1 > y0)) {
     throw new Error(`PDF page ${pageNumber || "?"} has an invalid visible page box`);
   }
   const rotate = ((Math.round(Number(page?.rotate) || 0) % 360) + 360) % 360;
@@ -337,11 +338,11 @@ export function buildPdfDocument({ title, pageCount, processedPages, pageMetadat
   let blockId = 0;
   const markdown = normalizeBlockIds(assembled, { idFactory: () => `pdf${String(blockId++).padStart(3, "0")}` }).markdown;
   const positions = linePositions(markdown);
-  const lines = provenance.map(({ ordinal, ...line }) => ({
-    ...line,
-    s: positions[ordinal].s,
-    e: positions[ordinal].e,
-  }));
+  const lines = provenance.map(({ ordinal, ...line }) => {
+    const position = positions[ordinal];
+    if (!position) throw new Error(`PDF provenance line ${ordinal} has no Markdown position`);
+    return { ...line, s: position.s, e: position.e };
+  });
   const pagesByNumber = new Map((metadata || []).map((entry) => [entry.n, entry]));
   const pages = (processedPages || []).map((n) => pagesByNumber.get(n)).filter(Boolean);
   return {
@@ -365,7 +366,7 @@ export function buildPdfDocument({ title, pageCount, processedPages, pageMetadat
 export function normalizePdfExtension(nodeOrExtension) {
   try {
     const body = String(nodeOrExtension?.markdown ?? nodeOrExtension?.md ?? "");
-    const value = nodeOrExtension?.extensions?.pdf ?? nodeOrExtension?.pdf ?? nodeOrExtension;
+    const value = nodeOrExtension?.source ?? nodeOrExtension?.extensions?.pdf ?? nodeOrExtension?.pdf ?? nodeOrExtension;
     if (!value || value.version !== PDF_RENDER_VERSION || !Array.isArray(value.pages) || !Array.isArray(value.lines)) return null;
     if (value.pages.length > MAX_PDF_PAGES || value.lines.length > MAX_PDF_LINES) return null;
     const finite = (/** @type {unknown} */ number) => typeof number === "number" && Number.isFinite(number);
@@ -415,14 +416,17 @@ export function pdfAnchorBounds(anchor, pageNumber) {
 /** @param {number[]} bounds @param {number[]} pageView @param {number} [padding] */
 export function expandPdfBounds(bounds, pageView, padding = PDF_AGENT_CROP_PADDING_POINTS) {
   if (!Array.isArray(bounds) || !Array.isArray(pageView) || bounds.length !== 4 || pageView.length !== 4) return null;
+  const [boundX0, boundY0, boundX1, boundY1] = /** @type {[number, number, number, number]} */ (bounds);
+  const [pageX0, pageY0, pageX1, pageY1] = /** @type {[number, number, number, number]} */ (pageView);
   const pad = Math.max(0, Number(padding) || 0);
   const expanded = [
-    Math.max(pageView[0], bounds[0] - pad),
-    Math.max(pageView[1], bounds[1] - pad),
-    Math.min(pageView[2], bounds[2] + pad),
-    Math.min(pageView[3], bounds[3] + pad),
+    Math.max(pageX0, boundX0 - pad),
+    Math.max(pageY0, boundY0 - pad),
+    Math.min(pageX1, boundX1 + pad),
+    Math.min(pageY1, boundY1 + pad),
   ];
-  return expanded[2] > expanded[0] && expanded[3] > expanded[1] ? expanded : null;
+  const [expandedX0, expandedY0, expandedX1, expandedY1] = /** @type {[number, number, number, number]} */ (expanded);
+  return expandedX1 > expandedX0 && expandedY1 > expandedY0 ? expanded : null;
 }
 
 /** @param {any} viewport @param {{ x?: unknown, y?: unknown, w?: unknown, h?: unknown }} rect */

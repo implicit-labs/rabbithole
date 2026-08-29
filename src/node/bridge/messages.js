@@ -58,6 +58,7 @@ function codexImageBlock(part) {
 }
 
 export function buildClaudeInput(messages = []) {
+  /** @type {any[]} */
   const content = [{ type: "text", text: serializeTranscript(messages) }];
   let imagePartCount = 0;
   for (const message of messages) {
@@ -95,6 +96,7 @@ export function countImageParts(messages = []) {
 
 export function buildCodexInput(messages = []) {
   const transcript = serializeTranscript(messages);
+  /** @type {any[]} */
   const input = [{ type: "text", text: transcript }];
   let imagePartCount = 0;
   for (const message of messages) {

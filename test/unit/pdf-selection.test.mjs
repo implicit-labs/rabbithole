@@ -1,5 +1,6 @@
+/** @protects pdf selection capability contracts. */
 import assert from "node:assert/strict";
-import { normalizeAnchor } from "../../src/core/model.js";
+import { normalizeAnchor } from "../../src/core/hole/anchor.js";
 import { expandPdfBounds, pdfAnchorBounds } from "../../src/core/pdf-shared.js";
 
 const sha256 = "cd".repeat(32);

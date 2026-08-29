@@ -1,3 +1,4 @@
+/** @protects custom endpoint capability contracts. */
 /*
  * The custom OpenAI-compatible endpoint, driven the way a person drives it: type a URL,
  * maybe a key, watch the status line, pick a model, generate. Also pins the two things
@@ -174,8 +175,8 @@ async function verifyTypedKeySurvivesAnEndpointVerdict() {
     page.on("pageerror", (error) => process.stderr.write(`browser page error: ${error.stack || error.message}\n`));
     let releaseUnauthorized = () => {};
     let announceKeylessProbe = () => {};
-    const unauthorized = new Promise((resolve) => { releaseUnauthorized = resolve; });
-    const keylessProbe = new Promise((resolve) => { announceKeylessProbe = resolve; });
+    const unauthorized = new Promise((resolve) => { releaseUnauthorized = () => resolve(); });
+    const keylessProbe = new Promise((resolve) => { announceKeylessProbe = () => resolve(); });
     let keylessProbes = 0;
     await page.route(MODELS_URL, async (route) => {
       if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: corsHeaders(), body: "" });
@@ -220,7 +221,7 @@ async function verifyGenerationSendsTheKey() {
     await page.click("#composer-path-ask");
     await page.fill("#composer-input", "What is a custom endpoint?");
     await page.click("#composer-primary");
-    await page.locator(".node", { hasText: "Streamed from a self-hosted server." }).first().waitFor();
+    await page.locator(".card", { hasText: "Streamed from a self-hosted server." }).first().waitFor();
 
     assert.equal(chatCalls.length, 1);
     assert.equal(chatCalls[0].authorization, `Bearer ${KEY}`, "the key must reach the endpoint as a bearer token");

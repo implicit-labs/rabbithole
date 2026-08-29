@@ -1,4 +1,4 @@
-import { providerFor } from "../brain/provider-registry.js";
+import { providerFor } from "../provider/provider-registry.js";
 
 const LEGACY_KEY = "rh-web-api-key";
 const KEYS_KEY = "rh-web-api-keys";

@@ -1,13 +1,14 @@
+/** @protects generation lifecycle capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import { GenerationRun } from "../../src/core/generation-run.js";
-import { createHoleState, reduceHoleEvent } from "../../src/core/reducer.js";
-import { ProviderError, normalizeProviderError } from "../../src/web/brain/errors.js";
-import { adaptBranchGeneration, adaptTextGeneration } from "../../src/web/brain/generation-events.js";
-import { OpenAICompatibleBrain, parseOpenAISseEvent, streamOpenAICompatible } from "../../src/web/brain/openai-compatible.js";
-import { TitleSentinelParser } from "../../src/web/brain/title-sentinel.js";
+import { Run } from "../../src/core/hole/run.js";
+import { createHoleState, reduceHoleEvent } from "../../src/core/hole/reduce.js";
+import { ProviderError, normalizeProviderError } from "../../src/web/provider/errors.js";
+import { adaptBranchGeneration, adaptTextGeneration } from "../../src/web/provider/generation-events.js";
+import { OpenAICompatibleProvider, parseOpenAISseEvent, streamOpenAICompatible } from "../../src/web/provider/openai-compatible.js";
+import { TitleSentinelParser } from "../../src/web/provider/title-sentinel.js";
 import { GenerationIngress } from "../../src/node/transport/generation-ingress.js";
-import { RabbitHoleSession } from "../../src/node/transport/session.js";
+import { RabbitholeSession } from "../../src/node/transport/session.js";
 import { DirectRabbitholeHost, createHoleFromMarkdown, createPendingHoleFromQuestion, generationDocEvents } from "../../src/web/transport/direct-host.js";
 
 async function collect(iterable) {
@@ -105,7 +106,7 @@ assert.equal(network.retryable, true);
 console.log("ok generation lifecycle: provider error normalization shapes");
 
 const failedHole = createPendingHoleFromQuestion("Why?");
-let providerFailure = null;
+let providerFailure = /** @type {any} */ (null);
 let authFailure = null;
 const failureHost = new DirectRabbitholeHost({
   store: { saveHole: async () => {} },
@@ -144,17 +145,17 @@ assert.equal(providerFailure?.error?.code, "model_unknown");
 const unpairedHost = new DirectRabbitholeHost({
   store: { saveHole: async () => {} },
   hole: createPendingHoleFromQuestion("Use my plan"),
-  brainRequiredError: {
+  providerRequiredError: {
     message: "Pair Rabbithole with your subscriptions to keep asking.",
     code: "subscription_unpaired",
   },
 });
 await assert.rejects(
   () => unpairedHost.runRootAnswer(unpairedHost.state.root_id, "Use my plan", new AbortController()),
-  (error) => error.code === "subscription_unpaired"
+  (/** @type {any} */ error) => error.code === "subscription_unpaired"
     && /Pair Rabbithole/.test(error.message)
     && !/provider key/i.test(error.message),
-  "Subscriptions must never inherit the provider-key no-brain error",
+  "Subscriptions must never inherit the provider-key no-provider error",
 );
 let abortedFailure = false;
 let abortedEvent = false;
@@ -186,20 +187,20 @@ for (const events of [
 }
 console.log("ok generation lifecycle: pure branch and author adapters preserve exact text bytes");
 
-const openAiBrain = new OpenAICompatibleBrain({ baseUrl: "https://example.test", model: "fixture" });
+const openAiProvider = new OpenAICompatibleProvider({ baseUrl: "https://example.test", model: "fixture" });
 try {
   globalThis.fetch = async (_url, options) => {
     const messages = JSON.parse(options.body).messages;
     const isBranch = messages[0].content.includes("TITLE: <short node title>");
-    const text = isBranch ? "TITLE: Brain title\nBody" : rawAuthor;
+    const text = isBranch ? "TITLE: Provider title\nBody" : rawAuthor;
     const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`;
     return responseFromChunks(chunksOf(wire, [1, 7, 19]));
   };
-  const branch = await collect(openAiBrain.answerBranch({ fallbackTitle: "Fallback" }, new AbortController().signal));
-  assert.deepEqual(branch, [{ type: "title", title: "Brain title" }, { type: "text", delta: "Body" }]);
+  const branch = await collect(openAiProvider.answerBranch({ fallbackTitle: "Fallback" }, new AbortController().signal));
+  assert.deepEqual(branch, [{ type: "title", title: "Provider title" }, { type: "text", delta: "Body" }]);
   for (const events of [
-    await collect(openAiBrain.authorExplainer({ question: "why" }, new AbortController().signal)),
-    await collect(openAiBrain.authorDocument({ markdown: "source" }, new AbortController().signal)),
+    await collect(openAiProvider.authorExplainer({ question: "why" }, new AbortController().signal)),
+    await collect(openAiProvider.authorDocument({ markdown: "source" }, new AbortController().signal)),
   ]) {
     assert.equal(events.some((event) => event.type === "title"), false);
     assert.equal(events.map((event) => event.delta).join(""), rawAuthor);
@@ -208,7 +209,7 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-const run = new GenerationRun({ id: "run-a", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
+const run = new Run({ id: "run-a", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
 assert.deepEqual(run.accept({ type: "text", delta: "one" }, { nodeId: "node-a" }), {
   type: "node_progress", node_id: "node-a", markdown: "Start one", run: { id: "run-a", seq: 1 },
 });
@@ -228,30 +229,30 @@ assert.deepEqual(run.complete(finalContext), finalEvent);
 assert.deepEqual(run.complete(finalContext), finalEvent);
 assert.deepEqual(run.snapshot(), { id: "run-a", seq: 2, markdown: "Start one two", title: "Late title" });
 
-const empty = new GenerationRun({ id: "empty", fallbackTitle: "Empty fallback" });
+const empty = new Run({ id: "empty", fallbackTitle: "Empty fallback" });
 assert.deepEqual(empty.complete({ nodeId: "empty-node" }), {
   type: "node_answered", node_id: "empty-node", title: "Empty fallback", markdown: "",
 });
 assert.throws(() => empty.accept({ type: "usage", input_tokens: 1, output_tokens: 2 }), /Unsupported GenerationEvent/);
 assert.throws(() => empty.accept({ type: "text", delta: "no node" }), /requires a non-empty nodeId/);
 assert.equal(JSON.stringify(run.complete(finalContext)).includes("node_error"), false);
-console.log("ok generation lifecycle: GenerationRun accumulation, ordering, late title, empty completion, idempotence, and rejection goldens");
+console.log("ok generation lifecycle: Run accumulation, ordering, late title, empty completion, idempotence, and rejection goldens");
 
 const wiringEvents = [{ type: "title", title: "Wired title" }, { type: "text", delta: "one" }, { type: "text", delta: " two" }];
-const wiredRun = new GenerationRun({ id: "wired-run", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
+const wiredRun = new Run({ id: "wired-run", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
 const wired = await collect(generationDocEvents(fixtureChunks(wiringEvents), wiredRun, {
   nodeId: "wired-node",
   progressFields: { base_url: "https://example.test" },
   answeredFields: { parent_id: "root", read: false },
 }));
-const manualRun = new GenerationRun({ id: "wired-run", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
+const manualRun = new Run({ id: "wired-run", initialMarkdown: "Start ", fallbackTitle: "Fallback" });
 const manual = wiringEvents.flatMap((event) => {
   const progress = manualRun.accept(event, { nodeId: "wired-node", progressFields: { base_url: "https://example.test" } });
   return progress ? [progress] : [];
 });
 manual.push(manualRun.complete({ nodeId: "wired-node", answeredFields: { parent_id: "root", read: false } }));
 assert.deepEqual(wired, manual);
-console.log("ok generation lifecycle: browser branch wiring matches hand-driven GenerationRun DocEvents");
+console.log("ok generation lifecycle: browser branch wiring matches hand-driven Run DocEvents");
 
 const mcpIngress = new GenerationIngress({ id: "mcp-run", nodeId: "mcp-node", fallbackTitle: "Fallback" });
 assert.deepEqual(mcpIngress.acceptChunk("one"), {
@@ -267,9 +268,9 @@ const tailIngress = new GenerationIngress({ id: "tail-run", nodeId: "tail-node" 
 tailIngress.acceptChunk("one");
 assert.equal(tailIngress.acceptChunk(" two", { final: true, title: "Tail" }).markdown, "one two");
 let mcpMinted = 0;
-const mcpSession = new RabbitHoleSession({
+const mcpSession = new RabbitholeSession({
   nodes: [],
-  mintGenerationRunId: () => `fresh-${++mcpMinted}`,
+  mintRunId: () => `fresh-${++mcpMinted}`,
 });
 assert.notEqual(
   mcpSession.createGenerationIngress({ id: "node", title: "Fallback" }).run.id,
@@ -281,7 +282,7 @@ let minted = 0;
 const mintHost = new DirectRabbitholeHost({
   store: { saveHole: async () => {} },
   hole: { hole_id: "hole", root_id: "root", nodes: [{ id: "root", status: "answered", markdown: "" }] },
-  mintGenerationRunId: () => `attempt-${++minted}`,
+  mintRunId: () => `attempt-${++minted}`,
 });
 const lifecycleHost = new DirectRabbitholeHost({
   store: { saveHole: async () => {} },
@@ -363,7 +364,7 @@ async function verifyAttachmentFallbackToast(source, expectedToasts) {
       { id: "root", parent_id: null, title: "Root", markdown: "Root", status: "answered" },
       { id: "branch", parent_id: "root", title: "Branch", markdown: "", status: "pending", origin: { question: "Why?" } },
     ] },
-    brain: { async *answerBranch() {
+    provider: { async *answerBranch() {
       attempts += 1;
       if (attempts === 1) throw new ProviderError("payload too large", { status: 413, code: "payload_too_large" });
       yield { type: "title", title: "Fallback answer" };
@@ -384,9 +385,9 @@ await verifyAttachmentFallbackToast("pasted_image", [
 await verifyAttachmentFallbackToast("selection_crop", []);
 console.log("ok generation lifecycle: attachment retry toasts only when pasted images are dropped, not PDF crops");
 
-const pendingNode = { id: "branch", status: "pending", markdown: "", title: "Fallback" };
-const oldRun = mintHost.createGenerationRun(pendingNode);
-const retryRun = mintHost.createGenerationRun(pendingNode);
+const pendingNode = { id: "branch", status: /** @type {const} */ ("pending"), markdown: "", title: "Fallback" };
+const oldRun = mintHost.createRun(pendingNode);
+const retryRun = mintHost.createRun(pendingNode);
 assert.notEqual(oldRun.id, retryRun.id);
 let guarded = createHoleState({ root_id: "branch", nodes: [pendingNode] });
 guarded = reduceHoleEvent(guarded, oldRun.accept({ type: "text", delta: "old" }, { nodeId: "branch" })).state;
@@ -395,7 +396,7 @@ guarded = reduceHoleEvent(guarded, oldRun.accept({ type: "text", delta: " late" 
 assert.equal(guarded.nodes.get("branch").markdown, "new");
 console.log("ok generation lifecycle: retry mints a new run id and reducer rejects an aborted-run straggler");
 
-const emptyWired = await collect(generationDocEvents(fixtureChunks([]), new GenerationRun({
+const emptyWired = await collect(generationDocEvents(fixtureChunks([]), new Run({
   id: "empty-wired", fallbackTitle: "Branch fallback",
 }), { nodeId: "empty-branch" }));
 assert.deepEqual(emptyWired, [{
@@ -409,7 +410,7 @@ const rootBeforeComplete = (activeRun) => {
 };
 const rootWired = await collect(generationDocEvents(fixtureChunks([
   { type: "text", delta: "# Root title\n" }, { type: "text", delta: "Body" },
-]), new GenerationRun({ id: "root-run", fallbackTitle: "Question" }), {
+]), new Run({ id: "root-run", fallbackTitle: "Question" }), {
   nodeId: "root", answeredFields: { parent_id: null, read: true }, beforeComplete: rootBeforeComplete,
 }));
 assert.deepEqual(rootWired, [
@@ -418,23 +419,24 @@ assert.deepEqual(rootWired, [
   { type: "node_answered", parent_id: null, read: true, node_id: "root", title: "Root title", markdown: "# Root title\nBody" },
 ]);
 for (const events of [[], [{ type: "text", delta: " \n" }]]) {
-  await assert.rejects(() => collect(generationDocEvents(fixtureChunks(events), new GenerationRun({
+  await assert.rejects(() => collect(generationDocEvents(fixtureChunks(events), new Run({
     id: "empty-root", fallbackTitle: "Question",
   }), { nodeId: "root", beforeComplete: rootBeforeComplete })), /provider returned an empty document/);
 }
-console.log("ok generation lifecycle: browser root wiring uses GenerationRun and rejects empty or whitespace streams");
+console.log("ok generation lifecycle: browser root wiring uses Run and rejects empty or whitespace streams");
 
 const authoringHole = createHoleFromMarkdown({ title: "Source", markdown: "Original source" });
 authoringHole.nodes[0].status = "pending";
 authoringHole.nodes[0].markdown = "";
 const authoringSaves = [];
+/** @type {undefined | (() => void)} */
 let continueAuthoring;
-const authoringGate = new Promise((resolve) => { continueAuthoring = resolve; });
+const authoringGate = new Promise((resolve) => { continueAuthoring = () => resolve(); });
 const authoringHost = new DirectRabbitholeHost({
   store: { saveHole: async (hole) => authoringSaves.push(structuredClone(hole)) },
   hole: authoringHole,
-  brain: { async *authorDocument() { yield { type: "text", delta: "# Better\n" }; await authoringGate; yield { type: "text", delta: "Body" }; } },
-  mintGenerationRunId: () => "author-run",
+  provider: { async *authorDocument() { yield { type: "text", delta: "# Better\n" }; await authoringGate; yield { type: "text", delta: "Body" }; } },
+  mintRunId: () => "author-run",
 });
 const progressLengths = [];
 const authorDocumentPromise = authoringHost.authorDocument({ markdown: "Original source" }, {
@@ -443,7 +445,7 @@ const authorDocumentPromise = authoringHost.authorDocument({ markdown: "Original
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(progressLengths, [9]);
 const savesWhileStreaming = authoringSaves.length;
-continueAuthoring();
+continueAuthoring?.();
 const authoredHole = await authorDocumentPromise;
 assert.deepEqual(progressLengths, [9, 13]);
 assert.equal(authoredHole.title, "Better");
@@ -462,7 +464,7 @@ failedAuthoringSaves.length = 0;
 const failedAuthoringHost = new DirectRabbitholeHost({
   store: { saveHole: captureFailedAuthoringSave },
   hole: structuredClone(authoringHole),
-  brain: { async *authorDocument() { yield { type: "text", delta: "Partial" }; throw new Error("provider failed"); } },
+  provider: { async *authorDocument() { yield { type: "text", delta: "Partial" }; throw new Error("provider failed"); } },
 });
 await assert.rejects(() => failedAuthoringHost.authorDocument({ markdown: "Original source" }), /provider failed/);
 await new Promise((resolve) => setTimeout(resolve, 450));
@@ -474,3 +476,21 @@ const appSource = await fs.readFile(new URL("../../src/web/app.js", import.meta.
 assert.match(appSource, /document\.addEventListener\("visibilitychange"[\s\S]*document\.visibilityState === "hidden"[\s\S]*currentHost\?\.flushSave\(\)/);
 assert.match(appSource, /window\.addEventListener\("pagehide"[\s\S]*currentHost\?\.flushSave\(\)/);
 console.log("ok generation lifecycle: hidden visibility and pagehide flush the existing host save pipeline");
+
+const extensionHole = createHoleFromMarkdown({ title: "Pinned", markdown: "Durable state" });
+const extensionSaves = [];
+const extensionHost = new DirectRabbitholeHost({
+  store: { saveHole: async (hole) => extensionSaves.push(structuredClone(hole)) },
+  hole: extensionHole,
+});
+assert.deepEqual(await extensionHost.handleBrowserEvent({
+  type: "node_extensions_patch",
+  node_id: extensionHole.root_id,
+  namespace: "canvas",
+  value: { pin: { x: 24, y: 36, width: 420, height: 280 } },
+}), { ok: true });
+assert.equal(extensionSaves.length, 1, "extension patches are durable when the browser event resolves");
+assert.deepEqual(extensionSaves[0].nodes[0].extensions.canvas.pin, {
+  x: 24, y: 36, width: 420, height: 280,
+});
+console.log("ok generation lifecycle: extension-backed presentation state is durable before immediate navigation");

@@ -1,3 +1,4 @@
+/** @protects pdf import error capability contracts. */
 import assert from "node:assert/strict";
 import { describePdfImportFailure } from "../../src/web/ingest/pdf.js";
 

@@ -1,15 +1,20 @@
+/** @protects preferences store capability contracts. */
 import assert from "node:assert/strict";
 
 const store = new Map();
-globalThis.localStorage = {
-  getItem: (key) => (store.has(key) ? store.get(key) : null),
+let settingsReads = 0;
+(/** @type {any} */ (globalThis)).localStorage = {
+  getItem: (key) => {
+    if (key === "rh-web-settings") settingsReads += 1;
+    return store.has(key) ? store.get(key) : null;
+  },
   setItem: (key, value) => store.set(key, String(value)),
   removeItem: (key) => store.delete(key),
 };
 
 const { getApiKey } = await import("../../src/web/settings/credential-store.js");
-const { loadSettings, saveSettings } = await import("../../src/web/settings/preferences-store.js");
-const { settingsForProvider } = await import("../../src/web/brain/provider-registry.js");
+const { loadSettings, saveSettings, resetSettingsCache } = await import("../../src/web/settings/preferences-store.js");
+const { settingsForProvider } = await import("../../src/web/provider/provider-registry.js");
 const { takeBridgeTokenFromFragment } = await import("../../src/web/settings/bridge-pairing.js");
 
 const SETTINGS_KEY = "rh-web-settings";
@@ -27,6 +32,9 @@ store.set(SETTINGS_KEY, JSON.stringify({
   session_only: true,
 }));
 let settings = loadSettings();
+const readsAfterHydration = settingsReads;
+for (let i = 0; i < 20; i += 1) assert.equal(loadSettings(), settings);
+assert.equal(settingsReads, readsAfterHydration, "settings are hydrated once and then owned in memory");
 assert.equal(settings.preset, "local", "the legacy Local id is migrated on read");
 assert.equal(settings.base_url, "http://localhost:11434/v1");
 assert.equal(settings.model, "llama3.2");
@@ -104,6 +112,7 @@ store.set(SETTINGS_KEY, JSON.stringify({
     },
   },
 }));
+resetSettingsCache();
 settings = loadSettings();
 assert.equal(settings.model, "claude/legacy-model");
 assert.equal(settings.transcribe_model, "claude/legacy-vision");
@@ -155,10 +164,13 @@ assert.equal(store.has(LEGACY_KEY), false);
 
 /* Corrupt storage falls back to defaults instead of throwing. */
 store.set(SETTINGS_KEY, "not json");
+resetSettingsCache();
 assert.equal(loadSettings().preset, "openrouter");
 store.set(SETTINGS_KEY, JSON.stringify(["nope"]));
+resetSettingsCache();
 assert.equal(loadSettings().preset, "openrouter");
 store.set(SETTINGS_KEY, JSON.stringify({ preset: "custom_endpoint", providers: "nope" }));
+resetSettingsCache();
 assert.equal(loadSettings().preset, "custom_endpoint");
 assert.equal(loadSettings().base_url, "", "a junk provider map degrades to preset defaults");
 

@@ -1,4 +1,5 @@
 import { randomUuidOrFallback } from "./utils.js";
+import { systemClock } from "./clock.js";
 
 /**
  * RabbitholeStore port.
@@ -65,7 +66,7 @@ export function assertSafeIngestId(ingestId) {
 }
 
 export function createIngestId() {
-  return `ingest-${Date.now().toString(36)}-${randomUuidOrFallback().replace(/-/g, "").slice(0, 16)}`;
+  return `ingest-${systemClock.now().toString(36)}-${randomUuidOrFallback().replace(/-/g, "").slice(0, 16)}`;
 }
 
 /** @param {{ hole_id?: unknown, title?: unknown, updated_at?: unknown, nodes?: unknown[] }} hole */

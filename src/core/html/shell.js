@@ -1,4 +1,4 @@
-import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "./button-markup.js";
+import { buttonMarkup, composerActionsMarkup, iconButtonMarkup } from "./markup.js";
 import { iconSvg } from "./icons.js";
 
 /*
@@ -7,8 +7,7 @@ import { iconSvg } from "./icons.js";
  * node --check gate.
  */
 /*
- * The three folds a card offers, rendered identically into the ⋯ menu and into
- * the collapse button's own right-click menu. Each row names a different scope:
+ * The three folds a card offers in its ⋯ menu. Each row names a different scope:
  * the card, the card plus its subtree ("branch", as in Delete branch), and the
  * subtree alone — so each wears the mini-tree glyph that fills exactly the nodes
  * its scope folds, not the card header's minus. Labels are swapped per row at
@@ -133,12 +132,6 @@ export const CANVAS_SHELL = `
   ${collapseGroupMarkup("cm-")}
   <div class="sm-sep cm-delete-sep"></div>
   ${buttonMarkup({ bare: true, className: "sm-item danger", id: "cm-delete", role: "menuitem", tabIndex: -1, label: "Delete branch", labelClass: "sm-label", svgIconHtml: '<span class="sm-ic">' + iconSvg("delete") + '</span>' })}
-</div>
-
-<!-- Right-clicking a card's collapse button opens the same three folds the ⋯
-     menu carries, anchored to the button the gesture started from. -->
-<div id="collapsemenu" class="anchored-menu" role="menu" aria-label="Collapse actions">
-  ${collapseGroupMarkup("cc-")}
 </div>
 
 <!-- A docked note reads and edits in place: one anchored, non-modal dialog,

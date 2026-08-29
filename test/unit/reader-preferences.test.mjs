@@ -1,3 +1,4 @@
+/** @protects reader preferences capability contracts. */
 import assert from "node:assert/strict";
 
 /*
@@ -8,7 +9,7 @@ import assert from "node:assert/strict";
 
 const store = new Map();
 let storageWritable = true;
-globalThis.localStorage = {
+(/** @type {any} */ (globalThis)).localStorage = {
   getItem: (key) => (store.has(key) ? store.get(key) : null),
   setItem: (key, value) => {
     if (!storageWritable) throw new Error("storage is unavailable");
@@ -25,8 +26,8 @@ const root = {
   getAttribute(name){ return this.attributes.has(name) ? this.attributes.get(name) : null; },
   setAttribute(name, value){ this.attributes.set(name, value); },
 };
-globalThis.document = { documentElement: root };
-globalThis.window = {
+(/** @type {any} */ (globalThis)).document = { documentElement: root };
+(/** @type {any} */ (globalThis)).window = {
   matchMedia: (query) => ({
     matches: query.includes("dark") ? systemPrefersDark : false,
     addEventListener: (_type, handler) => mediaListeners.add(handler),

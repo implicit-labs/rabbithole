@@ -1,26 +1,28 @@
-  // ===========================================================================
+// ===========================================================================
 // VISUAL FENCES
 // ===========================================================================
 import { getBlockType } from "../core/blocks.js";
-import { escapeHtml } from "../core/utils.js";
 import { iconSvg } from "../core/html/icons.js";
+import { BUTTON_OPEN } from "../core/html/markup.js";
+import { escapeHtml } from "../core/utils.js";
 import { disposeLightbox, openLightbox } from "./lightbox.js";
+import { visualStylesFor } from "./visual-style-runtime.js";
 
-var visualSurfaceCaches = {};
-var blockMounts = {};
-var mermaidRuntimePromise = null;
-var mermaidRenderQueue = Promise.resolve();
-var mermaidRenderId = 0;
-var mermaidControllers = [];
-var mermaidThemeObserver = null;
-var mermaidGeneration = 0;
-var utf8Decoder = typeof TextDecoder === "function" ? new TextDecoder("utf-8") : null;
+let visualSurfaceCaches = {};
+const blockMounts = {};
+let mermaidRuntimePromise = null;
+let mermaidRenderQueue = Promise.resolve();
+let mermaidRenderId = 0;
+let mermaidControllers = [];
+let mermaidThemeObserver = null;
+let mermaidGeneration = 0;
+const utf8Decoder = typeof TextDecoder === "function" ? new TextDecoder("utf-8") : null;
 
-function loadEmbeddedMermaidRuntime(){
+function loadEmbeddedMermaidRuntime() {
   if (window.mermaid) return window.mermaid;
-  var carrier = document.getElementById("rabbithole-mermaid-runtime");
+  const carrier = document.getElementById("rabbithole-mermaid-runtime");
   if (!carrier || !carrier.textContent) throw new Error("Mermaid runtime is unavailable");
-  var script = document.createElement("script");
+  const script = document.createElement("script");
   script.setAttribute("data-rabbithole-runtime", "mermaid");
   script.textContent = carrier.textContent;
   (document.head || document.body || document.documentElement).appendChild(script);
@@ -29,162 +31,137 @@ function loadEmbeddedMermaidRuntime(){
   return window.mermaid;
 }
 
-function defaultVisualHooks(){
+function defaultVisualHooks() {
   return {
-    post: function(){ return Promise.resolve({ ok: true }); },
-    getNode: function(){ return null; },
-    loadMermaid: loadEmbeddedMermaidRuntime
+    post: function () {
+      return Promise.resolve({ ok: true });
+    },
+    getNode: function () {
+      return null;
+    },
+    loadMermaid: loadEmbeddedMermaidRuntime,
   };
 }
-var visualHooks = defaultVisualHooks();
-var visualHooksReady = false;
-var VISUAL_ALLOWED_URI = /^(?:(?:https?:)?\/\/|https?:|\/|\.\/|\.\.\/|#|data:image\/(?:png|jpe?g|gif|webp);base64,|[^:]*$)/i;
-var VISUAL_SANITIZE_CONFIG = {
-    USE_PROFILES: { html: true, svg: true, svgFilters: true },
-    ADD_TAGS: ["style"],
-    ADD_ATTR: ["style"],
-    FORCE_BODY: true,
-    FORBID_TAGS: ["script", "iframe", "object", "embed", "form"],
-    FORBID_ATTR: ["srcdoc"],
-    ALLOWED_URI_REGEXP: VISUAL_ALLOWED_URI
-  };
-  var VISUAL_BASE_CSS =
-    ":host{display:block;width:100%;max-width:100%;margin:0.55em 0 1em;contain:content;color:var(--fg);background:transparent;font:inherit;}" +
-    ".rh-viz-frame{box-sizing:border-box;width:100%;max-width:100%;overflow-x:auto;overflow-y:visible;overscroll-behavior-x:contain;border:1px solid var(--border);border-radius:8px;padding:0.85em 1em;background:var(--node-bg);color:var(--fg);font:inherit;}" +
-    ".rh-viz-content{box-sizing:border-box;min-width:100%;width:auto;color:inherit;font:inherit;}" +
-    ".rh-viz-content *,.rh-viz-content *::before,.rh-viz-content *::after{box-sizing:border-box;}" +
-    ".rh-viz-content svg{max-width:none;height:auto;}" +
-    ".rh-viz-content img{max-width:100%;height:auto;}" +
-    ".rh-viz-content a{color:var(--accent);text-decoration-color:color-mix(in srgb,var(--accent) 42%,transparent);}" +
-    ".rh-viz-content code,.rh-viz-content pre{font-family:var(--font-mono);}";
-  var CHECK_CSS =
-    ".rh-check{display:grid;gap:.75em;}" +
-    ".rh-check-question{font-weight:650;line-height:1.4;}" +
-    ".rh-check-options{display:grid;gap:.5em;}" +
-    ".rh-check-option,.rh-check-reset{appearance:none;border:1px solid var(--border);border-radius:7px;background:var(--node-bg);color:var(--fg);font:inherit;text-align:left;padding:.62em .75em;cursor:pointer;}" +
-    ".rh-check-option:hover:not(:disabled),.rh-check-option:focus-visible,.rh-check-reset:hover,.rh-check-reset:focus-visible{border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 28%,transparent);outline-offset:1px;}" +
-    ".rh-check-option:disabled{cursor:default;opacity:1;}" +
-    ".rh-check-option.is-correct{border-color:color-mix(in srgb,#2f9e44 70%,var(--border));background:color-mix(in srgb,#2f9e44 13%,var(--node-bg));}" +
-    ".rh-check-option.is-incorrect{border-color:color-mix(in srgb,#e03131 70%,var(--border));background:color-mix(in srgb,#e03131 12%,var(--node-bg));}" +
-    ".rh-check-explanation{padding:.7em .8em;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);line-height:1.45;}" +
-    ".rh-check-actions{display:flex;justify-content:flex-end;}" +
-    ".rh-check-reset{padding:.45em .7em;text-align:center;}";
-  var MERMAID_CSS =
-    ":host{box-sizing:border-box;padding:10px 15px 0 0;}" +
-    ".rh-viz-frame{position:relative;overflow:visible;overscroll-behavior-x:auto;}" +
-    ".rh-mermaid{display:grid;place-items:center;min-height:3.5em;width:100%;}" +
-    ".rh-mermaid.is-rendered{cursor:zoom-in;}" +
-    ".rh-mermaid svg{display:block;width:100%;max-width:100%!important;height:auto;margin:auto;}" +
-    ".rh-mermaid-expand{position:absolute;top:-10px;right:-15px;z-index:1;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid color-mix(in srgb,var(--fg) 22%,transparent);border-radius:6px;background:var(--node-bg);color:var(--fg-dim);box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;opacity:0;transition:opacity var(--duration-fast) var(--ease-standard),background var(--duration-fast) var(--ease-standard),color var(--duration-fast) var(--ease-standard);}" +
-    ".rh-mermaid:hover .rh-mermaid-expand,.rh-mermaid-expand:focus-visible{opacity:1;}" +
-    ".rh-mermaid-expand:hover{background:var(--bar-bg);color:var(--fg-bold);}" +
-    ".rh-mermaid-expand:focus{outline:none;}" +
-    ".rh-mermaid-expand:focus-visible{outline:var(--focus-ring);outline-offset:var(--focus-offset);}" +
-    ".rh-mermaid-expand svg{width:16px;height:16px;margin:0;}" +
-    ".rh-mermaid-loading{color:var(--fg-dim);font:500 .85em var(--font-ui);}" +
-    ".rh-mermaid .viz-fallback{width:100%;}";
-export function registerVisualHooks(hooks){
-    visualHooks = Object.assign({}, visualHooks, hooks || {});
+/** @type {any} */
+let visualHooks = defaultVisualHooks();
+let visualHooksReady = false;
+const VISUAL_ALLOWED_URI =
+  /^(?:(?:https?:)?\/\/|https?:|\/|\.\/|\.\.\/|#|data:image\/(?:png|jpe?g|gif|webp);base64,|[^:]*$)/i;
+const VISUAL_SANITIZE_CONFIG = {
+  USE_PROFILES: { html: true, svg: true, svgFilters: true },
+  ADD_TAGS: ["style"],
+  ADD_ATTR: ["style"],
+  FORCE_BODY: true,
+  FORBID_TAGS: ["script", "iframe", "object", "embed", "form"],
+  FORBID_ATTR: ["srcdoc"],
+  ALLOWED_URI_REGEXP: VISUAL_ALLOWED_URI,
+};
+export function initVisuals(hooks) {
+  visualHooks = Object.assign(defaultVisualHooks(), hooks || {});
+}
+export function disposeVisuals() {
+  for (let i = 0; i < mermaidControllers.length; i++) mermaidControllers[i].dispose();
+  disposeLightbox();
+  visualSurfaceCaches = {};
+  visualHooks = defaultVisualHooks();
+  mermaidRuntimePromise = null;
+  mermaidRenderQueue = Promise.resolve();
+  mermaidControllers = [];
+  mermaidGeneration += 1;
+  if (mermaidThemeObserver) mermaidThemeObserver.disconnect();
+  mermaidThemeObserver = null;
+}
+export function registerBlockMount(type, mountSpec) {
+  const key = String(type || "").toLowerCase();
+  const descriptor = getBlockType(key);
+  if (!descriptor) throw new Error('Cannot register mount for unknown block type "' + key + '"');
+  if (!mountSpec || typeof mountSpec !== "object")
+    throw new TypeError('Block mount for "' + key + '" must be an object');
+  if (descriptor.security === "sanitize-html" && typeof mountSpec.renderHtml !== "function") {
+    throw new TypeError('Block mount for "' + key + '" must provide renderHtml(model)');
   }
-export function disposeVisuals(){
-    for (var i = 0; i < mermaidControllers.length; i++) mermaidControllers[i].dispose();
-    disposeLightbox();
-    visualSurfaceCaches = {};
-    visualHooks = defaultVisualHooks();
-    mermaidRuntimePromise = null;
-    mermaidRenderQueue = Promise.resolve();
-    mermaidControllers = [];
-    mermaidGeneration += 1;
-    if (mermaidThemeObserver) mermaidThemeObserver.disconnect();
-    mermaidThemeObserver = null;
+  if (mountSpec.wire !== undefined && typeof mountSpec.wire !== "function") {
+    throw new TypeError('Block mount wire for "' + key + '" must be a function');
   }
-export function registerBlockMount(type, mountSpec){
-    var key = String(type || "").toLowerCase();
-    var descriptor = getBlockType(key);
-    if (!descriptor) throw new Error('Cannot register mount for unknown block type "' + key + '"');
-    if (!mountSpec || typeof mountSpec !== "object") throw new TypeError('Block mount for "' + key + '" must be an object');
-    if (descriptor.security === "sanitize-html" && typeof mountSpec.renderHtml !== "function") {
-      throw new TypeError('Block mount for "' + key + '" must provide renderHtml(model)');
-    }
-    if (mountSpec.wire !== undefined && typeof mountSpec.wire !== "function") {
-      throw new TypeError('Block mount wire for "' + key + '" must be a function');
-    }
-    blockMounts[key] = mountSpec;
+  blockMounts[key] = mountSpec;
+}
+function ensureVisualSanitizer() {
+  const purifier = window.DOMPurify;
+  if (!purifier || typeof purifier.sanitize !== "function") throw new Error("DOMPurify is unavailable");
+  if (!visualHooksReady && typeof purifier.addHook === "function") {
+    purifier.addHook("uponSanitizeAttribute", function (node, data) {
+      if (data && data.attrName && /^on/i.test(data.attrName)) data.keepAttr = false;
+    });
+    visualHooksReady = true;
   }
-  function ensureVisualSanitizer(){
-    var purifier = window.DOMPurify;
-    if (!purifier || typeof purifier.sanitize !== "function") throw new Error("DOMPurify is unavailable");
-    if (!visualHooksReady && typeof purifier.addHook === "function"){
-      purifier.addHook("uponSanitizeAttribute", function(node, data){
-        if (data && data.attrName && /^on/i.test(data.attrName)) data.keepAttr = false;
-      });
-      visualHooksReady = true;
-    }
-    return purifier;
+  return purifier;
+}
+function sanitizeVisualSource(source) {
+  return ensureVisualSanitizer().sanitize(source, VISUAL_SANITIZE_CONFIG);
+}
+function decodeVisualSource(encoded) {
+  const bin = atob(String(encoded || ""));
+  if (utf8Decoder) {
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return utf8Decoder.decode(bytes);
   }
-function sanitizeVisualSource(source){
-    return ensureVisualSanitizer().sanitize(source, VISUAL_SANITIZE_CONFIG);
+  try {
+    return decodeURIComponent(escape(bin));
+  } catch (e) {
+    return bin;
   }
-function decodeVisualSource(encoded){
-    var bin = atob(String(encoded || ""));
-    if (utf8Decoder){
-      var bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return utf8Decoder.decode(bytes);
-    }
-    try {
-      return decodeURIComponent(escape(bin));
-    } catch(e) {
-      return bin;
-    }
-  }
-  function visualCacheKey(type, encoded){
-    return String(type || "") + "\n" + String(encoded || "");
-  }
-function visualFallback(source, message){
-    var wrap = document.createElement("div");
-    wrap.className = "viz-fallback";
-    var note = document.createElement("div");
-    note.className = "viz-fallback-note";
-    note.textContent = message || "Unable to render visual. Showing source.";
-    var pre = document.createElement("pre");
-    var code = document.createElement("code");
-    code.textContent = String(source || "");
-    pre.appendChild(code);
-    wrap.appendChild(note);
-    wrap.appendChild(pre);
-    return wrap;
-  }
-function buildShowVisual(model){
-    return String(model == null ? "" : model);
-  }
+}
+function visualCacheKey(type, encoded) {
+  return String(type || "") + "\n" + String(encoded || "");
+}
+function visualFallback(source, message) {
+  const wrap = document.createElement("div");
+  wrap.className = "viz-fallback";
+  const note = document.createElement("div");
+  note.className = "viz-fallback-note";
+  note.textContent = message || "Unable to render visual. Showing source.";
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = String(source || "");
+  pre.appendChild(code);
+  wrap.appendChild(note);
+  wrap.appendChild(pre);
+  return wrap;
+}
+function buildShowVisual(model) {
+  return String(model == null ? "" : model);
+}
 
-function buildMermaidVisual(){
+function buildMermaidVisual() {
   return '<div class="rh-mermaid" role="img" aria-label="Mermaid diagram"><span class="rh-mermaid-loading">Drawing diagram…</span></div>';
 }
 
-function currentMermaidTheme(){
+function currentMermaidTheme() {
   return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "default";
 }
 
-function loadMermaidRuntime(){
+function loadMermaidRuntime() {
   if (!mermaidRuntimePromise) {
-    mermaidRuntimePromise = Promise.resolve().then(function(){
-      return visualHooks.loadMermaid();
-    }).then(function(runtime){
-      if (!runtime || typeof runtime.initialize !== "function" || typeof runtime.render !== "function") {
-        throw new Error("Mermaid runtime does not expose initialize() and render()");
-      }
-      return runtime;
-    }).catch(function(error){
-      mermaidRuntimePromise = null;
-      throw error;
-    });
+    mermaidRuntimePromise = Promise.resolve()
+      .then(function () {
+        return visualHooks.loadMermaid();
+      })
+      .then(function (runtime) {
+        if (!runtime || typeof runtime.initialize !== "function" || typeof runtime.render !== "function") {
+          throw new Error("Mermaid runtime does not expose initialize() and render()");
+        }
+        return runtime;
+      })
+      .catch(function (error) {
+        mermaidRuntimePromise = null;
+        throw error;
+      });
   }
   return mermaidRuntimePromise;
 }
 
-function showMermaidFallback(target, source){
+function showMermaidFallback(target, source) {
   target.textContent = "";
   target.classList.remove("is-rendered");
   target.removeAttribute("role");
@@ -192,12 +169,15 @@ function showMermaidFallback(target, source){
   target.appendChild(visualFallback(source, "Mermaid could not render this diagram. Showing source."));
 }
 
-function mermaidAccessibleName(svg){
-  return String(svg.getAttribute("aria-label") || svg.querySelector("title")?.textContent || "Mermaid diagram").trim() || "Mermaid diagram";
+function mermaidAccessibleName(svg) {
+  return (
+    String(svg.getAttribute("aria-label") || svg.querySelector("title")?.textContent || "Mermaid diagram").trim() ||
+    "Mermaid diagram"
+  );
 }
 
-function cloneMermaidSvg(svg){
-  var clone = svg.cloneNode(true);
+function cloneMermaidSvg(svg) {
+  const clone = svg.cloneNode(true);
   clone.removeAttribute("width");
   clone.removeAttribute("height");
   clone.style.removeProperty("width");
@@ -208,31 +188,31 @@ function cloneMermaidSvg(svg){
   return clone;
 }
 
-function openMermaidLightbox(controller, target, trigger){
-  var svg = target.querySelector("svg");
+function openMermaidLightbox(controller, target, trigger) {
+  const svg = target.querySelector("svg");
   if (!svg || !target.classList.contains("is-rendered")) return;
-  var label = mermaidAccessibleName(svg);
+  const label = mermaidAccessibleName(svg);
   controller.lightbox = openLightbox({
     content: cloneMermaidSvg(svg),
     label: label,
     trigger: trigger,
-    variant: "diagram"
+    variant: "diagram",
   });
 }
 
-function mountMermaidAffordance(controller, target, svg){
+function mountMermaidAffordance(controller, target, svg) {
   target.classList.add("is-rendered");
   target.removeAttribute("role");
   target.removeAttribute("aria-label");
-  var button = target.querySelector("button.rh-mermaid-expand");
-  if (!button){
+  let button = target.querySelector("button.rh-mermaid-expand");
+  if (!button) {
     button = document.createElement("button");
     button.type = "button";
     button.className = "rh-mermaid-expand";
     button.setAttribute("aria-label", "Open diagram fullscreen");
     button.title = "Open fullscreen";
     button.innerHTML = iconSvg("expand");
-    button.addEventListener("click", function(e){
+    button.addEventListener("click", function (e) {
       e.preventDefault();
       e.stopPropagation();
       openMermaidLightbox(controller, target, button);
@@ -244,40 +224,48 @@ function mountMermaidAffordance(controller, target, svg){
   }
 }
 
-function wireMermaidSurface(controller, target){
-  var start = null;
-  function onPointerdown(e){
+function wireMermaidSurface(controller, target) {
+  let start = null;
+  function onPointerdown(e) {
     start = null;
-    if (!target.classList.contains("is-rendered") || e.button !== 0 || e.isPrimary === false || e.target.closest?.(".rh-mermaid-expand")) return;
+    if (
+      !target.classList.contains("is-rendered") ||
+      e.button !== 0 ||
+      e.isPrimary === false ||
+      e.target.closest?.(".rh-mermaid-expand")
+    )
+      return;
     start = { id: e.pointerId, x: e.clientX, y: e.clientY };
   }
-  function onPointerup(e){
+  function onPointerup(e) {
     if (!start || start.id !== e.pointerId) return;
-    var dx = e.clientX - start.x;
-    var dy = e.clientY - start.y;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
     start = null;
     if (dx * dx + dy * dy >= 25) return;
-    var button = target.querySelector("button.rh-mermaid-expand");
+    const button = target.querySelector("button.rh-mermaid-expand");
     if (button) openMermaidLightbox(controller, target, button);
   }
-  function onPointercancel(){ start = null; }
+  function onPointercancel() {
+    start = null;
+  }
   target.addEventListener("pointerdown", onPointerdown);
   target.addEventListener("pointerup", onPointerup);
   target.addEventListener("pointercancel", onPointercancel);
-  return function(){
+  return function () {
     target.removeEventListener("pointerdown", onPointerdown);
     target.removeEventListener("pointerup", onPointerup);
     target.removeEventListener("pointercancel", onPointercancel);
   };
 }
 
-function trackMermaidController(controller){
+function trackMermaidController(controller) {
   mermaidControllers.push(controller);
   if (mermaidThemeObserver || typeof MutationObserver !== "function") return;
-  mermaidThemeObserver = new MutationObserver(function(){
-    var live = [];
-    for (var i = 0; i < mermaidControllers.length; i++) {
-      var current = mermaidControllers[i];
+  mermaidThemeObserver = new MutationObserver(function () {
+    const live = [];
+    for (let i = 0; i < mermaidControllers.length; i++) {
+      const current = mermaidControllers[i];
       if (current.root && current.root.isConnected !== false) {
         live.push(current);
         current.render();
@@ -288,19 +276,19 @@ function trackMermaidController(controller){
   mermaidThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
-function wireMermaid(root, source){
-  var target = root.querySelector(".rh-mermaid");
-  var renderVersion = 0;
-  var generation = mermaidGeneration;
-  var controller = {
+function wireMermaid(root, source) {
+  const target = root.querySelector(".rh-mermaid");
+  let renderVersion = 0;
+  const generation = mermaidGeneration;
+  const controller = {
     root: root,
     lightbox: null,
-    dispose: function(){},
-    render: function(){
-      var version = ++renderVersion;
-      mermaidRenderQueue = mermaidRenderQueue.then(async function(){
+    dispose: function () {},
+    render: function () {
+      const version = ++renderVersion;
+      mermaidRenderQueue = mermaidRenderQueue.then(async function () {
         try {
-          var runtime = await loadMermaidRuntime();
+          const runtime = await loadMermaidRuntime();
           if (generation !== mermaidGeneration || version !== renderVersion || !target) return;
           runtime.initialize({
             startOnLoad: false,
@@ -309,171 +297,200 @@ function wireMermaid(root, source){
             suppressErrorRendering: true,
             theme: currentMermaidTheme(),
             flowchart: { htmlLabels: false, useMaxWidth: true },
-            sequence: { useMaxWidth: true }
+            sequence: { useMaxWidth: true },
           });
-          var result = await runtime.render("rh-mermaid-" + (++mermaidRenderId), String(source || ""));
+          const result = await runtime.render("rh-mermaid-" + ++mermaidRenderId, String(source || ""));
           if (generation !== mermaidGeneration || version !== renderVersion || !target) return;
-          var rendered = document.createElement("div");
-          rendered.innerHTML = sanitizeVisualSource(result && result.svg || "");
-          var svg = rendered.querySelector("svg");
+          const rendered = document.createElement("div");
+          rendered.innerHTML = sanitizeVisualSource((result && result.svg) || "");
+          const svg = rendered.querySelector("svg");
           if (!svg) throw new Error("Mermaid produced no SVG");
           svg.setAttribute("role", "img");
           if (!svg.getAttribute("aria-label")) svg.setAttribute("aria-label", "Mermaid diagram");
-          var previous = target.querySelector("svg");
+          const previous = target.querySelector("svg");
           if (previous && target.classList.contains("is-rendered")) previous.replaceWith(svg);
           else {
             target.textContent = "";
             target.appendChild(svg);
           }
           mountMermaidAffordance(controller, target, svg);
-        } catch(e) {
-          if (generation === mermaidGeneration && version === renderVersion && target) showMermaidFallback(target, source);
+        } catch (e) {
+          if (generation === mermaidGeneration && version === renderVersion && target)
+            showMermaidFallback(target, source);
         }
       });
-    }
+    },
   };
   controller.dispose = wireMermaidSurface(controller, target);
   trackMermaidController(controller);
   controller.render();
 }
 
-  function buildMountedVisual(descriptor, mountSpec, model, context){
-      var host = document.createElement("div");
-      host.className = "viz-mounted viz-" + descriptor.type;
-      host.setAttribute("data-viz-mounted", descriptor.type);
-      host.style.contain = descriptor.type === "mermaid" ? "layout style" : "content";
-      var shadow = host.attachShadow({ mode: "open" });
-      var style = document.createElement("style");
-      style.textContent = VISUAL_BASE_CSS + (descriptor.type === "check" ? CHECK_CSS : descriptor.type === "mermaid" ? MERMAID_CSS : "");
-      var frame = document.createElement("div");
-      frame.className = "rh-viz-frame";
-      var content = document.createElement("div");
-      content.className = "rh-viz-content";
-      if (descriptor.security === "sanitize-html") {
-        content.innerHTML = sanitizeVisualSource(mountSpec.renderHtml(model));
-      } else {
-        content.textContent = descriptor.toPlainText(model);
-      }
-      frame.appendChild(content);
-      shadow.appendChild(style);
-      shadow.appendChild(frame);
-      if (mountSpec.wire) mountSpec.wire(content, model, context);
-      return host;
+function buildMountedVisual(descriptor, mountSpec, model, context) {
+  const host = document.createElement("div");
+  host.className = "viz-mounted viz-" + descriptor.type;
+  host.setAttribute("data-viz-mounted", descriptor.type);
+  host.style.contain = descriptor.type === "mermaid" ? "layout style" : "content";
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = visualStylesFor(descriptor.type);
+  const frame = document.createElement("div");
+  frame.className = "rh-viz-frame";
+  const content = document.createElement("div");
+  content.className = "rh-viz-content";
+  if (descriptor.security === "sanitize-html") {
+    content.innerHTML = sanitizeVisualSource(mountSpec.renderHtml(model));
+  } else {
+    content.textContent = descriptor.toPlainText(model);
   }
-  function getSurfaceCache(surfaceKey){
-    var key = String(surfaceKey || "default");
-    if (!visualSurfaceCaches[key]) visualSurfaceCaches[key] = {};
-    return visualSurfaceCaches[key];
+  frame.appendChild(content);
+  shadow.appendChild(style);
+  shadow.appendChild(frame);
+  if (mountSpec.wire) mountSpec.wire(content, model, context);
+  return host;
+}
+function getSurfaceCache(surfaceKey) {
+  const key = String(surfaceKey || "default");
+  if (!visualSurfaceCaches[key]) visualSurfaceCaches[key] = {};
+  return visualSurfaceCaches[key];
+}
+export function mountVisuals(containerEl, surfaceKey) {
+  if (!containerEl || !containerEl.querySelectorAll) return;
+  const placeholders = containerEl.querySelectorAll(".viz");
+  if (!placeholders.length) {
+    if (surfaceKey && visualSurfaceCaches[surfaceKey]) visualSurfaceCaches[surfaceKey] = {};
+    return;
   }
-export function mountVisuals(containerEl, surfaceKey){
-    if (!containerEl || !containerEl.querySelectorAll) return;
-    var placeholders = containerEl.querySelectorAll(".viz");
-    if (!placeholders.length) {
-      if (surfaceKey && visualSurfaceCaches[surfaceKey]) visualSurfaceCaches[surfaceKey] = {};
-      return;
+  const cache = getSurfaceCache(surfaceKey);
+  const present = {};
+  const idCounts = {};
+  const used = {};
+  const mountable = [];
+  for (let i = 0; i < placeholders.length; i++) {
+    const ph = placeholders[i];
+    if (ph.classList && ph.classList.contains("viz-pending")) continue;
+    const type = String(ph.getAttribute("data-viz") || "").toLowerCase();
+    const encoded = ph.getAttribute("data-src") || "";
+    if (!type || !encoded) continue;
+    const blockId = ph.getAttribute("data-block-id") || "";
+    const key = blockId ? "id\n" + blockId : visualCacheKey(type, encoded);
+    if (blockId) idCounts[blockId] = (idCounts[blockId] || 0) + 1;
+    present[key] = (present[key] || 0) + 1;
+    mountable.push({ el: ph, type: type, encoded: encoded, key: key, blockId: blockId });
+  }
+  for (let d = 0; d < mountable.length; d++) {
+    const candidate = mountable[d];
+    if (candidate.blockId && idCounts[candidate.blockId] > 1) {
+      present[candidate.key] -= 1;
+      candidate.key = visualCacheKey(candidate.type, candidate.encoded);
+      present[candidate.key] = (present[candidate.key] || 0) + 1;
+      candidate.blockId = "";
     }
-    var cache = getSurfaceCache(surfaceKey);
-    var present = {};
-    var idCounts = {};
-    var used = {};
-    var mountable = [];
-    for (var i = 0; i < placeholders.length; i++){
-      var ph = placeholders[i];
-      if (ph.classList && ph.classList.contains("viz-pending")) continue;
-      var type = String(ph.getAttribute("data-viz") || "").toLowerCase();
-      var encoded = ph.getAttribute("data-src") || "";
-      if (!type || !encoded) continue;
-      var blockId = ph.getAttribute("data-block-id") || "";
-      var key = blockId ? "id\n" + blockId : visualCacheKey(type, encoded);
-      if (blockId) idCounts[blockId] = (idCounts[blockId] || 0) + 1;
-      present[key] = (present[key] || 0) + 1;
-      mountable.push({ el: ph, type: type, encoded: encoded, key: key, blockId: blockId });
-    }
-    for (var d = 0; d < mountable.length; d++){
-      var candidate = mountable[d];
-      if (candidate.blockId && idCounts[candidate.blockId] > 1){
-        present[candidate.key] -= 1;
-        candidate.key = visualCacheKey(candidate.type, candidate.encoded);
-        present[candidate.key] = (present[candidate.key] || 0) + 1;
-        candidate.blockId = "";
+  }
+  for (let m = 0; m < mountable.length; m++) {
+    let item = mountable[m];
+    const idx = used[item.key] || 0;
+    used[item.key] = idx + 1;
+    if (!cache[item.key]) cache[item.key] = [];
+    let mounted = cache[item.key][idx];
+    const signature = visualCacheKey(item.type, item.encoded);
+    if (mounted && mounted.__rhVisualSignature !== signature) mounted = null;
+    if (!mounted) {
+      const descriptor = getBlockType(item.type);
+      const mountSpec = blockMounts[item.type];
+      let source;
+      try {
+        source = decodeVisualSource(item.encoded);
+      } catch (e) {
+        mounted = visualFallback("", "Unable to decode visual source.");
       }
-    }
-    for (let m = 0; m < mountable.length; m++){
-      let item = mountable[m];
-      var idx = used[item.key] || 0;
-      used[item.key] = idx + 1;
-      if (!cache[item.key]) cache[item.key] = [];
-      var mounted = cache[item.key][idx];
-      var signature = visualCacheKey(item.type, item.encoded);
-      if (mounted && mounted.__rhVisualSignature !== signature) mounted = null;
-      if (!mounted){
-        var descriptor = getBlockType(item.type);
-        var mountSpec = blockMounts[item.type];
-        var source;
+      if (!mounted)
         try {
-          source = decodeVisualSource(item.encoded);
-        } catch(e) {
-          mounted = visualFallback("", "Unable to decode visual source.");
-        }
-        if (!mounted) try {
-          var nodeId = String(item.el.closest && item.el.closest("[data-node-id]")?.getAttribute("data-node-id") || item.key && String(surfaceKey || "").split(":").slice(1).join(":") || "");
-          var node = visualHooks.getNode(nodeId);
-          var learn = node && node.extensions && node.extensions.learn;
-          var currentState = item.blockId && learn && typeof learn === "object" ? learn[item.blockId] : null;
-          var context = {
+          const nodeId = String(
+            (item.el.closest && item.el.closest("[data-node-id]")?.getAttribute("data-node-id")) ||
+              (item.key &&
+                String(surfaceKey || "")
+                  .split(":")
+                  .slice(1)
+                  .join(":")) ||
+              "",
+          );
+          const node = visualHooks.getNode(nodeId);
+          const learn = node && node.progress;
+          const currentState = item.blockId && learn && typeof learn === "object" ? learn[item.blockId] : null;
+          const context = {
             node_id: nodeId,
             block_id: item.blockId,
             state: currentState && typeof currentState === "object" ? currentState : {},
-            recordBlockState: function(nextState){
+            recordBlockState: function (nextState) {
               if (!item.blockId || !nodeId) return Promise.resolve({ ok: true });
               if (node) {
-                node.extensions = node.extensions && typeof node.extensions === "object" ? node.extensions : {};
-                node.extensions.learn = node.extensions.learn && typeof node.extensions.learn === "object" ? node.extensions.learn : {};
-                node.extensions.learn[item.blockId] = Object.assign({}, node.extensions.learn[item.blockId] || {}, nextState);
+                node.progress = node.progress && typeof node.progress === "object" ? node.progress : {};
+                node.progress[item.blockId] = Object.assign({}, node.progress[item.blockId] || {}, nextState);
               }
-              return Promise.resolve(visualHooks.post({ type: "block_state", node_id: nodeId, block_id: item.blockId, state: nextState }));
-            }
+              return Promise.resolve(
+                visualHooks.post({ type: "block_state", node_id: nodeId, block_id: item.blockId, state: nextState }),
+              );
+            },
           };
-          mounted = descriptor && mountSpec
-            ? buildMountedVisual(descriptor, mountSpec, descriptor.parse(source), context)
-            : visualFallback(source, "Unsupported visual type. Showing source.");
-        } catch(e) {
+          mounted =
+            descriptor && mountSpec
+              ? buildMountedVisual(descriptor, mountSpec, descriptor.parse(source), context)
+              : visualFallback(source, "Unsupported visual type. Showing source.");
+        } catch (e) {
           mounted = visualFallback(source, "Unable to render visual. Showing source.");
         }
-        mounted.__rhVisualSignature = signature;
-        cache[item.key][idx] = mounted;
-      }
-      if (item.el.parentNode) item.el.parentNode.replaceChild(mounted, item.el);
+      mounted.__rhVisualSignature = signature;
+      cache[item.key][idx] = mounted;
     }
-    for (var ckey in cache){
-      if (!Object.prototype.hasOwnProperty.call(cache, ckey)) continue;
-      if (!present[ckey]) delete cache[ckey];
-      else cache[ckey].length = present[ckey];
-    }
+    if (item.el.parentNode) item.el.parentNode.replaceChild(mounted, item.el);
   }
+  for (const ckey in cache) {
+    if (!Object.prototype.hasOwnProperty.call(cache, ckey)) continue;
+    if (!present[ckey]) delete cache[ckey];
+    else cache[ckey].length = present[ckey];
+  }
+}
 
 registerBlockMount("show", { renderHtml: buildShowVisual });
 registerBlockMount("mermaid", { renderHtml: buildMermaidVisual, wire: wireMermaid });
 
-export function buildCheckVisual(model){
-  var options = model.options.map(function(option, index){
-    return '<button class="rh-check-option" type="button" data-option="' + index + '">' + escapeHtml(option ?? "") + '</button>';
-  }).join("");
-  return '<section class="rh-check"><div class="rh-check-question">' + escapeHtml(model.question ?? "") +
-    '</div><div class="rh-check-options">' + options + '</div><div class="rh-check-explanation" hidden>' +
-    escapeHtml(model.explanation || "") + '</div><div class="rh-check-actions" hidden><button class="rh-check-reset" type="button">Try again</button></div></section>';
+export function buildCheckVisual(model) {
+  const options = model.options
+    .map(function (option, index) {
+      return (
+        BUTTON_OPEN +
+        ' class="rh-check-option" type="button" data-option="' +
+        index +
+        '">' +
+        escapeHtml(option ?? "") +
+        "</button>"
+      );
+    })
+    .join("");
+  return (
+    '<section class="rh-check"><div class="rh-check-question">' +
+    escapeHtml(model.question ?? "") +
+    '</div><div class="rh-check-options">' +
+    options +
+    '</div><div class="rh-check-explanation" hidden>' +
+    escapeHtml(model.explanation || "") +
+    '</div><div class="rh-check-actions" hidden>' +
+    BUTTON_OPEN +
+    ' class="rh-check-reset" type="button">Try again</button></div></section>'
+  );
 }
 
-function wireCheck(root, model, ctx){
-  var options = Array.from(root.querySelectorAll(".rh-check-option"));
-  var explanation = root.querySelector(".rh-check-explanation");
-  var actions = root.querySelector(".rh-check-actions");
-  var reset = root.querySelector(".rh-check-reset");
-  var state = ctx && ctx.state && typeof ctx.state === "object" ? ctx.state : {};
-  var attempts = Number.isInteger(state.attempts) && state.attempts >= 0 ? state.attempts : 0;
-  var currentLast = state.last || null;
-  function paint(last, revealed){
-    options.forEach(function(button, index){
+function wireCheck(root, model, ctx) {
+  const options = Array.from(root.querySelectorAll(".rh-check-option"));
+  const explanation = root.querySelector(".rh-check-explanation");
+  const actions = root.querySelector(".rh-check-actions");
+  const reset = root.querySelector(".rh-check-reset");
+  const state = ctx && ctx.state && typeof ctx.state === "object" ? ctx.state : {};
+  let attempts = Number.isInteger(state.attempts) && state.attempts >= 0 ? state.attempts : 0;
+  let currentLast = state.last || null;
+  function paint(last, revealed) {
+    options.forEach(function (button, index) {
       button.disabled = !!revealed;
       button.classList.remove("is-correct", "is-incorrect");
       button.removeAttribute("aria-pressed");
@@ -487,17 +504,17 @@ function wireCheck(root, model, ctx){
     actions.hidden = !revealed;
   }
   paint(state.last, state.revealed === true);
-  options.forEach(function(button, index){
-    button.addEventListener("click", function(){
+  options.forEach(function (button, index) {
+    button.addEventListener("click", function () {
       if (button.disabled) return;
       attempts += 1;
-      var last = { option: index, correct: index === model.answer };
+      const last = { option: index, correct: index === model.answer };
       currentLast = last;
       paint(last, true);
       if (ctx) ctx.recordBlockState({ attempts: attempts, last: last, revealed: true });
     });
   });
-  reset.addEventListener("click", function(){
+  reset.addEventListener("click", function () {
     paint(null, false);
     options[0]?.focus();
     if (ctx) ctx.recordBlockState({ attempts: attempts, last: currentLast, revealed: false });

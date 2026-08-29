@@ -1,4 +1,4 @@
-import { BRANCH_FOLLOWUP, BRANCH_SELECTION, branchTypeOfNode } from "./model.js";
+import { BRANCH_FOLLOWUP, BRANCH_SELECTION, branchTypeOfNode } from "./hole/ask.js";
 
 /** @typedef {Omit<import("./contracts/engine.js").HoleNode, "origin"> & { origin?: { branch_type?: unknown, selected_text?: unknown } | null } & Record<string, any>} LayoutNode */
 /** @typedef {{ minX: number, minY: number, maxX: number, maxY: number }} Bounds */
@@ -18,22 +18,22 @@ export function nodeOrder(a, b) {
 
 /** @param {LayoutNode | null | undefined} node */
 function nodeX(node) {
-  return Number(node?.x ?? node?.position?.x) || 0;
+  return Number(node?.position?.x) || 0;
 }
 
 /** @param {LayoutNode | null | undefined} node */
 function nodeY(node) {
-  return Number(node?.y ?? node?.position?.y) || 0;
+  return Number(node?.position?.y) || 0;
 }
 
 /** @param {LayoutNode | null | undefined} node @param {number} [fallback] */
 function nodeW(node, fallback = DEFAULT_CHILD.w) {
-  return Number(node?.w ?? node?.size?.w) || fallback;
+  return Number(node?.size?.w) || fallback;
 }
 
 /** @param {LayoutNode | null | undefined} node @param {number} [fallback] */
 function nodeH(node, fallback = DEFAULT_CHILD.h) {
-  return Number(node?.h ?? node?.size?.h) || fallback;
+  return Number(node?.size?.h) || fallback;
 }
 
 /** @param {LayoutNode} node @param {{ effH?: EffectiveHeight | null }} [options] @returns {Bounds} */

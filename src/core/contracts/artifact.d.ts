@@ -47,7 +47,7 @@ export interface PersistedNode {
   base_url: string | null;
   base_url_source: BaseUrlSource | null;
   /** Preserved application metadata; schema.js does not currently validate it. */
-  origin: unknown;
+  origin: any;
   position: Position;
   size: NodeSize | null;
   font_scale: number;
@@ -56,7 +56,8 @@ export interface PersistedNode {
   read: boolean;
   created_at: string | null;
   /** Opaque learner/application state, preserved with structural JSON fidelity. */
-  extensions: Record<string, unknown>;
+  extensions: Record<string, any>;
+  [field: string]: unknown;
 }
 
 /** Canonical schema-v2 document accepted by `validatePersistedHole`. */

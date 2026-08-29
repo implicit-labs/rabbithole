@@ -1,3 +1,4 @@
+/** @protects install smoke capability contracts. */
 /**
  * Pack/install/launch release smoke test.
  *

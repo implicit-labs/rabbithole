@@ -1,6 +1,7 @@
+/** @protects pdf provenance capability contracts. */
 import assert from "node:assert/strict";
 import { buildPdfDocument, normalizePdfExtension } from "../../src/core/pdf-shared.js";
-import { createHoleState, holeStateToHole, reduceHoleEvent } from "../../src/core/reducer.js";
+import { createHoleState, holeStateToHole, reduceHoleEvent } from "../../src/core/hole/reduce.js";
 import { parsePersistedHole, toPersistedHole } from "../../src/core/schema.js";
 
 const sha256 = "ab".repeat(32);

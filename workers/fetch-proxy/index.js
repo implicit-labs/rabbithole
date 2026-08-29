@@ -1,10 +1,6 @@
-export const ALLOWED_HOSTS = new Set([
-  "arxiv.org",
-  "www.arxiv.org",
-  "ar5iv.labs.arxiv.org",
-  "ar5iv.org",
-  "openreview.net",
-]);
+import { FETCH_PROXY_ALLOWED_HOSTS } from "../../policy/origins.js";
+
+export const ALLOWED_HOSTS = new Set(FETCH_PROXY_ALLOWED_HOSTS);
 
 export const MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 const MAX_REDIRECTS = 5;

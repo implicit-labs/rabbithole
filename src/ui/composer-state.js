@@ -1,6 +1,6 @@
 import { followupCommitFromEnter, isComposingText } from "./input-intent.js";
 
-const LENS_KEYS = { "1": "explain", "2": "eli5", "3": "example", "4": "deeper" };
+const LENS_KEYS = { 1: "explain", 2: "eli5", 3: "example", 4: "deeper" };
 
 /**
  * @param {{ text: HTMLTextAreaElement, commits: Iterable<HTMLButtonElement>, lenses?: Iterable<HTMLButtonElement>, wrap: Element, hasDraft?: boolean | (() => boolean) }} elements
@@ -12,17 +12,21 @@ export function applyComposerState(elements, state, copy) {
   // flip the class on every call instead of setting it.
   // Parent readiness is intent-specific: notes can be saved against the text
   // already on screen, while asks need the parent answer to settle first.
-  var down = !!(state.phase === "frozen" || state.phase === "closed" || state.unavailable);
-  var commitsDown = down || !!state.disabled;
-  var hasDraft = typeof elements.hasDraft === "function" ? elements.hasDraft() :
-    (typeof elements.hasDraft === "boolean" ? elements.hasDraft : !!elements.text.value.trim());
+  const down = !!(state.phase === "frozen" || state.phase === "closed" || state.unavailable);
+  const commitsDown = down || !!state.disabled;
+  const hasDraft =
+    typeof elements.hasDraft === "function"
+      ? elements.hasDraft()
+      : typeof elements.hasDraft === "boolean"
+        ? elements.hasDraft
+        : !!elements.text.value.trim();
   elements.text.disabled = down;
   elements.wrap.classList.toggle("disabled", down);
-  var placeholderPhase = state.pending && state.phase !== "frozen" && state.phase !== "closed"
-    ? "pending" : state.phase;
+  const placeholderPhase =
+    state.pending && state.phase !== "frozen" && state.phase !== "closed" ? "pending" : state.phase;
   elements.text.placeholder = copy[placeholderPhase];
   for (const commit of elements.commits) {
-    var intentBlocked = commitsDown || (state.pending && commit.dataset.commit === "ask");
+    const intentBlocked = commitsDown || (state.pending && commit.dataset.commit === "ask");
     commit.dataset.intentBlocked = intentBlocked ? "true" : "false";
     commit.disabled = intentBlocked || !hasDraft;
   }
@@ -41,32 +45,56 @@ export function applyComposerState(elements, state, copy) {
  *   onCommit: (kind: string, event: Event) => void,
  *   onLens: (lens: string, event: Event) => void }} surface */
 export function wireComposerActions(surface) {
-  var listen = surface.listen || function (target, type, handler) { target.addEventListener(type, handler); };
-  var hasDraft = surface.hasDraft || function(){ return !!surface.text.value.trim(); };
-  var commitFromEnter = surface.commitFromEnter || followupCommitFromEnter;
-  var hasLenses = !!surface.actions.querySelector(".lens");
+  const listen =
+    surface.listen ||
+    function (target, type, handler) {
+      target.addEventListener(type, handler);
+    };
+  const hasDraft =
+    surface.hasDraft ||
+    function () {
+      return !!surface.text.value.trim();
+    };
+  const commitFromEnter = surface.commitFromEnter || followupCommitFromEnter;
+  const hasLenses = !!surface.actions.querySelector(".lens");
   listen(surface.actions, "click", function (e) {
-    var target = /** @type {Element} */ (e.target);
-    var button = target.closest ? /** @type {HTMLButtonElement | null} */ (target.closest("button")) : null;
+    const target = /** @type {Element} */ (e.target);
+    const button = target.closest ? /** @type {HTMLButtonElement | null} */ (target.closest("button")) : null;
     if (!button || button.disabled) return;
     if (button.dataset.commit && hasDraft()) surface.onCommit(button.dataset.commit, e);
     else if (button.dataset.lens && surface.text.value === "") surface.onLens(button.dataset.lens, e);
   });
   listen(surface.text, "keydown", function (e) {
-    var commit = commitFromEnter(e);
+    const commit = commitFromEnter(e);
     if (commit) {
       e.preventDefault();
       // note-window is a placement variant of the Note intent, not a third
       // availability class in the action bar.
-      var commitButton = surface.actions.querySelector('[data-commit="' + (commit === "ask" ? "ask" : "note") + '"]');
-      var available = commitButton && (commitButton.hasAttribute("data-intent-blocked")
-        ? commitButton.dataset.intentBlocked !== "true" : !commitButton.disabled);
+      const commitButton = /** @type {HTMLButtonElement | null} */ (
+        surface.actions.querySelector('[data-commit="' + (commit === "ask" ? "ask" : "note") + '"]')
+      );
+      const available =
+        commitButton &&
+        (commitButton.hasAttribute("data-intent-blocked")
+          ? commitButton.dataset.intentBlocked !== "true"
+          : !commitButton.disabled);
       if (available && (commit === "ask" || hasDraft())) surface.onCommit(commit, e);
       return;
     }
-    if (hasLenses && !isComposingText(e) && surface.text.value === "" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && LENS_KEYS[e.key]) {
+    if (
+      hasLenses &&
+      !isComposingText(e) &&
+      surface.text.value === "" &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      LENS_KEYS[e.key]
+    ) {
       e.preventDefault();
-      var lens = surface.actions.querySelector('[data-lens="' + LENS_KEYS[e.key] + '"]');
+      const lens = /** @type {HTMLButtonElement | null} */ (
+        surface.actions.querySelector('[data-lens="' + LENS_KEYS[e.key] + '"]')
+      );
       if (lens && !lens.disabled) surface.onLens(LENS_KEYS[e.key], e);
     }
   });

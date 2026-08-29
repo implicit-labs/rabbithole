@@ -16,17 +16,25 @@ export async function loadPdfJsModule() {
       const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
       pdfjsPromise = import(url)
         .finally(() => setTimeout(() => URL.revokeObjectURL(url), 1000))
-        .catch((error) => { pdfjsPromise = null; throw error; });
+        .catch((error) => {
+          pdfjsPromise = null;
+          throw error;
+        });
     } else {
       const nodeRuntime = typeof process !== "undefined" && process.versions?.node;
-      let runtimeUrl = nodeRuntime ? ["pdfjs-dist", "build/pdf.mjs"].join("/") : new URL("pdf.mjs", document.baseURI).href;
+      let runtimeUrl = nodeRuntime
+        ? ["pdfjs-dist", "build/pdf.mjs"].join("/")
+        : new URL("pdf.mjs", document.baseURI).href;
       if (!nodeRuntime && pdfjsNetworkAttempts) {
         const retryUrl = new URL(runtimeUrl);
         retryUrl.searchParams.set("retry", String(pdfjsNetworkAttempts));
         runtimeUrl = retryUrl.href;
       }
       pdfjsNetworkAttempts++;
-      pdfjsPromise = import(runtimeUrl).catch((error) => { pdfjsPromise = null; throw error; });
+      pdfjsPromise = import(runtimeUrl).catch((error) => {
+        pdfjsPromise = null;
+        throw error;
+      });
     }
   }
   pdfjs = await pdfjsPromise;
@@ -53,6 +61,7 @@ function runtimeAssetUrl(directory) {
 }
 
 /** Share a parsed PDF between Reader and Canvas mounts of the same node. */
+/** @param {{key: string, url?: string, data?: Uint8Array, blob?: Blob}} options */
 export async function acquirePdfDocument({ key, url, data, blob }) {
   await loadPdfJsModule();
   const cacheKey = String(key || url || "");
@@ -72,7 +81,9 @@ export async function acquirePdfDocument({ key, url, data, blob }) {
     });
     entry = { loadingTask, promise: loadingTask.promise, refs: 0, destroyTimer: 0 };
     documents.set(cacheKey, entry);
-    entry.promise.catch(() => { if (documents.get(cacheKey) === entry) documents.delete(cacheKey); });
+    entry.promise.catch(() => {
+      if (documents.get(cacheKey) === entry) documents.delete(cacheKey);
+    });
   }
   clearTimeout(entry.destroyTimer);
   entry.refs++;
@@ -115,16 +126,26 @@ function scheduleDestroy(cacheKey, entry, delay) {
 }
 
 function runtimeCanvasFactoryOption() {
-  if (typeof process === "undefined" || !process.versions?.node || typeof document === "undefined" || typeof document.createElement !== "function") return {};
-  return { canvasFactory: {
-    create(width, height) {
-      if (!(width > 0 && height > 0)) throw new Error("Canvas dimensions must be positive.");
-      const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
-      return { canvas, context: canvas.getContext("2d") };
+  if (
+    typeof process === "undefined" ||
+    !process.versions?.node ||
+    typeof document === "undefined" ||
+    typeof document.createElement !== "function"
+  )
+    return {};
+  return {
+    canvasFactory: {
+      create(width, height) {
+        if (!(width > 0 && height > 0)) throw new Error("Canvas dimensions must be positive.");
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        return { canvas, context: canvas.getContext("2d") };
+      },
+      reset: resetPdfCanvasTarget,
+      destroy: destroyPdfCanvasTarget,
     },
-    reset: resetPdfCanvasTarget,
-    destroy: destroyPdfCanvasTarget
-  } };
+  };
 }
 
 export function renderPdfTextLayer(params) {

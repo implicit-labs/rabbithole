@@ -14,10 +14,12 @@ export function buildOriginCrop(node, surface) {
   img.src = resolveAssetUrl(name);
   img.alt = "Selected PDF region";
   img.draggable = false;
-  const hideIfMissing = function(){ if (!img.naturalWidth) button.hidden = true; };
+  const hideIfMissing = function () {
+    if (!img.naturalWidth) button.hidden = true;
+  };
   img.addEventListener("error", hideIfMissing, { once: true });
   img.addEventListener("load", hideIfMissing, { once: true });
-  button.addEventListener("click", function(event){
+  button.addEventListener("click", function (event) {
     event.preventDefault();
     event.stopPropagation();
     openImageLightbox(img.currentSrc || img.src, img.alt, button);

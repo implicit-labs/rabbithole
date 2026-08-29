@@ -62,7 +62,7 @@ narrowest relevant file directly, for example:
 ```bash
 node test/unit/reducer.test.mjs
 node test/contracts/artifact-roundtrip.test.mjs
-node test/e2e/web-app.test.mjs
+node test/e2e/web-app-branching.test.mjs
 ```
 
 ## Generated files

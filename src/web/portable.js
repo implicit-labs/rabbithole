@@ -23,6 +23,7 @@ export async function buildRabbitholeExport(store, holeId) {
     ? await store.getAssets(persisted.hole_id)
     : await Promise.all((await store.listAssets(persisted.hole_id)).map(async (name) => ({ name, blob: await store.getAsset(persisted.hole_id, name) })));
   const encoded = await Promise.all(rows.map(async ({ name, blob }) => [name, blob ? await binaryToBase64(blob) : ""]));
+  /** @type {Record<string, string>} */
   const assets = {};
   for (const [name, value] of encoded) {
     validateAssetName(name);
@@ -105,7 +106,7 @@ async function decodeAssets(rawAssets) {
   for (const [name, encoded] of Object.entries(rawAssets || {})) {
     const safeName = validateAssetName(name);
     const bytes = base64ToBytes(encoded);
-    const blob = new Blob([bytes], { type: getAssetContentType(safeName) });
+    const blob = new Blob([/** @type {BlobPart} */ (bytes)], { type: getAssetContentType(safeName) });
     const limit = maxAssetBytes(safeName);
     if (blob.size > limit) throw new Error(`Import failed: asset ${safeName} exceeds ${Math.round(limit / 1024 / 1024)} MB.`);
     out.push({ name: safeName, blob });

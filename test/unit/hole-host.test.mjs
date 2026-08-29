@@ -1,3 +1,4 @@
+/** @protects hole host capability contracts. */
 import assert from "node:assert/strict";
 import { createSaveChain } from "../../src/core/hole-host.js";
 

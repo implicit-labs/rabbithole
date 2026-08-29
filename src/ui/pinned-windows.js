@@ -9,11 +9,11 @@ const DUPLICATE_REFERENCE_ATTRIBUTES = ["aria-controls", "aria-describedby", "ar
  * viewport geometry.
  */
 export function createPinnedWindows(options) {
-  var layer = options.layer;
-  var entries = new Map();
-  var nextZ = 1;
-  var disposed = false;
-  var layerObserver = typeof MutationObserver === "function" ? new MutationObserver(removeDetachedEntries) : null;
+  const layer = options.layer;
+  const entries = new Map();
+  let nextZ = 1;
+  let disposed = false;
+  const layerObserver = typeof MutationObserver === "function" ? new MutationObserver(removeDetachedEntries) : null;
   layerObserver?.observe(layer, { childList: true, subtree: true });
 
   function sync(node, pin) {
@@ -21,7 +21,7 @@ export function createPinnedWindows(options) {
       if (node) remove(node.id);
       return;
     }
-    var entry = entries.get(node.id);
+    let entry = entries.get(node.id);
     if (!entry) entry = createEntry(node, pin);
     entry.node = node;
     entry.pin = pin;
@@ -32,23 +32,31 @@ export function createPinnedWindows(options) {
   }
 
   function createEntry(node, pin) {
-    var source = node.el;
-    var wrapper = document.createElement("section");
+    const source = node.el;
+    const wrapper = document.createElement("section");
     wrapper.className = "pinned-window";
     wrapper.dataset.pinnedNodeId = node.id;
     wrapper.setAttribute("role", "region");
     wrapper.setAttribute("aria-label", "Pinned: " + (node.title || "Untitled card"));
     wrapper.style.zIndex = String(nextZ++);
 
-    var origin = document.createElement("div");
+    const origin = document.createElement("div");
     origin.className = "pinned-origin";
     origin.dataset.pinnedOriginId = node.id;
     source.before(origin);
     layer.appendChild(wrapper);
 
-    var entry = {
-      node, pin, wrapper, origin, card: source, visual: null, originBody: null,
-      renderFrame: 0, movingCard: true, pinnedActions: [],
+    const entry = {
+      node,
+      pin,
+      wrapper,
+      origin,
+      card: source,
+      visual: null,
+      originBody: null,
+      renderFrame: 0,
+      movingCard: true,
+      pinnedActions: [],
       graphStyle: {
         height: source.style.height,
         minHeight: source.style.minHeight,
@@ -61,24 +69,36 @@ export function createPinnedWindows(options) {
     wrapper.appendChild(source);
     entry.movingCard = false;
 
-    entry.observer = typeof MutationObserver === "function" ? new MutationObserver(function(){
-      scheduleProxyRender(entry);
-      positionEntry(entry);
-    }) : null;
-    entry.observer?.observe(source, { attributes: true, attributeFilter: ["class"], characterData: true, childList: true, subtree: true });
-    wrapper.addEventListener("pointerdown", function(){ raise(entry); });
-    wireDrag(entry, source.querySelector(":scope > .node-head"));
-    wireResize(entry, source.querySelector(":scope > .node-resize"));
+    entry.observer =
+      typeof MutationObserver === "function"
+        ? new MutationObserver(function () {
+            scheduleProxyRender(entry);
+            positionEntry(entry);
+          })
+        : null;
+    entry.observer?.observe(source, {
+      attributes: true,
+      attributeFilter: ["class"],
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    wrapper.addEventListener("pointerdown", function () {
+      raise(entry);
+    });
+    wireDrag(entry, source.querySelector(":scope > .card-head"));
+    wireResize(entry, source.querySelector(":scope > .card-resize"));
     renderProxy(entry);
     return entry;
   }
 
   function normalizePinSize(entry) {
-    var scale = entry.pin.scale;
-    if (!Number.isFinite(entry.pin.w) || entry.pin.w < 240) entry.pin.w = Math.max(240, entry.node.w || entry.card.offsetWidth || 240);
+    const scale = entry.pin.scale;
+    if (!Number.isFinite(entry.pin.w) || entry.pin.w < 240)
+      entry.pin.w = Math.max(240, entry.node.size.w || entry.card.offsetWidth || 240);
     if (!Number.isFinite(entry.pin.h) || entry.pin.h < 160) {
-      var rendered = entry.card.getBoundingClientRect().height / Math.max(scale, 0.01);
-      entry.pin.h = Math.max(160, rendered || entry.node.h || 160);
+      const rendered = entry.card.getBoundingClientRect().height / Math.max(scale, 0.01);
+      entry.pin.h = Math.max(160, rendered || entry.node.size.h || 160);
     }
   }
 
@@ -87,31 +107,32 @@ export function createPinnedWindows(options) {
   }
 
   function syncPinnedActions(entry) {
-    var acts = entry.card.querySelector(":scope > .node-head > .node-acts");
+    const acts = entry.card.querySelector(":scope > .card-head > .card-acts");
     if (!acts) return;
     if (!entry.pinnedActions.length) {
-      var focus = iconButton("locate", "Focus original on canvas", "focus-original");
-      focus.addEventListener("click", function(event){
+      const focus = iconButton("locate", "Focus original on canvas", "focus-original");
+      focus.addEventListener("click", function (event) {
         event.stopPropagation();
         options.onShowOriginal?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
       });
       entry.pinnedActions.push(focus);
       if (!options.readOnly) {
-        var unpin = iconButton("pin-active", "Unpin window", "unpin");
-        unpin.addEventListener("click", function(event){
+        const unpin = iconButton("pin-active", "Unpin window", "unpin");
+        unpin.addEventListener("click", function (event) {
           event.stopPropagation();
           options.onUnpin?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
         });
         entry.pinnedActions.push(unpin);
       }
     }
-    var divider = entry.node.actDivider;
-    for (var i = 0; i < entry.pinnedActions.length; i++) acts.insertBefore(entry.pinnedActions[i], divider || acts.firstChild);
+    const divider = entry.node.actDivider;
+    for (let i = 0; i < entry.pinnedActions.length; i++)
+      acts.insertBefore(entry.pinnedActions[i], divider || acts.firstChild);
   }
 
   function scheduleProxyRender(entry) {
     if (disposed || !entries.has(entry.node.id) || entry.renderFrame) return;
-    entry.renderFrame = requestAnimationFrame(function(){
+    entry.renderFrame = requestAnimationFrame(function () {
       entry.renderFrame = 0;
       if (!entry.card?.isConnected || !entries.has(entry.node.id)) return remove(entry.node.id);
       renderProxy(entry);
@@ -119,39 +140,47 @@ export function createPinnedWindows(options) {
   }
 
   function renderProxy(entry) {
-    var source = entry.card;
-    var previousScroll = entry.originBody?.scrollTop || source.querySelector(":scope > .node-body")?.scrollTop || 0;
-    var visual = source.cloneNode(true);
-    visual.classList.remove("node", "current", "flash", "node-enter", "entered", "pinned-window-card", "dragging");
+    const source = entry.card;
+    const previousScroll = entry.originBody?.scrollTop || source.querySelector(":scope > .card-body")?.scrollTop || 0;
+    const visual = source.cloneNode(true);
+    visual.classList.remove("card", "current", "flash", "card-enter", "entered", "pinned-window-card", "dragging");
     visual.classList.add("pinned-origin-card");
     visual.removeAttribute("data-id");
     visual.removeAttribute("style");
-    visual.style.width = entry.node.w + "px";
+    visual.style.width = entry.node.size.w + "px";
     visual.style.height = entry.node.collapsed ? "auto" : entry.graphStyle.height;
     visual.style.minHeight = entry.node.collapsed ? "" : entry.graphStyle.minHeight;
     visual.style.maxHeight = entry.node.collapsed ? "" : entry.graphStyle.maxHeight;
     visual.inert = true;
     visual.setAttribute("aria-hidden", "true");
-    visual.querySelectorAll("[id]").forEach(function(el){ el.removeAttribute("id"); });
-    visual.querySelectorAll("[data-id]").forEach(function(el){ el.removeAttribute("data-id"); });
-    visual.querySelectorAll("[data-node-id]").forEach(function(el){ el.removeAttribute("data-node-id"); });
-    visual.querySelectorAll("*").forEach(function(el){
-      for (var i = 0; i < DUPLICATE_REFERENCE_ATTRIBUTES.length; i++) el.removeAttribute(DUPLICATE_REFERENCE_ATTRIBUTES[i]);
+    visual.querySelectorAll("[id]").forEach(function (el) {
+      el.removeAttribute("id");
+    });
+    visual.querySelectorAll("[data-id]").forEach(function (el) {
+      el.removeAttribute("data-id");
+    });
+    visual.querySelectorAll("[data-node-id]").forEach(function (el) {
+      el.removeAttribute("data-node-id");
+    });
+    visual.querySelectorAll("*").forEach(function (el) {
+      for (let i = 0; i < DUPLICATE_REFERENCE_ATTRIBUTES.length; i++)
+        el.removeAttribute(DUPLICATE_REFERENCE_ATTRIBUTES[i]);
     });
 
-    var overlay = document.createElement("button");
+    const overlay = document.createElement("button");
     overlay.type = "button";
     overlay.className = "pinned-origin-overlay";
     overlay.setAttribute("aria-label", "Show pinned window: " + (entry.node.title || "Untitled card"));
-    overlay.innerHTML = '<span class="pinned-origin-label">' + iconSvg("pin-active") + '<span>Pinned to screen</span></span>';
-    overlay.addEventListener("click", function(){
+    overlay.innerHTML =
+      '<span class="pinned-origin-label">' + iconSvg("pin-active") + "<span>Pinned to screen</span></span>";
+    overlay.addEventListener("click", function () {
       raise(entry);
       entry.node.moreBtn?.focus({ preventScroll: true });
     });
 
     entry.origin.replaceChildren(visual, overlay);
     entry.visual = visual;
-    entry.originBody = visual.querySelector(":scope > .node-body");
+    entry.originBody = visual.querySelector(":scope > .card-body");
     entry.node.canvasBodyEl = entry.originBody;
     if (entry.originBody) entry.originBody.scrollTop = previousScroll;
     copyCanvasPixels(source, visual);
@@ -159,20 +188,23 @@ export function createPinnedWindows(options) {
   }
 
   function positionOrigin(entry) {
-    var origin = entry.origin;
-    origin.style.left = entry.node.x + "px";
-    origin.style.top = entry.node.y + "px";
-    origin.style.width = entry.node.w + "px";
+    const origin = entry.origin;
+    origin.style.left = entry.node.position.x + "px";
+    origin.style.top = entry.node.position.y + "px";
+    origin.style.width = entry.node.size.w + "px";
   }
 
   function positionEntry(entry) {
     if (!entry.pin) return;
-    var scale = entry.pin.scale;
+    const scale = entry.pin.scale;
     entry.wrapper.setAttribute("aria-label", "Pinned: " + (entry.node.title || "Untitled card"));
     entry.wrapper.style.left = entry.pin.x + "px";
     entry.wrapper.style.top = entry.pin.y + "px";
     entry.wrapper.style.width = entry.pin.w * scale + "px";
-    entry.wrapper.style.height = (entry.node.collapsed ? entry.card.querySelector(":scope > .node-head")?.offsetHeight || 36 : entry.pin.h) * scale + "px";
+    entry.wrapper.style.height =
+      (entry.node.collapsed ? entry.card.querySelector(":scope > .card-head")?.offsetHeight || 36 : entry.pin.h) *
+        scale +
+      "px";
     entry.card.style.left = "0";
     entry.card.style.top = "0";
     entry.card.style.width = entry.pin.w + "px";
@@ -185,36 +217,51 @@ export function createPinnedWindows(options) {
 
   function wireDrag(entry, head) {
     if (!head) return;
-    var pointerId = null, startX = 0, startY = 0, originX = 0, originY = 0, moved = false;
-    head.addEventListener("pointerdown", function(event){
+    let pointerId = null,
+      startX = 0,
+      startY = 0,
+      originX = 0,
+      originY = 0,
+      moved = false;
+    head.addEventListener("pointerdown", function (event) {
       if (event.button !== 0 || event.target.closest("button, a, [contenteditable]")) return;
       event.preventDefault();
       pointerId = event.pointerId;
-      startX = event.clientX; startY = event.clientY;
-      originX = entry.pin.x; originY = entry.pin.y;
+      startX = event.clientX;
+      startY = event.clientY;
+      originX = entry.pin.x;
+      originY = entry.pin.y;
       moved = false;
       entry.wrapper.classList.add("dragging");
-      try { head.setPointerCapture(pointerId); } catch (_error) {}
+      try {
+        head.setPointerCapture(pointerId);
+      } catch (_error) {}
     });
-    head.addEventListener("pointermove", function(event){
+    head.addEventListener("pointermove", function (event) {
       if (pointerId !== event.pointerId) return;
-      var dx = event.clientX - startX, dy = event.clientY - startY;
+      const dx = event.clientX - startX,
+        dy = event.clientY - startY;
       moved = moved || Math.hypot(dx, dy) > 2;
-      var visibleGrip = 44;
-      entry.pin.x = Math.max(visibleGrip - entry.wrapper.offsetWidth, Math.min(Math.max(0, layer.clientWidth - visibleGrip), originX + dx));
+      const visibleGrip = 44;
+      entry.pin.x = Math.max(
+        visibleGrip - entry.wrapper.offsetWidth,
+        Math.min(Math.max(0, layer.clientWidth - visibleGrip), originX + dx),
+      );
       entry.pin.y = Math.max(0, Math.min(Math.max(0, layer.clientHeight - visibleGrip), originY + dy));
       positionEntry(entry);
     });
     function finish(event) {
       if (pointerId !== event.pointerId) return;
-      try { head.releasePointerCapture(pointerId); } catch (_error) {}
+      try {
+        head.releasePointerCapture(pointerId);
+      } catch (_error) {}
       pointerId = null;
       entry.wrapper.classList.remove("dragging");
       if (moved) options.onChange?.(entry.node, entry.pin);
     }
     head.addEventListener("pointerup", finish);
     head.addEventListener("pointercancel", finish);
-    head.addEventListener("lostpointercapture", function(){
+    head.addEventListener("lostpointercapture", function () {
       if (pointerId === null) return;
       pointerId = null;
       entry.wrapper.classList.remove("dragging");
@@ -224,21 +271,30 @@ export function createPinnedWindows(options) {
 
   function wireResize(entry, handle) {
     if (!handle || options.readOnly) return;
-    var pointerId = null, startX = 0, startY = 0, startW = 0, startH = 0, moved = false;
-    handle.addEventListener("pointerdown", function(event){
+    let pointerId = null,
+      startX = 0,
+      startY = 0,
+      startW = 0,
+      startH = 0,
+      moved = false;
+    handle.addEventListener("pointerdown", function (event) {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
       pointerId = event.pointerId;
-      startX = event.clientX; startY = event.clientY;
-      startW = entry.pin.w; startH = entry.pin.h;
+      startX = event.clientX;
+      startY = event.clientY;
+      startW = entry.pin.w;
+      startH = entry.pin.h;
       moved = false;
-      try { handle.setPointerCapture(pointerId); } catch (_error) {}
+      try {
+        handle.setPointerCapture(pointerId);
+      } catch (_error) {}
     });
-    handle.addEventListener("pointermove", function(event){
+    handle.addEventListener("pointermove", function (event) {
       if (pointerId !== event.pointerId) return;
-      var dx = (event.clientX - startX) / entry.pin.scale;
-      var dy = (event.clientY - startY) / entry.pin.scale;
+      const dx = (event.clientX - startX) / entry.pin.scale;
+      const dy = (event.clientY - startY) / entry.pin.scale;
       moved = moved || Math.hypot(dx, dy) > 2;
       entry.pin.w = Math.max(240, startW + dx);
       entry.pin.h = Math.max(160, startH + dy);
@@ -246,13 +302,15 @@ export function createPinnedWindows(options) {
     });
     function finish(event) {
       if (pointerId !== event.pointerId) return;
-      try { handle.releasePointerCapture(pointerId); } catch (_error) {}
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch (_error) {}
       pointerId = null;
       if (moved) options.onChange?.(entry.node, entry.pin);
     }
     handle.addEventListener("pointerup", finish);
     handle.addEventListener("pointercancel", finish);
-    handle.addEventListener("lostpointercapture", function(){
+    handle.addEventListener("lostpointercapture", function () {
       if (pointerId === null) return;
       pointerId = null;
       if (moved) options.onChange?.(entry.node, entry.pin);
@@ -260,19 +318,21 @@ export function createPinnedWindows(options) {
   }
 
   function remove(id) {
-    var entry = entries.get(id);
+    const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
     if (entry.renderFrame) cancelAnimationFrame(entry.renderFrame);
     entry.observer?.disconnect();
-    entry.pinnedActions.forEach(function(action){ action.remove(); });
+    entry.pinnedActions.forEach(function (action) {
+      action.remove();
+    });
     if (entry.card?.isConnected) {
       entry.origin.before(entry.card);
       entry.card.classList.remove("pinned-window-card");
       entry.card.style.transform = "";
-      entry.card.style.left = entry.node.x + "px";
-      entry.card.style.top = entry.node.y + "px";
-      entry.card.style.width = entry.node.w + "px";
+      entry.card.style.left = entry.node.position.x + "px";
+      entry.card.style.top = entry.node.position.y + "px";
+      entry.card.style.width = entry.node.size.w + "px";
       entry.card.style.height = entry.graphStyle.height;
       entry.card.style.minHeight = entry.graphStyle.minHeight;
       entry.card.style.maxHeight = entry.graphStyle.maxHeight;
@@ -284,7 +344,9 @@ export function createPinnedWindows(options) {
   }
 
   function removeDetachedEntries() {
-    entries.forEach(function(entry, id){ if (!entry.card?.isConnected && !entry.movingCard) remove(id); });
+    entries.forEach(function (entry, id) {
+      if (!entry.card?.isConnected && !entry.movingCard) remove(id);
+    });
   }
 
   function dispose() {
@@ -298,9 +360,9 @@ export function createPinnedWindows(options) {
 }
 
 function iconButton(icon, label, action) {
-  var button = document.createElement("button");
+  const button = document.createElement("button");
   button.type = "button";
-  button.className = "node-btn pinned-window-action";
+  button.className = "card-btn pinned-window-action";
   button.setAttribute("aria-label", label);
   button.dataset.pinnedAction = action;
   button.title = label;
@@ -309,12 +371,15 @@ function iconButton(icon, label, action) {
 }
 
 function copyCanvasPixels(source, clone) {
-  var sourceCanvases = source.querySelectorAll("canvas");
-  var cloneCanvases = clone.querySelectorAll("canvas");
-  for (var i = 0; i < Math.min(sourceCanvases.length, cloneCanvases.length); i++) {
-    var sourceCanvas = sourceCanvases[i], cloneCanvas = cloneCanvases[i];
+  const sourceCanvases = source.querySelectorAll("canvas");
+  const cloneCanvases = clone.querySelectorAll("canvas");
+  for (let i = 0; i < Math.min(sourceCanvases.length, cloneCanvases.length); i++) {
+    const sourceCanvas = sourceCanvases[i],
+      cloneCanvas = cloneCanvases[i];
     cloneCanvas.width = sourceCanvas.width;
     cloneCanvas.height = sourceCanvas.height;
-    try { cloneCanvas.getContext("2d")?.drawImage(sourceCanvas, 0, 0); } catch (_error) {}
+    try {
+      cloneCanvas.getContext("2d")?.drawImage(sourceCanvas, 0, 0);
+    } catch (_error) {}
   }
 }

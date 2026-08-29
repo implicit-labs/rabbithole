@@ -1,3 +1,4 @@
+/** @protects pdf portability caps capability contracts. */
 import assert from "node:assert/strict";
 import { MAX_PDF_SOURCE_BYTES } from "../../src/core/assets.js";
 import { createPortableProjection } from "../../src/core/portable-projection.js";

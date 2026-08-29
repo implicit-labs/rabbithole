@@ -8,8 +8,8 @@ const RABBITHOLE_FILE_FORMAT = "rabbithole";
 const RABBITHOLE_FILE_FORMAT_VERSION = 1;
 
 /**
- * @param {PersistedHole} hole
- * @param {Record<string, string>} assets
+ * @param {any} hole
+ * @param {any} assets
  * @returns {PortableArtifact}
  */
 export function createPortableProjection(hole, assets) {

@@ -1,11 +1,18 @@
-import { normalizePdfExtension } from "../core/pdf-shared.js";
-import { isNoteNode } from "../core/model.js";
+import { isNoteNode } from "../core/hole/ask.js";
 import { iconSvg } from "../core/html/icons.js";
-import { childrenOf, postBrowserEvent } from "./core.js";
+import { normalizePdfExtension } from "../core/pdf-shared.js";
 import { showAskFromSelection } from "./ask-followups.js";
-import { mountPdfRectMark } from "./text-marks.js";
-import { acquirePdfDocument, pdfAnnotationModeDisabled, pdfShowTextOpcode, renderPdfTextLayer, updatePdfTextLayer } from "./pdf-runtime.js";
+import { childrenOf, postBrowserEvent } from "./core.js";
+import { createCleanupScope } from "./kit/scope.js";
+import {
+  acquirePdfDocument,
+  pdfAnnotationModeDisabled,
+  pdfShowTextOpcode,
+  renderPdfTextLayer,
+  updatePdfTextLayer,
+} from "./pdf-runtime.js";
 import { resolveAssetUrl } from "./renderer.js";
+import { mountPdfRectMark } from "./text-marks.js";
 
 const TILE_PIXELS = 1536;
 const FULL_PAGE_PIXELS = 12 * 1024 * 1024;
@@ -17,11 +24,13 @@ const textMeasureContext = textMeasureCanvas?.getContext("2d") || null;
 
 export function mountPdfView(container, node, options = {}) {
   const pdf = normalizePdfExtension(node);
-  const rawPdf = node?.extensions?.pdf;
+  const rawPdf = node?.source;
   if (!pdf || pdf.converted || pdf.converting) {
     if (rawPdf?.version === 1 && !rawPdf.converted) mountLegacyNotice(container);
     return null;
   }
+
+  const scope = createCleanupScope();
 
   container.className = "doc-content rh-pdf";
   const isReaderSurface = container.dataset.surface === "reader";
@@ -68,7 +77,7 @@ export function mountPdfView(container, node, options = {}) {
     if (document.body.classList.contains("mode-flight")) {
       // Mid-flight the reader is transformed, so every rect is skewed —
       // measure once it lands.
-      document.addEventListener("rh-reader-flight-end", alignReaderToolbar, { once: true });
+      scope.listen(document, "rh-reader-flight-end", alignReaderToolbar, { once: true });
       return;
     }
     const rect = scroll.getBoundingClientRect();
@@ -192,7 +201,7 @@ export function mountPdfView(container, node, options = {}) {
     state.textLayer.replaceChildren();
     const [content, operatorList] = await Promise.all([
       state.textContent || (state.textContentPromise ||= state.page.getTextContent({ includeMarkedContent: true })),
-      state.operatorListPromise ||= state.page.getOperatorList(),
+      (state.operatorListPromise ||= state.page.getOperatorList()),
     ]);
     if (disposed || state.textGeneration !== generation) return;
     state.textContent = content;
@@ -212,7 +221,11 @@ export function mountPdfView(container, node, options = {}) {
       textContentItemsStr: [],
     });
     state.textTask = task;
-    try { await task.promise; } catch (error) { if (error?.name !== "AbortException") throw error; }
+    try {
+      await task.promise;
+    } catch (error) {
+      if (error?.name !== "AbortException") throw error;
+    }
     if (disposed || state.textGeneration !== generation || state.textTask !== task) return;
     tuneTextLayerSpacing(state.textDivs, state.textItems, state.textStyles, state.textProperties, state.viewport);
     let itemIndex = 0;
@@ -246,7 +259,10 @@ export function mountPdfView(container, node, options = {}) {
       if (missing.length) {
         const canvases = await renderTiles(state, page, renderViewport, outputScale, missing, key);
         if (!canvases) return;
-        if (disposed || state.renderKey !== key || !current.isConnected) { releaseCanvases(canvases); return; }
+        if (disposed || state.renderKey !== key || !current.isConnected) {
+          releaseCanvases(canvases);
+          return;
+        }
         current.append(...canvases);
       }
       // The desired set already includes a one-tile reading buffer. Reusing
@@ -268,9 +284,15 @@ export function mountPdfView(container, node, options = {}) {
     generation.style.right = "auto";
     generation.style.bottom = "auto";
     const canvases = await renderTiles(state, page, renderViewport, outputScale, desired, key);
-    if (!canvases) { releaseGeneration(generation); return; }
+    if (!canvases) {
+      releaseGeneration(generation);
+      return;
+    }
     generation.append(...canvases);
-    if (disposed || state.renderKey !== key) { releaseGeneration(generation); return; }
+    if (disposed || state.renderKey !== key) {
+      releaseGeneration(generation);
+      return;
+    }
     // Keep the readable pixels mounted until their complete replacement is
     // ready. DOM updates paint atomically, so zoom never exposes a white frame.
     generation.dataset.ready = "true";
@@ -283,14 +305,16 @@ export function mountPdfView(container, node, options = {}) {
     const tasks = tiles.map(async (tile) => {
       const canvas = document.createElement("canvas");
       canvas.dataset.tile = tileKey(tile);
-      canvas.width = tile.w; canvas.height = tile.h;
+      canvas.width = tile.w;
+      canvas.height = tile.h;
       canvas.style.left = `${tile.x / outputScale}px`;
       canvas.style.top = `${tile.y / outputScale}px`;
       canvas.style.width = `${tile.w / outputScale}px`;
       canvas.style.height = `${tile.h / outputScale}px`;
       canvases.push(canvas);
       const context = canvas.getContext("2d", { alpha: false });
-      context.fillStyle = "white"; context.fillRect(0, 0, tile.w, tile.h);
+      context.fillStyle = "white";
+      context.fillRect(0, 0, tile.w, tile.h);
       const task = page.render({
         canvasContext: context,
         viewport: renderViewport,
@@ -298,12 +322,17 @@ export function mountPdfView(container, node, options = {}) {
         annotationMode: pdfAnnotationModeDisabled(),
       });
       state.renderTasks.add(task);
-      try { await task.promise; }
-      catch (error) { if (error?.name !== "RenderingCancelledException") throw error; }
-      finally { state.renderTasks.delete(task); }
+      try {
+        await task.promise;
+      } catch (error) {
+        if (error?.name !== "RenderingCancelledException") throw error;
+      } finally {
+        state.renderTasks.delete(task);
+      }
     });
-    try { await Promise.all(tasks); }
-    catch (error) {
+    try {
+      await Promise.all(tasks);
+    } catch (error) {
       releaseCanvases(canvases);
       if (!disposed && state.renderKey === key) state.renderKey = "";
       if (!disposed && error?.name !== "RenderingCancelledException") console.warn("PDF page render failed", error);
@@ -323,25 +352,39 @@ export function mountPdfView(container, node, options = {}) {
   }
 
   function desiredTiles(state, viewport, outputScale, pageRect) {
-    const width = Math.ceil(viewport.width), height = Math.ceil(viewport.height);
-    if (width <= 4096 && height <= 4096 && width * height <= FULL_PAGE_PIXELS) return [{ x: 0, y: 0, w: width, h: height }];
+    const width = Math.ceil(viewport.width),
+      height = Math.ceil(viewport.height);
+    if (width <= 4096 && height <= 4096 && width * height <= FULL_PAGE_PIXELS)
+      return [{ x: 0, y: 0, w: width, h: height }];
     const rootRect = scroll.getBoundingClientRect();
-    const left = Math.max(0, (rootRect.left - pageRect.left) / (pageRect.width / state.viewport.width) * outputScale);
-    const top = Math.max(0, (rootRect.top - pageRect.top) / (pageRect.height / state.viewport.height) * outputScale);
-    const right = Math.min(width, (rootRect.right - pageRect.left) / (pageRect.width / state.viewport.width) * outputScale);
-    const bottom = Math.min(height, (rootRect.bottom - pageRect.top) / (pageRect.height / state.viewport.height) * outputScale);
+    const left = Math.max(0, ((rootRect.left - pageRect.left) / (pageRect.width / state.viewport.width)) * outputScale);
+    const top = Math.max(0, ((rootRect.top - pageRect.top) / (pageRect.height / state.viewport.height)) * outputScale);
+    const right = Math.min(
+      width,
+      ((rootRect.right - pageRect.left) / (pageRect.width / state.viewport.width)) * outputScale,
+    );
+    const bottom = Math.min(
+      height,
+      ((rootRect.bottom - pageRect.top) / (pageRect.height / state.viewport.height)) * outputScale,
+    );
     const firstX = Math.max(0, Math.floor(left / TILE_PIXELS) - 1);
     const lastX = Math.min(Math.ceil(width / TILE_PIXELS) - 1, Math.floor(Math.max(left, right - 1) / TILE_PIXELS) + 1);
     const firstY = Math.max(0, Math.floor(top / TILE_PIXELS) - 1);
-    const lastY = Math.min(Math.ceil(height / TILE_PIXELS) - 1, Math.floor(Math.max(top, bottom - 1) / TILE_PIXELS) + 1);
+    const lastY = Math.min(
+      Math.ceil(height / TILE_PIXELS) - 1,
+      Math.floor(Math.max(top, bottom - 1) / TILE_PIXELS) + 1,
+    );
     const tiles = [];
-    for (let y = firstY; y <= lastY; y++) for (let x = firstX; x <= lastX; x++) {
-      const nominalX = x * TILE_PIXELS, nominalY = y * TILE_PIXELS;
-      const px = Math.max(0, nominalX - 1), py = Math.max(0, nominalY - 1);
-      const rightEdge = Math.min(width, nominalX + TILE_PIXELS + 1);
-      const bottomEdge = Math.min(height, nominalY + TILE_PIXELS + 1);
-      tiles.push({ x: px, y: py, w: rightEdge - px, h: bottomEdge - py });
-    }
+    for (let y = firstY; y <= lastY; y++)
+      for (let x = firstX; x <= lastX; x++) {
+        const nominalX = x * TILE_PIXELS,
+          nominalY = y * TILE_PIXELS;
+        const px = Math.max(0, nominalX - 1),
+          py = Math.max(0, nominalY - 1);
+        const rightEdge = Math.min(width, nominalX + TILE_PIXELS + 1);
+        const bottomEdge = Math.min(height, nominalY + TILE_PIXELS + 1);
+        tiles.push({ x: px, y: py, w: rightEdge - px, h: bottomEdge - py });
+      }
     return tiles;
   }
 
@@ -353,7 +396,13 @@ export function mountPdfView(container, node, options = {}) {
   function refreshAllMarks() {
     for (const state of pageStates) state.marks.replaceChildren();
     for (const child of childrenOf(node.id)) {
-      if (child.origin?.anchor?.pdf) mountPdfRectMark(container, child.origin.anchor, child.id, `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}${isNoteNode(child) ? " mark-note" : ""}`);
+      if (child.origin?.anchor?.pdf)
+        mountPdfRectMark(
+          container,
+          child.origin.anchor,
+          child.id,
+          `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}${isNoteNode(child) ? " mark-note" : ""}`,
+        );
     }
   }
 
@@ -361,8 +410,8 @@ export function mountPdfView(container, node, options = {}) {
     const state = pageStateAt(clientX, clientY);
     if (!state?.viewport) return null;
     const rect = state.element.getBoundingClientRect();
-    const x = (clientX - rect.left) * state.viewport.width / rect.width;
-    const y = (clientY - rect.top) * state.viewport.height / rect.height;
+    const x = ((clientX - rect.left) * state.viewport.width) / rect.width;
+    const y = ((clientY - rect.top) * state.viewport.height) / rect.height;
     return { state, point: state.viewport.convertToPdfPoint(x, y) };
   }
 
@@ -377,14 +426,17 @@ export function mountPdfView(container, node, options = {}) {
   }
 
   function pageStateAt(clientX, clientY) {
-    return pageStates.find((state) => {
-      const rect = state.element.getBoundingClientRect();
-      return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-    }) || null;
+    return (
+      pageStates.find((state) => {
+        const rect = state.element.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+      }) || null
+    );
   }
 
   function alignNativeSelection(span, offsets, state, quad) {
-    const textNode = span.firstChild, text = textNode?.nodeValue || "";
+    const textNode = span.firstChild,
+      text = textNode?.nodeValue || "";
     const props = state.textProperties?.get(span);
     if (textNode?.nodeType !== 3 || !quad || Number(props?.angle)) return;
     const selectedText = text.slice(offsets.start, offsets.end);
@@ -393,8 +445,11 @@ export function mountPdfView(container, node, options = {}) {
     const pageRect = state.element.getBoundingClientRect();
     if (!(pageRect.width > 0) || !state.viewport) return;
     const cssScale = pageRect.width / state.viewport.width;
-    const expected = quad.map((point) => state.viewport.convertToViewportPoint(point[0], point[1])[0] * cssScale + pageRect.left);
-    const expectedLeft = Math.min(...expected), expectedRight = Math.max(...expected);
+    const expected = quad.map(
+      (point) => state.viewport.convertToViewportPoint(point[0], point[1])[0] * cssScale + pageRect.left,
+    );
+    const expectedLeft = Math.min(...expected),
+      expectedRight = Math.max(...expected);
     const selectionRange = document.createRange();
     selectionRange.setStart(textNode, offsets.start);
     selectionRange.setEnd(textNode, offsets.end);
@@ -402,9 +457,11 @@ export function mountPdfView(container, node, options = {}) {
     wholeRange.selectNodeContents(span);
     const countSpaces = (value) => [...value].filter((character) => /\s/u.test(character)).length;
     const beforeText = text.slice(0, offsets.start);
-    const beforeCharacters = [...beforeText].length, beforeSpaces = countSpaces(beforeText);
+    const beforeCharacters = [...beforeText].length,
+      beforeSpaces = countSpaces(beforeText);
     const selectedSpaces = countSpaces(selectedText);
-    const totalCharacters = [...text].length, totalSpaces = countSpaces(text);
+    const totalCharacters = [...text].length,
+      totalSpaces = countSpaces(text);
 
     // Letter and word spacing are the two independent degrees of freedom we
     // can use without splitting the stable PDF.js text DOM. Solve them against
@@ -423,7 +480,8 @@ export function mountPdfView(container, node, options = {}) {
       } else {
         const wholeRect = wholeRange.getBoundingClientRect();
         const boundaries = state.textMetrics?.[Number(span.dataset.pdfItem)];
-        if (!Array.isArray(boundaries) || !Number.isFinite(boundaries[0]) || !Number.isFinite(boundaries[text.length])) return;
+        if (!Array.isArray(boundaries) || !Number.isFinite(boundaries[0]) || !Number.isFinite(boundaries[text.length]))
+          return;
         aLetters = totalCharacters;
         aSpaces = totalSpaces;
         aDelta = (boundaries[text.length] - boundaries[0]) * state.viewport.scale * cssScale - wholeRect.width;
@@ -458,7 +516,16 @@ export function mountPdfView(container, node, options = {}) {
         if (offsets.end <= offsets.start) continue;
         const item = state.textItems[Number(span.dataset.pdfItem)];
         if (!item) continue;
-        const selectedQuads = textSelectionQuads(span.firstChild, offsets.start, offsets.end, state.element, state.viewport, item, state.textStyles[item.fontName] || {}, state.textMetrics[Number(span.dataset.pdfItem)]);
+        const selectedQuads = textSelectionQuads(
+          span.firstChild,
+          offsets.start,
+          offsets.end,
+          state.element,
+          state.viewport,
+          item,
+          state.textStyles[item.fontName] || {},
+          state.textMetrics[Number(span.dataset.pdfItem)],
+        );
         if (selectedQuads.length) alignNativeSelection(span, offsets, state, selectedQuads[0]);
         quads.push(...selectedQuads);
       }
@@ -480,7 +547,8 @@ export function mountPdfView(container, node, options = {}) {
 
   function beginRegion(state, event) {
     if (!boxMode || event.button !== 0 || !state.viewport) return;
-    event.preventDefault(); event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
     const rect = state.element.getBoundingClientRect();
     const start = clientToViewport(event.clientX, event.clientY, rect, state.viewport);
     const draft = document.createElement("div");
@@ -490,9 +558,14 @@ export function mountPdfView(container, node, options = {}) {
     let current = start;
     const move = (moveEvent) => {
       current = clientToViewport(moveEvent.clientX, moveEvent.clientY, rect, state.viewport);
-      const x = Math.min(start[0], current[0]), y = Math.min(start[1], current[1]);
-      const w = Math.abs(current[0] - start[0]), h = Math.abs(current[1] - start[1]);
-      draft.style.left = `${x}px`; draft.style.top = `${y}px`; draft.style.width = `${w}px`; draft.style.height = `${h}px`;
+      const x = Math.min(start[0], current[0]),
+        y = Math.min(start[1], current[1]);
+      const w = Math.abs(current[0] - start[0]),
+        h = Math.abs(current[1] - start[1]);
+      draft.style.left = `${x}px`;
+      draft.style.top = `${y}px`;
+      draft.style.width = `${w}px`;
+      draft.style.height = `${h}px`;
     };
     const cleanup = () => {
       state.element.removeEventListener("pointermove", move);
@@ -501,20 +574,48 @@ export function mountPdfView(container, node, options = {}) {
     };
     const finish = () => {
       cleanup();
-      const x0 = Math.min(start[0], current[0]), y0 = Math.min(start[1], current[1]);
-      const x1 = Math.max(start[0], current[0]), y1 = Math.max(start[1], current[1]);
-      if ((x1 - x0) < 8 || (y1 - y0) < 8) { draft.remove(); return; }
-      const quad = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => state.viewport.convertToPdfPoint(x, y));
-      const anchor = { version: 2, source_sha256: pdf.source.sha256, kind: "region", fragments: [{ page: state.meta.n, quads: [quad] }] };
+      const x0 = Math.min(start[0], current[0]),
+        y0 = Math.min(start[1], current[1]);
+      const x1 = Math.max(start[0], current[0]),
+        y1 = Math.max(start[1], current[1]);
+      if (x1 - x0 < 8 || y1 - y0 < 8) {
+        draft.remove();
+        return;
+      }
+      const quad = [
+        [x0, y0],
+        [x1, y0],
+        [x1, y1],
+        [x0, y1],
+      ].map(([x, y]) => state.viewport.convertToPdfPoint(x, y));
+      const anchor = {
+        version: 2,
+        source_sha256: pdf.source.sha256,
+        kind: "region",
+        fragments: [{ page: state.meta.n, quads: [quad] }],
+      };
       draft.classList.add("settled");
       state.regionDraft = { element: draft, quad };
       positionRegionDraft(state);
       toolbar.setBoxMode(false);
-      boxMode = false; container.classList.remove("rh-pdf-box-mode");
-      showAskFromSelection({ parentId: node.id, selectedText: textInsideQuad(state, quad), mdStart: 0, mdEnd: 0, pdfAnchor: anchor, anchorRectEl: draft });
-      retireWhenAskCloses(draft, () => { if (state.regionDraft?.element === draft) state.regionDraft = null; });
+      boxMode = false;
+      container.classList.remove("rh-pdf-box-mode");
+      showAskFromSelection({
+        parentId: node.id,
+        selectedText: textInsideQuad(state, quad),
+        mdStart: 0,
+        mdEnd: 0,
+        pdfAnchor: anchor,
+        anchorRectEl: draft,
+      });
+      retireWhenAskCloses(draft, () => {
+        if (state.regionDraft?.element === draft) state.regionDraft = null;
+      });
     };
-    const cancel = () => { cleanup(); draft.remove(); };
+    const cancel = () => {
+      cleanup();
+      draft.remove();
+    };
     state.element.addEventListener("pointermove", move);
     state.element.addEventListener("pointerup", finish);
     state.element.addEventListener("pointercancel", cancel);
@@ -523,10 +624,17 @@ export function mountPdfView(container, node, options = {}) {
   function positionRegionDraft(state) {
     const pending = state.regionDraft;
     if (!pending || !state.viewport) return;
-    if (!pending.element.isConnected) { state.regionDraft = null; return; }
+    if (!pending.element.isConnected) {
+      state.regionDraft = null;
+      return;
+    }
     const points = pending.quad.map((point) => state.viewport.convertToViewportPoint(point[0], point[1]));
-    const xs = points.map((point) => point[0]), ys = points.map((point) => point[1]);
-    const x0 = Math.min(...xs), y0 = Math.min(...ys), x1 = Math.max(...xs), y1 = Math.max(...ys);
+    const xs = points.map((point) => point[0]),
+      ys = points.map((point) => point[1]);
+    const x0 = Math.min(...xs),
+      y0 = Math.min(...ys),
+      x1 = Math.max(...xs),
+      y1 = Math.max(...ys);
     pending.element.style.left = `${x0}px`;
     pending.element.style.top = `${y0}px`;
     pending.element.style.width = `${x1 - x0}px`;
@@ -555,10 +663,15 @@ export function mountPdfView(container, node, options = {}) {
     gesture.moved = true;
     const selection = window.getSelection();
     if (!selection) return;
-    if (typeof selection.setBaseAndExtent === "function") selection.setBaseAndExtent(gesture.start.node, gesture.start.offset, end.node, end.offset);
+    if (typeof selection.setBaseAndExtent === "function")
+      selection.setBaseAndExtent(gesture.start.node, gesture.start.offset, end.node, end.offset);
     else {
-      const range = document.createRange(); range.setStart(gesture.start.node, gesture.start.offset); range.collapse(true);
-      selection.removeAllRanges(); selection.addRange(range); selection.extend?.(end.node, end.offset);
+      const range = document.createRange();
+      range.setStart(gesture.start.node, gesture.start.offset);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selection.extend?.(end.node, end.offset);
     }
     event.preventDefault();
   }
@@ -586,34 +699,71 @@ export function mountPdfView(container, node, options = {}) {
       element.className = "rh-pdf-page";
       element.dataset.page = String(meta.n);
       element.setAttribute("aria-label", `PDF page ${meta.n}`);
-      const rawWidth = meta.view[2] - meta.view[0], rawHeight = meta.view[3] - meta.view[1];
+      const rawWidth = meta.view[2] - meta.view[0],
+        rawHeight = meta.view[3] - meta.view[1];
       const displayWidth = meta.rotate % 180 ? rawHeight : rawWidth;
       const displayHeight = meta.rotate % 180 ? rawWidth : rawHeight;
       element.style.width = "min(100%, 760px)";
       element.style.aspectRatio = `${displayWidth} / ${displayHeight}`;
-      const canvasLayer = document.createElement("div"); canvasLayer.className = "rh-pdf-canvas-layer";
-      const textLayer = document.createElement("div"); textLayer.className = "rh-pdf-textlayer";
-      const marks = document.createElementNS("http://www.w3.org/2000/svg", "svg"); marks.classList.add("rh-pdf-marks");
+      const canvasLayer = document.createElement("div");
+      canvasLayer.className = "rh-pdf-canvas-layer";
+      const textLayer = document.createElement("div");
+      textLayer.className = "rh-pdf-textlayer";
+      const marks = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      marks.classList.add("rh-pdf-marks");
       element.append(canvasLayer, textLayer, marks);
-      const state = { meta, element, canvasLayer, textLayer, marks, page: null, viewport: null, displayScale: 1, textContent: null, textContentPromise: null, operatorListPromise: null, textItems: [], textStyles: {}, textMetrics: [], textDivs: [], textTask: null, textGeneration: 0, textKey: "", renderTasks: new Set(), renderKey: "", regionDraft: null };
-      element.addEventListener("pointerdown", (event) => { beginRegion(state, event); beginTextSelection(event); });
+      const state = {
+        meta,
+        element,
+        canvasLayer,
+        textLayer,
+        marks,
+        page: null,
+        viewport: null,
+        displayScale: 1,
+        textContent: null,
+        textContentPromise: null,
+        operatorListPromise: null,
+        textItems: [],
+        textStyles: {},
+        textMetrics: [],
+        textDivs: [],
+        textTask: null,
+        textGeneration: 0,
+        textKey: "",
+        renderTasks: new Set(),
+        renderKey: "",
+        regionDraft: null,
+      };
+      element.addEventListener("pointerdown", (event) => {
+        beginRegion(state, event);
+        beginTextSelection(event);
+      });
       element.addEventListener("dblclick", selectTextWord);
-      pageStates.push(state); stack.appendChild(element);
+      pageStates.push(state);
+      stack.appendChild(element);
     }
-    intersectionObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const state = pageStates.find((candidate) => candidate.element === entry.target);
-        if (!state) continue;
-        if (entry.isIntersecting) { visiblePages.add(state); void ensurePage(state).then(scheduleRender); }
-        else visiblePages.delete(state);
-      }
-    }, { root: scroll, rootMargin: "100% 0px" });
+    intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const state = pageStates.find((candidate) => candidate.element === entry.target);
+          if (!state) continue;
+          if (entry.isIntersecting) {
+            visiblePages.add(state);
+            void ensurePage(state).then(scheduleRender);
+          } else visiblePages.delete(state);
+        }
+      },
+      { root: scroll, rootMargin: "100% 0px" },
+    );
+    scope.addCleanup(() => intersectionObserver?.disconnect());
     pageStates.forEach((state) => intersectionObserver.observe(state.element));
   }
 
   const onWheel = (event) => {
     if (!event.ctrlKey) return;
-    event.preventDefault(); event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
     setZoom(localZoom * Math.exp(-event.deltaY * 0.01), { x: event.clientX, y: event.clientY });
   };
   const onKeyDown = (event) => {
@@ -631,26 +781,42 @@ export function mountPdfView(container, node, options = {}) {
     if (!event.target?.closest?.(".rh-pdf-textlayer")) return;
     selectionToAsk();
   };
-  scroll.addEventListener("wheel", onWheel, { passive: false });
-  scroll.addEventListener("scroll", scheduleRender, { passive: true });
-  container.addEventListener("mouseup", onSelectionMouseUp);
-  document.addEventListener("pointermove", moveTextSelection, { passive: false });
-  document.addEventListener("pointerup", finishTextSelection);
-  document.addEventListener("pointercancel", finishTextSelection);
-  document.addEventListener("keydown", onKeyDown, true);
+  scope.listen(scroll, "wheel", onWheel, { passive: false });
+  scope.listen(scroll, "scroll", scheduleRender, { passive: true });
+  scope.listen(container, "mouseup", onSelectionMouseUp);
+  scope.listen(document, "pointermove", moveTextSelection, { passive: false });
+  scope.listen(document, "pointerup", finishTextSelection);
+  scope.listen(document, "pointercancel", finishTextSelection);
+  scope.listen(document, "keydown", onKeyDown, true);
   touchCleanup = installTouchZoom(scroll, () => localZoom, setZoom);
+  scope.addCleanup(() => touchCleanup());
 
   initializePages();
-  documentReady = acquirePdfDocument({ key: pdf.source.sha256, url: resolveAssetUrl(pdf.source.asset) }).then((lease) => {
-    if (disposed) { lease.release(); return; }
-    documentLease = lease; documentProxy = lease.document;
-    toolbar.setReady(true);
-  });
-  documentReady.then(() => ensurePage(pageStates[0])).then(() => { updatePageLayouts(); scheduleRender(); }).catch((error) => toolbar.setError(error?.message || String(error)));
+  documentReady = acquirePdfDocument({ key: pdf.source.sha256, url: resolveAssetUrl(pdf.source.asset) }).then(
+    (lease) => {
+      if (disposed) {
+        lease.release();
+        return;
+      }
+      documentLease = lease;
+      documentProxy = lease.document;
+      toolbar.setReady(true);
+    },
+  );
+  documentReady
+    .then(() => ensurePage(pageStates[0]))
+    .then(() => {
+      updatePageLayouts();
+      scheduleRender();
+    })
+    .catch((error) => toolbar.setError(error?.message || String(error)));
 
   if (typeof ResizeObserver === "function") {
-    resizeObserver = new ResizeObserver(() => { updatePageLayouts(); scheduleRender(); });
-    resizeObserver.observe(scroll);
+    resizeObserver = new ResizeObserver(() => {
+      updatePageLayouts();
+      scheduleRender();
+    });
+    scope.observe(resizeObserver, scroll);
   }
 
   return function dispose() {
@@ -658,17 +824,11 @@ export function mountPdfView(container, node, options = {}) {
     disposed = true;
     if (frame) cancelAnimationFrame(frame);
     if (zoomFrame) cancelAnimationFrame(zoomFrame);
-    intersectionObserver?.disconnect(); resizeObserver?.disconnect();
-    scroll.removeEventListener("wheel", onWheel);
-    container.removeEventListener("mouseup", onSelectionMouseUp);
-    document.removeEventListener("pointermove", moveTextSelection);
-    document.removeEventListener("pointerup", finishTextSelection);
-    document.removeEventListener("pointercancel", finishTextSelection);
-    document.removeEventListener("keydown", onKeyDown, true);
-    document.removeEventListener("rh-reader-flight-end", alignReaderToolbar);
-    touchCleanup();
+    scope.dispose();
     for (const state of pageStates) {
-      state.textTask?.cancel?.(); cancelRenderTasks(state); state.page?.cleanup?.();
+      state.textTask?.cancel?.();
+      cancelRenderTasks(state);
+      state.page?.cleanup?.();
       for (const generation of [...state.canvasLayer.children]) releaseGeneration(generation);
     }
     documentLease?.release();
@@ -688,7 +848,8 @@ function textPositionAtPoint(container, clientX, clientY, fallbackSpan = null) {
   if (caret?.startContainer?.nodeType === 3 && container.contains(caret.startContainer)) {
     return { node: caret.startContainer, offset: caret.startOffset };
   }
-  const span = fallbackSpan || document.elementFromPoint(clientX, clientY)?.closest?.(".rh-pdf-textlayer span[data-pdf-item]");
+  const span =
+    fallbackSpan || document.elementFromPoint(clientX, clientY)?.closest?.(".rh-pdf-textlayer span[data-pdf-item]");
   const textNode = span?.firstChild;
   if (!span || !container.contains(span) || textNode?.nodeType !== 3) return null;
   const rect = span.getBoundingClientRect();
@@ -712,8 +873,9 @@ function selectWordAtPoint(span, textNode, clientX, clientY) {
   }
   offset = Math.max(0, Math.min(text.length, Number(offset) || 0));
   const words = [...text.matchAll(/[\p{L}\p{N}\p{M}_]+(?:[\u2019'\u2010\u2011\u2013-][\p{L}\p{N}\p{M}_]+)*/gu)];
-  const word = words.find((match) => offset >= match.index && offset < match.index + match[0].length)
-    || words.find((match) => offset > match.index && offset <= match.index + match[0].length);
+  const word =
+    words.find((match) => offset >= match.index && offset < match.index + match[0].length) ||
+    words.find((match) => offset > match.index && offset <= match.index + match[0].length);
   if (!word) return false;
   const range = document.createRange();
   range.setStart(textNode, word.index);
@@ -726,21 +888,26 @@ function selectWordAtPoint(span, textNode, clientX, clientY) {
 }
 
 function createToolbar(pdf, node, { reader = false } = {}) {
-  const element = document.createElement("div"); element.className = "rh-pdf-toolbar";
+  const element = document.createElement("div");
+  element.className = "rh-pdf-toolbar";
   const scanned = pdf.lines.length === 0;
-  const regionActions = document.createElement("div"); regionActions.className = "rh-pdf-toolbar-actions rh-pdf-region-actions";
+  const regionActions = document.createElement("div");
+  regionActions.className = "rh-pdf-toolbar-actions rh-pdf-region-actions";
   const region = button("Ask about an area", "Ask about an area of the PDF");
   region.className += " rh-pdf-box-toggle";
   region.setAttribute("aria-pressed", "false");
   region.innerHTML = `${iconSvg("area-select")}<span>${reader ? "Area" : "Ask about an area"}</span>`;
   regionActions.appendChild(region);
 
-  const center = document.createElement("div"); center.className = "rh-pdf-toolbar-center";
-  const zoomControls = document.createElement("div"); zoomControls.className = "rh-pdf-zoom-controls";
+  const center = document.createElement("div");
+  center.className = "rh-pdf-toolbar-center";
+  const zoomControls = document.createElement("div");
+  zoomControls.className = "rh-pdf-zoom-controls";
   const minus = button("", "Zoom PDF out");
   minus.className += " rh-pdf-zoom-control";
   minus.innerHTML = iconSvg("zoom-out");
-  const zoom = button("100%", "Reset PDF zoom"); zoom.className += " rh-pdf-zoom-value rh-pdf-zoom-control";
+  const zoom = button("100%", "Reset PDF zoom");
+  zoom.className += " rh-pdf-zoom-value rh-pdf-zoom-control";
   const plus = button("", "Zoom PDF in");
   plus.className += " rh-pdf-zoom-control";
   plus.innerHTML = iconSvg("zoom-in");
@@ -751,28 +918,59 @@ function createToolbar(pdf, node, { reader = false } = {}) {
   message.hidden = true;
   center.append(zoomControls, message);
 
-  const documentActions = document.createElement("div"); documentActions.className = "rh-pdf-toolbar-actions rh-pdf-document-actions";
+  const documentActions = document.createElement("div");
+  documentActions.className = "rh-pdf-toolbar-actions rh-pdf-document-actions";
   if (!pdf.converted && !childrenOf(node.id).some((child) => !isNoteNode(child))) {
-    const convert = button("Create text version", "Turn every page into clean, searchable text while preserving figures");
+    const convert = button(
+      "Create text version",
+      "Turn every page into clean, searchable text while preserving figures",
+    );
     convert.className += " rh-pdf-convert";
     convert.innerHTML = `${iconSvg("file-text")}<span>${reader ? "Text version" : "Create text version"}</span>`;
     if (scanned) convert.className += " primary";
-    convert.addEventListener("click", (event) => { event.stopPropagation(); convert.disabled = true; postBrowserEvent({ type: "convert_pdf", node_id: node.id }).then((result) => { if (!result?.ok) convert.disabled = false; }); });
+    convert.addEventListener("click", (event) => {
+      event.stopPropagation();
+      convert.disabled = true;
+      postBrowserEvent({ type: "convert_pdf", node_id: node.id }).then((result) => {
+        if (!result?.ok) convert.disabled = false;
+      });
+    });
     documentActions.appendChild(convert);
   }
   element.append(regionActions, center, documentActions);
-  let zoomHandler = () => {}, boxHandler = () => {}, boxMode = false;
+  /** @type {(direction: number) => void} */
+  let zoomHandler = () => {};
+  /** @type {(value: boolean) => void} */
+  let boxHandler = () => {};
+  let boxMode = false;
   minus.addEventListener("click", () => zoomHandler(-1));
   plus.addEventListener("click", () => zoomHandler(1));
   zoom.addEventListener("click", () => zoomHandler(0));
-  region.addEventListener("click", () => { boxMode = !boxMode; region.classList.toggle("active", boxMode); region.setAttribute("aria-pressed", String(boxMode)); boxHandler(boxMode); });
+  region.addEventListener("click", () => {
+    boxMode = !boxMode;
+    region.classList.toggle("active", boxMode);
+    region.setAttribute("aria-pressed", String(boxMode));
+    boxHandler(boxMode);
+  });
   return {
     element,
-    onZoom(handler) { zoomHandler = (direction) => handler(direction === 0 ? 1 : Number(zoom.dataset.value || 1) * (direction < 0 ? 0.8 : 1.25), null); },
-    onBoxMode(handler) { boxHandler = handler; },
-    setBoxMode(value) { boxMode = !!value; region.classList.toggle("active", boxMode); region.setAttribute("aria-pressed", String(boxMode)); },
-    setZoom(value) { zoom.dataset.value = String(value); zoom.textContent = `${Math.round(value * 100)}%`; },
-    setReady() {},
+    onZoom(handler) {
+      zoomHandler = (direction) =>
+        handler(direction === 0 ? 1 : Number(zoom.dataset.value || 1) * (direction < 0 ? 0.8 : 1.25), null);
+    },
+    onBoxMode(handler) {
+      boxHandler = handler;
+    },
+    setBoxMode(value) {
+      boxMode = !!value;
+      region.classList.toggle("active", boxMode);
+      region.setAttribute("aria-pressed", String(boxMode));
+    },
+    setZoom(value) {
+      zoom.dataset.value = String(value);
+      zoom.textContent = `${Math.round(value * 100)}%`;
+    },
+    setReady(_value) {},
     setError(error) {
       zoomControls.hidden = true;
       message.hidden = false;
@@ -785,22 +983,32 @@ function createToolbar(pdf, node, { reader = false } = {}) {
 }
 
 function button(text, label) {
-  const out = document.createElement("button"); out.type = "button"; out.className = "node-btn"; out.textContent = text; out.setAttribute("aria-label", label); return out;
+  const out = document.createElement("button");
+  out.type = "button";
+  out.className = "card-btn";
+  out.textContent = text;
+  out.setAttribute("aria-label", label);
+  return out;
 }
 
 function mountLegacyNotice(container) {
-  const notice = document.createElement("div"); notice.className = "rh-pdf-legacy"; notice.textContent = "This PDF uses the retired image-based format. Re-import the original PDF for source-quality rendering and accurate selections."; container.prepend(notice);
+  const notice = document.createElement("div");
+  notice.className = "rh-pdf-legacy";
+  notice.textContent =
+    "This PDF uses the retired image-based format. Re-import the original PDF for source-quality rendering and accurate selections.";
+  container.prepend(notice);
 }
 
 function clientToViewport(clientX, clientY, rect, viewport) {
   return [
-    Math.min(viewport.width, Math.max(0, (clientX - rect.left) * viewport.width / rect.width)),
-    Math.min(viewport.height, Math.max(0, (clientY - rect.top) * viewport.height / rect.height)),
+    Math.min(viewport.width, Math.max(0, ((clientX - rect.left) * viewport.width) / rect.width)),
+    Math.min(viewport.height, Math.max(0, ((clientY - rect.top) * viewport.height) / rect.height)),
   ];
 }
 
 function selectedOffsets(range, textNode) {
-  let start = 0, end = textNode.nodeValue?.length || 0;
+  let start = 0,
+    end = textNode.nodeValue?.length || 0;
   if (range.startContainer === textNode) start = range.startOffset;
   if (range.endContainer === textNode) end = range.endOffset;
   return { start: Math.max(0, Math.min(end, start)), end: Math.max(start, end) };
@@ -816,15 +1024,16 @@ function textSelectionQuads(textNode, start, end, page, viewport, item, style, m
   const scaleY = viewport.height / pageRect.height;
   const native = [...range.getClientRects()]
     .filter((rect) => rect.width > 0 && rect.height > 0)
-    .map((rect) => [
-      [rect.left, rect.top],
-      [rect.right, rect.top],
-      [rect.right, rect.bottom],
-      [rect.left, rect.bottom],
-    ].map(([clientX, clientY]) => viewport.convertToPdfPoint(
-      (clientX - pageRect.left) * scaleX,
-      (clientY - pageRect.top) * scaleY,
-    )));
+    .map((rect) =>
+      [
+        [rect.left, rect.top],
+        [rect.right, rect.top],
+        [rect.right, rect.bottom],
+        [rect.left, rect.bottom],
+      ].map(([clientX, clientY]) =>
+        viewport.convertToPdfPoint((clientX - pageRect.left) * scaleX, (clientY - pageRect.top) * scaleY),
+      ),
+    );
   if (style.vertical || !Array.isArray(item?.transform) || item.transform.length < 6) return native;
   const [a, b, c, d, e, f] = item.transform.map(Number);
   const baselineLength = Math.hypot(a, b);
@@ -854,16 +1063,23 @@ function exactTextItemMetrics(items, operatorList, showTextOpcode) {
     if (operatorList.fnArray[index] !== showTextOpcode) continue;
     const glyphs = operatorList.argsArray?.[index]?.[0];
     if (!Array.isArray(glyphs)) continue;
-    const text = glyphs.filter((value) => value && typeof value === "object").map((glyph) => String(glyph.unicode || "")).join("");
+    const text = glyphs
+      .filter((value) => value && typeof value === "object")
+      .map((glyph) => String(glyph.unicode || ""))
+      .join("");
     if (compactText(text)) runs.push({ glyphs, text: compactText(text) });
   }
   let cursor = 0;
   for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-    const item = items[itemIndex], target = compactText(item?.str);
+    const item = items[itemIndex],
+      target = compactText(item?.str);
     if (!target || item?.dir === "rtl") continue;
     let match = -1;
     for (let runIndex = cursor; runIndex < Math.min(runs.length, cursor + 5); runIndex++) {
-      if (runs[runIndex].text === target) { match = runIndex; break; }
+      if (runs[runIndex].text === target) {
+        match = runIndex;
+        break;
+      }
     }
     if (match < 0) continue;
     output[itemIndex] = glyphBoundaryMetrics(String(item.str), runs[match].glyphs, Number(item.width));
@@ -877,21 +1093,28 @@ function glyphBoundaryMetrics(text, glyphs, itemWidth) {
   let advance = 0;
   const records = [];
   for (const value of glyphs) {
-    if (typeof value === "number") { advance -= value; continue; }
-    const unicode = String(value?.unicode || ""), width = Number(value?.width);
+    if (typeof value === "number") {
+      advance -= value;
+      continue;
+    }
+    const unicode = String(value?.unicode || ""),
+      width = Number(value?.width);
     if (!unicode || !Number.isFinite(width)) continue;
     const characters = [...unicode];
-    for (let index = 0; index < characters.length; index++) records.push({
-      character: characters[index],
-      start: advance + width * index / characters.length,
-      end: advance + width * (index + 1) / characters.length,
-    });
+    for (let index = 0; index < characters.length; index++)
+      records.push({
+        character: characters[index],
+        start: advance + (width * index) / characters.length,
+        end: advance + (width * (index + 1)) / characters.length,
+      });
     advance += width;
   }
   if (!(advance > 0)) return null;
-  const textCharacters = [], glyphCharacters = records.filter((record) => !/\s/u.test(record.character));
-  for (let offset = 0; offset < text.length;) {
-    const point = text.codePointAt(offset), character = String.fromCodePoint(point);
+  const textCharacters = [],
+    glyphCharacters = records.filter((record) => !/\s/u.test(record.character));
+  for (let offset = 0; offset < text.length; ) {
+    const point = text.codePointAt(offset),
+      character = String.fromCodePoint(point);
     const next = offset + character.length;
     if (!/\s/u.test(character)) textCharacters.push({ character, start: offset, end: next });
     offset = next;
@@ -901,35 +1124,58 @@ function glyphBoundaryMetrics(text, glyphs, itemWidth) {
     if (compactText(textCharacters[index].character) !== compactText(glyphCharacters[index].character)) return null;
   }
   const boundaries = Array(text.length + 1).fill(null);
-  boundaries[0] = 0; boundaries[text.length] = itemWidth;
+  boundaries[0] = 0;
+  boundaries[text.length] = itemWidth;
   for (let index = 0; index < textCharacters.length; index++) {
-    const textCharacter = textCharacters[index], glyph = glyphCharacters[index];
-    boundaries[textCharacter.start] = glyph.start / advance * itemWidth;
-    boundaries[textCharacter.end] = glyph.end / advance * itemWidth;
+    const textCharacter = textCharacters[index],
+      glyph = glyphCharacters[index];
+    boundaries[textCharacter.start] = (glyph.start / advance) * itemWidth;
+    boundaries[textCharacter.end] = (glyph.end / advance) * itemWidth;
   }
-  for (let index = 0; index < boundaries.length;) {
-    if (boundaries[index] != null) { index++; continue; }
+  for (let index = 0; index < boundaries.length; ) {
+    if (boundaries[index] != null) {
+      index++;
+      continue;
+    }
     const first = index - 1;
     while (index < boundaries.length && boundaries[index] == null) index++;
-    const last = index, span = last - first;
-    for (let fill = first + 1; fill < last; fill++) boundaries[fill] = boundaries[first] + (boundaries[last] - boundaries[first]) * (fill - first) / span;
+    const last = index,
+      span = last - first;
+    for (let fill = first + 1; fill < last; fill++)
+      boundaries[fill] = boundaries[first] + ((boundaries[last] - boundaries[first]) * (fill - first)) / span;
   }
   return boundaries;
 }
 
 function compactText(value) {
-  return String(value || "").normalize("NFKC").replace(/\s+/gu, "");
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/gu, "");
 }
 
 async function useEmbeddedTextLayerFonts(page, items, styles) {
-  const names = [...new Set(items.map((item) => item?.fontName).filter((name) => typeof name === "string" && styles[name]))];
-  await Promise.all(names.map((name) => new Promise((resolve) => {
-    if (page.commonObjs.has(name)) { resolve(); return; }
-    page.commonObjs.get(name, resolve);
-  })));
+  const names = [
+    ...new Set(items.map((item) => item?.fontName).filter((name) => typeof name === "string" && styles[name])),
+  ];
+  await Promise.all(
+    names.map(
+      (name) =>
+        new Promise((resolve) => {
+          if (page.commonObjs.has(name)) {
+            resolve();
+            return;
+          }
+          page.commonObjs.get(name, resolve);
+        }),
+    ),
+  );
   for (const name of names) {
     let font;
-    try { font = page.commonObjs.get(name); } catch { continue; }
+    try {
+      font = page.commonObjs.get(name);
+    } catch {
+      continue;
+    }
     if (!font?.loadedName) continue;
     const fallback = String(font.fallbackName || styles[name].fontFamily || "sans-serif");
     styles[name] = { ...styles[name], fontFamily: `"${font.loadedName}", ${fallback}` };
@@ -939,7 +1185,10 @@ async function useEmbeddedTextLayerFonts(page, items, styles) {
 function tuneTextLayerSpacing(divs, items, styles, properties, viewport) {
   if (!textMeasureContext) return;
   for (let index = 0; index < divs.length; index++) {
-    const div = divs[index], item = items[index], props = properties.get(div), text = String(item?.str || "");
+    const div = divs[index],
+      item = items[index],
+      props = properties.get(div),
+      text = String(item?.str || "");
     div.style.letterSpacing = "";
     const spaces = [...text].filter((character) => /\s/u.test(character)).length;
     if (!spaces || !props?.canvasWidth || styles[item.fontName]?.vertical) continue;
@@ -955,20 +1204,33 @@ function tuneTextLayerSpacing(divs, items, styles, properties, viewport) {
 }
 
 function textInsideQuad(state, quad) {
-  const xs = quad.map((point) => point[0]), ys = quad.map((point) => point[1]);
+  const xs = quad.map((point) => point[0]),
+    ys = quad.map((point) => point[1]);
   const bounds = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
   const values = [];
   for (const item of state.textItems || []) {
-    const x = Number(item.transform?.[4]), y = Number(item.transform?.[5]);
-    if (x >= bounds[0] && x <= bounds[2] && y >= bounds[1] && y <= bounds[3] && String(item.str || "").trim()) values.push(item.str);
+    const x = Number(item.transform?.[4]),
+      y = Number(item.transform?.[5]);
+    if (x >= bounds[0] && x <= bounds[2] && y >= bounds[1] && y <= bounds[3] && String(item.str || "").trim())
+      values.push(item.str);
   }
   return values.join(" ").replace(/\s+/g, " ").trim();
 }
 
 function retireWhenAskCloses(element, onRemove = () => {}) {
   const ask = document.getElementById("ask");
-  if (!ask || typeof MutationObserver !== "function") { onRemove(); element.remove(); return; }
-  const observer = new MutationObserver(() => { if (!ask.classList.contains("visible")) { observer.disconnect(); onRemove(); element.remove(); } });
+  if (!ask || typeof MutationObserver !== "function") {
+    onRemove();
+    element.remove();
+    return;
+  }
+  const observer = new MutationObserver(() => {
+    if (!ask.classList.contains("visible")) {
+      observer.disconnect();
+      onRemove();
+      element.remove();
+    }
+  });
   observer.observe(ask, { attributes: true, attributeFilter: ["class"] });
 }
 
@@ -1000,7 +1262,8 @@ function installTouchZoom(element, getZoom, setZoom) {
     if (touches.size !== 2) return;
     const pair = [...touches.values()];
     gesture = { distance: Math.max(1, Math.hypot(pair[1].x - pair[0].x, pair[1].y - pair[0].y)), zoom: getZoom() };
-    event.preventDefault(); event.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
   };
   const move = (event) => {
     if (!touches.has(event.pointerId)) return;
@@ -1008,19 +1271,25 @@ function installTouchZoom(element, getZoom, setZoom) {
     if (!gesture || touches.size < 2) return;
     const pair = [...touches.values()].slice(0, 2);
     const midpoint = { x: (pair[0].x + pair[1].x) / 2, y: (pair[0].y + pair[1].y) / 2 };
-    setZoom(gesture.zoom * Math.hypot(pair[1].x - pair[0].x, pair[1].y - pair[0].y) / gesture.distance, midpoint);
-    event.preventDefault(); event.stopPropagation();
+    setZoom((gesture.zoom * Math.hypot(pair[1].x - pair[0].x, pair[1].y - pair[0].y)) / gesture.distance, midpoint);
+    event.preventDefault();
+    event.stopPropagation();
   };
-  const end = (event) => { touches.delete(event.pointerId); if (touches.size < 2) gesture = null; };
+  const end = (event) => {
+    touches.delete(event.pointerId);
+    if (touches.size < 2) gesture = null;
+  };
   element.addEventListener("pointerdown", down, { passive: false });
   element.addEventListener("pointermove", move, { passive: false });
-  element.addEventListener("pointerup", end); element.addEventListener("pointercancel", end);
+  element.addEventListener("pointerup", end);
+  element.addEventListener("pointercancel", end);
   return () => {
     element.removeEventListener("pointerdown", down);
     element.removeEventListener("pointermove", move);
     element.removeEventListener("pointerup", end);
     element.removeEventListener("pointercancel", end);
-    touches.clear(); gesture = null;
+    touches.clear();
+    gesture = null;
   };
 }
 
@@ -1028,7 +1297,9 @@ export function syncPdfTranscriptionControls(root, capability) {
   if (!root?.querySelectorAll) return;
   const available = capability?.available !== false;
   const reason = String(capability?.reason || "Set up a vision-capable PDF transcription model in Model settings.");
-  const containers = root.matches?.(".doc-content.rh-pdf") ? [root] : Array.from(root.querySelectorAll(".doc-content.rh-pdf"));
+  const containers = root.matches?.(".doc-content.rh-pdf")
+    ? [root]
+    : Array.from(root.querySelectorAll(".doc-content.rh-pdf"));
   containers.forEach((container) => {
     const toolbarRoot = container._rhPdfToolbarElement || container;
     const button = toolbarRoot.querySelector(".rh-pdf-convert");

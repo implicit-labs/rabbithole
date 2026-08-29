@@ -1,7 +1,8 @@
+/** @protects ui bundle boundaries capability contracts. */
 import assert from "node:assert/strict";
 import * as esbuild from "esbuild";
 import { CANVAS_SHELL } from "../../src/core/html/shell.js";
-import { CANVAS_STYLES } from "../../src/core/html/styles.js";
+import { CANVAS_STYLES } from "../support/design-css.mjs";
 
 const result = await esbuild.build({
   entryPoints: ["src/ui/frozen-entry.js"],
@@ -12,20 +13,20 @@ const result = await esbuild.build({
   platform: "browser",
   target: "es2018",
   external: ["pdfjs-dist/build/pdf.mjs"],
+  loader: { ".css": "text" },
   logLevel: "silent",
 });
 
 const inputs = Object.keys(result.metafile.inputs);
 const forbidden = inputs.filter((input) =>
-  input === "src/ui/transport-status.js"
-  || input === "src/ui/snapshot.js"
+  input.startsWith("src/ui/hosts/live/")
   || input.startsWith("src/web/")
 );
 
 assert.deepEqual(
   forbidden,
   [],
-  `frozen UI must not include live host modules (the source-backed PDF viewer is intentionally shared):\n${forbidden.join("\n")}`,
+  `frozen UI must not reach anything under hosts/live:\n${forbidden.join("\n")}`,
 );
 
 const frozenBundle = result.outputFiles[0].text;

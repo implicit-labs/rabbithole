@@ -10,7 +10,7 @@
 //     destructures firefox or webkit (chromium's are preinstalled).
 //     Prints nothing for a chromium-only shard.
 //
-// Packing is greedy by descending file byte size (stable name tiebreak):
+// Packing is greedy by descending measured runtime (stable name tiebreak):
 // each file lands in the currently lightest bin, so the assignment depends
 // only on the checked-in file set — every matrix job computes the same bins.
 import fs from "node:fs";
@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const E2E_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "e2e");
+const TIMINGS = JSON.parse(fs.readFileSync(path.join(E2E_DIR, "..", "timings.json"), "utf8"));
 
 function listTestFiles() {
   return fs
@@ -30,7 +31,11 @@ function listTestFiles() {
 
 function packIntoBins(files, total) {
   const bySizeDescending = files
-    .map((file) => ({ file, size: fs.statSync(file).size }))
+    .map((file) => {
+      const timing = TIMINGS[path.basename(file)];
+      if (!timing || !Number.isFinite(timing.ms)) throw new Error(`Missing measured timing for ${path.basename(file)}`);
+      return { file, size: timing.ms };
+    })
     .sort((a, b) => b.size - a.size || (a.file < b.file ? -1 : 1));
   const bins = Array.from({ length: total }, () => ({ files: [], size: 0 }));
   for (const entry of bySizeDescending) {
@@ -48,6 +53,8 @@ function packIntoBins(files, total) {
 // playwright import destructuring. A bare word match is too loose: e.g.
 // style.webkitBackdropFilter would count a chromium-only file.
 function importedExtraBrowsers(file) {
+  const measured = TIMINGS[path.basename(file)];
+  if (measured) return new Set(measured.browsers || []);
   const source = fs.readFileSync(file, "utf8");
   const importPattern = /import\s*\{([^}]*)\}\s*from\s*["']playwright["']/g;
   const browsers = new Set();

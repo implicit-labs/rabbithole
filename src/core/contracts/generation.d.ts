@@ -1,13 +1,13 @@
 /**
  * Shared generation adapter vocabulary.
  *
- * Runtime authority for the browser brain surfaces and their current raw-text
- * streams: {@link ../../web/brain/openai-compatible.js}. Current consumers and
+ * Runtime authority for the browser provider surfaces and their current raw-text
+ * streams: {@link ../../web/provider/openai-compatible.js}. Current consumers and
  * title extraction are {@link ../../web/transport/direct-host.js},
- * {@link ../../web/brain/title-sentinel.js}, and {@link ../../web/app.js}.
+ * {@link ../../web/provider/title-sentinel.js}, and {@link ../../web/app.js}.
  * The MCP path is normalized by
  * {@link ../../node/transport/generation-ingress.js} before entering the same
- * `GenerationRun`; it has no browser-style `Brain` and receives partial/final
+ * `Run`; it has no browser-style `Provider` and receives partial/final
  * tool calls carrying `content`, `partial`, and `title` instead.
  *
  * Browser brains emit this vocabulary: branch adapters contain sentinel
@@ -15,9 +15,9 @@
  * separate wire ingress with its own persistence policy.
  * Transport-level run tagging uses `ProgressRun` from {@link ./engine.js}; it
  * is intentionally not redeclared here.
- * `GenerationRun` runtime behavior is authoritative in
- * {@link ../generation-run.js}; `DocEvent` output shapes remain authoritative
- * in {@link ../reducer.js} and are described by {@link ./engine.js}.
+ * `Run` runtime behavior is authoritative in
+ * {@link ../hole/run.js}; `DocEvent` output shapes remain authoritative
+ * in {@link ../hole/reduce.js} and are described by {@link ./engine.js}.
  */
 
 import type { NodeAnsweredEvent, NodeProgressEvent } from "./engine.js";
@@ -40,19 +40,19 @@ export type GenerationEvent = TextGenerationEvent | TitleGenerationEvent;
  * shapes; the stable adapter boundary is the three method names, abort signal,
  * and generated event stream.
  */
-export interface Brain {
+export interface Provider {
   answerBranch(context: unknown, signal: AbortSignal): AsyncIterable<GenerationEvent>;
   authorExplainer(context: unknown, signal: AbortSignal): AsyncIterable<GenerationEvent>;
   authorDocument(source: unknown, signal: AbortSignal): AsyncIterable<GenerationEvent>;
 }
 
-export interface GenerationRunOptions {
+export interface RunOptions {
   id: string;
   initialMarkdown?: string;
   fallbackTitle?: string;
 }
 
-export interface GenerationRunSnapshot {
+export interface RunSnapshot {
   id: string;
   seq: number;
   markdown: string;
@@ -69,9 +69,9 @@ export interface AnsweredDocContext {
   answeredFields?: Record<string, unknown>;
 }
 
-export declare class GenerationRun {
-  constructor(options: GenerationRunOptions);
+export declare class Run {
+  constructor(options: RunOptions);
   accept(event: GenerationEvent, context?: ProgressDocContext): NodeProgressEvent | null;
   complete(context: AnsweredDocContext): NodeAnsweredEvent;
-  snapshot(): GenerationRunSnapshot;
+  snapshot(): RunSnapshot;
 }

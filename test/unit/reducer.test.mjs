@@ -1,8 +1,9 @@
+/** @protects reducer capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../src/core/reducer.js";
+import { createHoleState, holeStateToHole, holeStateToHydrationNodes, reduceHoleEvent } from "../../src/core/hole/reduce.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const cases = JSON.parse(await fs.readFile(path.join(ROOT, "test/fixtures/reducer-goldens/cases.json"), "utf8"));

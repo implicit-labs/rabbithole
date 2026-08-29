@@ -1,3 +1,4 @@
+/** @protects pdf gc capability contracts. */
 import assert from "node:assert/strict";
 import { DirectRabbitholeHost } from "../../src/web/transport/direct-host.js";
 
@@ -37,6 +38,6 @@ console.log("ok PDF v2 GC: source deletion candidates and shared references use 
   const store = storeFixture(); const host = new DirectRabbitholeHost({ store, hole: hole([]) });
   const messages = []; const adapter = host.adapter(); adapter.connect({ onMessage: (event) => messages.push(event) });
   await host.handleBrowserEvent({ type: "node_extensions_patch", node_id: "root", namespace: "pdf", value: { version: 2 } });
-  assert.deepEqual(host.state.nodes.get("root").extensions.pdf, { version: 2 });
+  assert.deepEqual(host.state.nodes.get("root").source, { version: 2 });
   assert(messages.some((event) => event.type === "node_extensions_patch"));
 }

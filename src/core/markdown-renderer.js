@@ -219,7 +219,7 @@ function findClosingFence(src, marker, from) {
     const end = lineEnd === -1 ? src.length : lineEnd;
     const line = src.slice(lineStart, end);
     const match = /^(?: {0,3})(`{3,})[ \t]*$/.exec(line);
-    if (match && match[1].length >= marker.length) return lineStart;
+    if (match && (match[1]?.length ?? 0) >= marker.length) return lineStart;
     if (lineEnd === -1) break;
     lineStart = lineEnd + 1;
   }
@@ -318,7 +318,7 @@ export function createMarkdownRenderer({ encodeBase64 = defaultEncodeBase64, res
           const info = parseBlockInfo(open[2]);
           const language = info.type;
           if (!registeredTypes.has(language)) return undefined;
-          if (findClosingFence(src, open[1], open[0].length) !== -1) return undefined;
+          if (findClosingFence(src, open[1] ?? "", open[0].length) !== -1) return undefined;
           return { type: "visualFencePending", raw: src, language, blockId: info.id };
         },
         renderer(token) {

@@ -1,35 +1,40 @@
 import { focusElement, registerLayer } from "../overlay/layer-stack.js";
 
-var FOCUSABLE = [
+const FOCUSABLE = [
   "a[href]",
   "button:not([disabled])",
   "textarea:not([disabled])",
   "input:not([disabled])",
   "select:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])"
+  "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
 function visibleFocusables(dialog) {
-  return Array.prototype.slice.call(dialog.querySelectorAll(FOCUSABLE)).filter(function(element) {
+  return Array.prototype.slice.call(dialog.querySelectorAll(FOCUSABLE)).filter(function (element) {
     return element.offsetParent !== null || element === document.activeElement;
   });
 }
 
 function resolveInitialFocus(dialog, requested) {
-  var explicit = typeof requested === "string" ? dialog.querySelector(requested) : requested;
+  const explicit = typeof requested === "string" ? dialog.querySelector(requested) : requested;
   return explicit?.isConnected ? explicit : visibleFocusables(dialog)[0] || dialog;
 }
 
 export function openDialog(options) {
   options = options || {};
-  var dialog = options.dialog || options.element;
-  var backdrop = options.backdrop || dialog;
+  const dialog = options.dialog || options.element;
+  const backdrop = options.backdrop || dialog;
   if (!dialog || !backdrop) throw new Error("openDialog requires a dialog element");
 
-  var labelledby = options.labelledby || dialog.getAttribute("aria-labelledby");
-  var label = options.label || dialog.getAttribute("aria-label");
+  const labelledby = options.labelledby || dialog.getAttribute("aria-labelledby");
+  const label = options.label || dialog.getAttribute("aria-label");
   if (!labelledby && !label) throw new Error("openDialog requires label or labelledby");
-  if (labelledby && !labelledby.split(/\s+/).every(function(id) { return document.getElementById(id); })) {
+  if (
+    labelledby &&
+    !labelledby.split(/\s+/).every(function (id) {
+      return document.getElementById(id);
+    })
+  ) {
     throw new Error("openDialog labelledby must reference existing elements");
   }
 
@@ -40,17 +45,18 @@ export function openDialog(options) {
   if (!dialog.hasAttribute("tabindex")) dialog.setAttribute("tabindex", "-1");
   backdrop.hidden = false;
 
-  var closed = false;
-  var initialTimer = null;
+  let closed = false;
+  let initialTimer = null;
   function onKeydown(event) {
     if (event.key !== "Tab") return;
-    var items = visibleFocusables(dialog);
+    const items = visibleFocusables(dialog);
     if (!items.length) {
       event.preventDefault();
       focusElement(dialog);
       return;
     }
-    var first = items[0], last = items[items.length - 1];
+    const first = items[0],
+      last = items[items.length - 1];
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
       event.preventDefault();
       focusElement(last);
@@ -61,13 +67,15 @@ export function openDialog(options) {
   }
   dialog.addEventListener("keydown", onKeydown);
 
-  var unregister = registerLayer({
+  const unregister = registerLayer({
     element: dialog,
     trigger: options.trigger,
     closeOnEscape: options.closeOnEscape,
     closeOnOutsidePointer: options.closeOnBackdrop,
     restoreFocus: options.restoreFocus,
-    onClose: function(reason) { close(reason === "outside-pointer" ? "backdrop" : reason); }
+    onClose: function (reason) {
+      close(reason === "outside-pointer" ? "backdrop" : reason);
+    },
   });
 
   function close(reason, settings) {
@@ -85,7 +93,7 @@ export function openDialog(options) {
     if (options.removeOnDispose) backdrop.remove();
   }
 
-  initialTimer = setTimeout(function() {
+  initialTimer = setTimeout(function () {
     initialTimer = null;
     if (!closed) focusElement(resolveInitialFocus(dialog, options.initialFocus));
   }, 0);

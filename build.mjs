@@ -4,8 +4,11 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
-import { CANVAS_STYLES } from "./src/core/html/styles.js";
+import { minify as minifyJavaScript } from "terser";
 import { faviconSvg } from "./src/core/html/icons.js";
+import { mapConcurrent } from "./src/core/concurrency.js";
+import { DEFAULT_FETCH_PROXY_URL } from "./policy/origins.js";
+import { webContentSecurityPolicy } from "./policy/csp.js";
 
 const require = createRequire(import.meta.url);
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -14,8 +17,7 @@ const outdir = parsed.outdir;
 const absOutdir = path.resolve(rootDir, outdir);
 // Rabbithole's hosted link relay; RABBITHOLE_PROXY_URL overrides it, and an
 // empty value ships the app with no default relay.
-const PUBLIC_FETCH_PROXY_URL = "https://rabbithole-fetch-proxy.khemanishlok.workers.dev";
-const proxyConfig = readProxyConfig(process.env.RABBITHOLE_PROXY_URL ?? PUBLIC_FETCH_PROXY_URL);
+const proxyConfig = readProxyConfig(process.env.RABBITHOLE_PROXY_URL ?? DEFAULT_FETCH_PROXY_URL);
 
 const CANONICAL_HOST_SCRIPT = `if(location.hostname==="www.rabbithole.ing")location.replace("https://rabbithole.ing"+location.pathname+location.search+location.hash);`;
 // This runs in the parser-blocking head, before the external stylesheet or app
@@ -29,25 +31,23 @@ const KATEX_FONT_SRC =
 await fs.rm(absOutdir, { recursive: true, force: true });
 await fs.mkdir(absOutdir, { recursive: true });
 
-const pdfPackageRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
 await Promise.all([
   buildUiBundle("src/ui/entry.js", "client.js", "RabbitholeClient"),
   buildUiBundle("src/ui/frozen-entry.js", "frozen-client.js", "RabbitholeFrozenClient"),
-  fs.copyFile(path.join(pdfPackageRoot, "build/pdf.worker.min.mjs"), path.join(absOutdir, "pdf.worker.mjs")),
-  fs.copyFile(path.join(pdfPackageRoot, "build/pdf.min.mjs"), path.join(absOutdir, "pdf.mjs")),
+  buildCss("index.canvas.css", path.join(absOutdir, "canvas.css")),
+  buildCss("index.visual.css", path.join(absOutdir, "visual-block.css")),
   buildKatexCss().then((source) => fs.writeFile(path.join(absOutdir, "katex.css"), source, "utf8")),
-  buildDompurifyScript().then((source) => fs.writeFile(path.join(absOutdir, "dompurify.js"), source, "utf8")),
-  buildMermaidScript().then((source) => fs.writeFile(path.join(absOutdir, "mermaid.js"), source, "utf8")),
 ]);
 
 if (!parsed.explicit) {
   await buildWebApp(absOutdir);
 }
 
-function buildUiBundle(entry, outfile, globalName) {
-  return esbuild.build({
+async function buildUiBundle(entry, outfile, globalName) {
+  const outputPath = path.join(absOutdir, outfile);
+  await esbuild.build({
     entryPoints: [path.join(rootDir, entry)],
-    outfile: path.join(absOutdir, outfile),
+    outfile: outputPath,
     bundle: true,
     format: "iife",
     globalName,
@@ -55,8 +55,36 @@ function buildUiBundle(entry, outfile, globalName) {
     minify: true,
     sourcemap: false,
     tsconfigRaw: {},
+    loader: { ".css": "text" },
     legalComments: "none",
     external: ["pdfjs-dist/build/pdf.mjs"],
+    logLevel: "silent",
+  });
+  // esbuild owns bundling and ES2018 lowering; Terser then performs the deeper
+  // compression pass that keeps committed live/frozen artifacts inside their
+  // byte budgets without changing the browser target or runtime boundaries.
+  const bundled = await fs.readFile(outputPath, "utf8");
+  const compressed = await minifyJavaScript(bundled, {
+    ecma: 2018,
+    compress: true,
+    mangle: true,
+    format: { comments: false },
+  });
+  if (!compressed.code) throw new Error(`Terser produced no output for ${outfile}`);
+  const embeddingSafe = compressed.code
+    .replace(/<script/gi, "<scr\\x69pt")
+    .replace(/<\/script/gi, "<\\/script");
+  await fs.writeFile(outputPath, embeddingSafe, "utf8");
+}
+
+function buildCss(entry, outfile) {
+  return esbuild.build({
+    entryPoints: [path.join(rootDir, "src/design", entry)],
+    outfile,
+    bundle: true,
+    minify: true,
+    loader: { ".css": "css" },
+    legalComments: "none",
     logLevel: "silent",
   });
 }
@@ -108,7 +136,7 @@ async function buildWebApp(assetDir) {
   await fs.mkdir(webDist, { recursive: true });
 
   const appBuild = esbuild.build({
-    entryPoints: { app: path.join(rootDir, "src/web/app.js") },
+    entryPoints: { app: path.join(rootDir, "src/web/main.js") },
     outdir: webDist,
     bundle: true,
     format: "esm",
@@ -126,6 +154,7 @@ async function buildWebApp(assetDir) {
     alias: {
       canvas: path.join(rootDir, "src/web/browser-canvas-stub.js"),
     },
+    loader: { ".css": "text" },
     define: {
       __RABBITHOLE_DEFAULT_PROXY_URL__: JSON.stringify(proxyConfig.defaultUrl),
     },
@@ -135,19 +164,18 @@ async function buildWebApp(assetDir) {
 
   const sources = Promise.all([
     fs.readFile(path.join(assetDir, "katex.css"), "utf8"),
-    fs.readFile(path.join(assetDir, "dompurify.js"), "utf8"),
-    fs.readFile(path.join(assetDir, "mermaid.js"), "utf8"),
+    buildDompurifyScript(),
+    buildMermaidScript(),
     fs.readFile(path.join(assetDir, "frozen-client.js"), "utf8"),
-    fs.readFile(path.join(rootDir, "src/web/styles.css"), "utf8"),
+    fs.readFile(path.join(assetDir, "canvas.css"), "utf8"),
   ]);
-  const [, [katexCss, dompurify, mermaid, frozenClient, webCss]] = await Promise.all([
-    Promise.all([appBuild, copyPdfAssets(webDist)]),
+  const [, [katexCss, dompurify, mermaid, frozenClient, canvasCss]] = await Promise.all([
+    Promise.all([appBuild, copyPdfAssets(webDist), buildCss("index.web.css", path.join(webDist, "styles.css"))]),
     sources,
   ]);
-  const frozenStyles = `${CANVAS_STYLES}\n${katexCss}`;
+  const frozenStyles = `${canvasCss}\n${katexCss}`;
 
   await Promise.all([
-    fs.writeFile(path.join(webDist, "styles.css"), `${CANVAS_STYLES}\n${webCss}`, "utf8"),
     fs.writeFile(path.join(webDist, "katex.css"), katexCss, "utf8"),
     fs.writeFile(path.join(webDist, "dompurify.js"), dompurify, "utf8"),
     fs.writeFile(path.join(webDist, "mermaid.js"), mermaid, "utf8"),
@@ -190,55 +218,10 @@ async function copyPackedCMaps(sourceDir, targetDir) {
   await mapConcurrent(files, 32, (entry) => fs.copyFile(path.join(sourceDir, entry.name), path.join(targetDir, entry.name)));
 }
 
-async function mapConcurrent(values, concurrency, fn) {
-  let next = 0;
-  async function worker() {
-    while (next < values.length) await fn(values[next++]);
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
-}
-
 function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
   if (!/^[a-f0-9]{12}$/.test(assetVersion)) throw new Error("Web asset version must be a 12-character SHA-256 prefix");
   const assetQuery = `?v=${assetVersion}`;
-  const connectSrc = [
-    "'self'",
-    "blob:",
-    // A custom endpoint is any host the person running this owns, so it cannot be
-    // enumerated here. script-src stays locked to 'self', which is what keeps an
-    // injection from using this. http: cannot be narrowed to the private ranges — CSP
-    // has no pattern for them — but it widens little: from an https page the browser
-    // blocks plain http anyway, except on this machine and, behind a permission prompt,
-    // the local network. Those two are exactly the endpoints worth reaching.
-    "https:",
-    "http:",
-    "https://openrouter.ai",
-    "https://api.github.com",
-    "https://arxiv.org",
-    "https://www.arxiv.org",
-    "https://ar5iv.labs.arxiv.org",
-    "https://ar5iv.org",
-    "https://openreview.net",
-    "https://*.workers.dev",
-    "http://localhost:*",
-    "http://127.0.0.1:*",
-  ];
-  if (proxyOrigin && !connectSrc.includes(proxyOrigin)) {
-    connectSrc.push(proxyOrigin);
-  }
-  const canonicalHostHash = createHash("sha256").update(CANONICAL_HOST_SCRIPT).digest("base64");
-  const initialThemeHash = createHash("sha256").update(INITIAL_THEME_SCRIPT).digest("base64");
-  const csp = [
-    "default-src 'self'",
-    `script-src 'self' 'sha256-${canonicalHostHash}' 'sha256-${initialThemeHash}'`,
-    "style-src 'self' 'unsafe-inline'",
-    "font-src 'self' data:",
-    "img-src 'self' blob: data: https:",
-    `connect-src ${connectSrc.join(" ")}`,
-    "worker-src 'self'",
-    "base-uri 'none'",
-    "form-action 'none'",
-  ].join("; ");
+  const csp = webContentSecurityPolicy({ proxyOrigin, canonicalHostScript: CANONICAL_HOST_SCRIPT, initialThemeScript: INITIAL_THEME_SCRIPT });
   return `<!doctype html>
 <html lang="en">
 <head>

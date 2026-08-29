@@ -23,6 +23,7 @@ function assertAgentState(agent) {
   return agent;
 }
 
+/** @param {string} id @param {{plan?: string, models: any[]}} input */
 export function readyAgent(id, { plan, models }) {
   return assertAgentState({
     id,
@@ -55,6 +56,7 @@ export function unavailableAgent(id, state, fix, detail) {
 }
 
 export class BridgeStateStore {
+  /** @param {{version: string, backends: any, logger?: any, refreshMs?: number}} input */
   constructor({ version, backends, logger, refreshMs = REFRESH_MS }) {
     this.version = version;
     this.backends = backends;

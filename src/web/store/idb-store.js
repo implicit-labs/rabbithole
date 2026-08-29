@@ -28,7 +28,7 @@ function txDone(tx) {
 function bytesToBlob(bytes, label = "asset bytes", name = "asset.png") {
   let blob;
   if (bytes instanceof Blob) blob = bytes;
-  else if (bytes instanceof Uint8Array || bytes instanceof ArrayBuffer) blob = new Blob([bytes]);
+  else if (bytes instanceof Uint8Array || bytes instanceof ArrayBuffer) blob = new Blob([/** @type {BlobPart} */ (bytes)]);
   else throw new Error(`${label} must be a Blob, ArrayBuffer, or Uint8Array`);
   const limit = maxAssetBytes(name);
   if (blob.size > limit) throw new Error(`${label} exceeds ${Math.round(limit / 1024 / 1024)} MB`);

@@ -1,3 +1,4 @@
+/** @param {{hash?: string, pathname?: string, search?: string}} [locationValue] @param {{state?: any, replaceState: (state: any, title: string, url: string) => void}} [historyValue] */
 export function takeBridgeTokenFromFragment(locationValue = globalThis.location, historyValue = globalThis.history) {
   const raw = String(locationValue?.hash || "").replace(/^#/, "");
   const params = new URLSearchParams(raw);

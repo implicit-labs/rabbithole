@@ -1,5 +1,6 @@
+/** @protects lifecycle capability contracts. */
 import assert from "node:assert/strict";
-import { createCleanupScope } from "../../src/ui/lifecycle.js";
+import { createCleanupScope } from "../../src/ui/kit/scope.js";
 
 const scope = createCleanupScope();
 const target = new EventTarget();

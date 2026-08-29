@@ -1,13 +1,14 @@
+/** @protects pdf transcription capability capability contracts. */
 import assert from "node:assert/strict";
-import { discoverLocalModels } from "../../src/web/brain/local-model-catalog.js";
-import { pdfTranscriptionCapability } from "../../src/web/brain/pdf-transcription.js";
-import { formatModelPrice } from "../../src/web/brain/model-catalog.js";
+import { discoverLocalModels } from "../../src/web/provider/local-model-catalog.js";
+import { pdfTranscriptionCapability } from "../../src/web/provider/pdf-transcription.js";
+import { formatModelPrice } from "../../src/web/provider/model-catalog.js";
 
 assert.equal(formatModelPrice({ id: "local/model" }), "", "local models without provider pricing should have no price label");
-assert.equal(formatModelPrice({ promptPrice: -1, completionPrice: -1 }), "Varies", "router-dependent pricing should not render negative token costs");
-assert.equal(formatModelPrice({ promptPrice: 0, completionPrice: 0 }), "Free");
+assert.equal(formatModelPrice({ price: { prompt: -1, completion: -1 } }), "Varies", "router-dependent pricing should not render negative token costs");
+assert.equal(formatModelPrice({ price: { prompt: 0, completion: 0 } }), "Free");
 
-const localSettings = { preset: "custom", model: "text:7b", transcribe_model: "text:7b" };
+const localSettings = { preset: "local", model: "text:7b", transcribe_model: "text:7b" };
 assert.equal(pdfTranscriptionCapability({ preset: "openrouter", transcribe_model: "vision/cloud" }).available, true);
 assert.equal(pdfTranscriptionCapability(localSettings, { models: [] }).status, "no_models");
 assert.equal(pdfTranscriptionCapability(localSettings, { models: [{ id: "text:7b", vision: false }] }).status, "no_vision");

@@ -1,4 +1,5 @@
 /** @typedef {import("./contracts/engine.js").HoleNode} HoleNode */
+import { projectNode } from "./hole/node.js";
 
 /**
  * Create a debounced, serialized persistence queue. `save` is called at flush
@@ -82,18 +83,12 @@ export function assetsOrphanedByDeletion({ deletedNodes, remainingNodes, extract
 
 /** @param {HoleNode} node @param {Record<string, unknown>} [overrides] */
 export function buildNodeAnsweredEvent(node, overrides = {}) {
+  const projected = projectNode(node, "wire");
+  const { id, ...fields } = projected;
   return {
     type: "node_answered",
-    node_id: node.id,
-    parent_id: node.parent_id,
-    title: node.title,
-    markdown: node.markdown,
-    base_url: node.base_url,
-    base_url_source: node.base_url_source,
-    origin: node.origin,
-    position: node.position,
-    size: node.size,
-    font_scale: node.font_scale,
+    node_id: id,
+    ...fields,
     ...overrides,
   };
 }

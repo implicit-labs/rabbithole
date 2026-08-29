@@ -11,6 +11,7 @@ import {
 } from "../../core/pdf-shared.js";
 import { createHoleFromMarkdown } from "../transport/direct-host.js";
 import { loadPdfJsModule, primePdfDocument } from "../../ui/pdf-runtime.js";
+import { mapConcurrent } from "../../core/concurrency.js";
 
 const PDF_RUNTIME_LOAD_FAILURE = /failed to fetch dynamically imported module|importing a module script failed|error loading dynamically imported module|load failed/i;
 
@@ -22,6 +23,7 @@ export function describePdfImportFailure(error) {
   return `PDF import failed. ${detail} Try a different PDF.`;
 }
 
+/** @param {any} source @param {any} [options] */
 async function ingestPdf(source, {
   pages,
   includeText = true,
@@ -32,7 +34,7 @@ async function ingestPdf(source, {
   validatePdfBytes(data, name);
   const sha256 = await sha256Hex(data);
   const sourceAsset = pdfSourceAssetName(sha256);
-  const sourceBlob = new Blob([data], { type: "application/pdf" });
+  const sourceBlob = new Blob([/** @type {BlobPart} */ (data)], { type: "application/pdf" });
   if (onSource) await onSource({ asset: sourceAsset, sha256, byte_length: sourceBlob.size }, sourceBlob);
   const pdfjs = await loadPdfJsModule();
 
@@ -64,6 +66,7 @@ async function ingestPdf(source, {
       return null;
     });
     const processedPages = resolvePagesToProcess(doc.numPages, pages, notes);
+    /** @type {any} */
     const result = {
       title: normalizePdfTitle(metadata),
       page_count: doc.numPages,
@@ -110,19 +113,7 @@ async function ingestPdf(source, {
   }
 }
 
-async function mapConcurrent(values, concurrency, fn) {
-  const results = new Array(values.length);
-  let next = 0;
-  async function worker() {
-    while (next < values.length) {
-      const index = next++;
-      results[index] = await fn(values[index], index);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
-  return results;
-}
-
+/** @param {any} [options] */
 export async function ingestPdfToStoredHole({
   source,
   store,

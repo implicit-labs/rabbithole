@@ -1,5 +1,7 @@
-import { normalizeStoredBaseUrlFields } from "./base-url.js";
-import { normalizePdfAnchor, normalizePosition, normalizeSize, normalizeViewState } from "./model.js";
+import { normalizePdfAnchor } from "./hole/anchor.js";
+import { validateLegacyAskOrigin } from "./hole/ask.js";
+import { normalizeViewState } from "./hole/bookmark.js";
+import { projectNode } from "./hole/node.js";
 
 /** @typedef {import("./contracts/artifact.js").PersistedHole} PersistedHole */
 /** @typedef {import("./contracts/artifact.js").PersistedNode} PersistedNode */
@@ -12,7 +14,7 @@ export function cloneJson(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
-/** @param {Partial<PersistedHole> | null | undefined} hole @param {{ updatedAt?: string, cloneExtensions?: boolean }} [options] @returns {PersistedHole} */
+/** @param {any} hole @param {{ updatedAt?: string, cloneExtensions?: boolean }} [options] @returns {PersistedHole} */
 export function toPersistedHole(hole, { updatedAt = new Date().toISOString(), cloneExtensions = true } = {}) {
   const nodes = Array.isArray(hole?.nodes) ? hole.nodes : [];
   /** @type {PersistedHole} */
@@ -24,32 +26,15 @@ export function toPersistedHole(hole, { updatedAt = new Date().toISOString(), cl
     created_at: hole?.created_at ?? null,
     updated_at: updatedAt,
     view_state: normalizeViewState(hole?.view_state),
-    nodes: nodes.map((node) => toPersistedNode(node, { cloneExtensions })),
+    nodes: nodes.map((/** @type {any} */ node) => toPersistedNode(node, { cloneExtensions })),
   };
   validatePersistedHole(persisted);
   return persisted;
 }
 
-/** @param {Partial<PersistedNode> | null | undefined} node @param {{ cloneExtensions?: boolean }} [options] @returns {PersistedNode} */
-function toPersistedNode(node, { cloneExtensions = true } = {}) {
-  const base = normalizeStoredBaseUrlFields(node);
-  return {
-    id: String(node?.id ?? ""),
-    parent_id: node?.parent_id == null ? null : String(node.parent_id),
-    title: String(node?.title ?? ""),
-    markdown: String(node?.markdown ?? ""),
-    base_url: base.base_url,
-    base_url_source: base.base_url_source,
-    origin: node?.origin ?? null,
-    position: normalizePosition(node?.position),
-    size: normalizeSize(node?.size),
-    font_scale: Number(node?.font_scale) || 1,
-    collapsed: !!node?.collapsed,
-    status: node?.status === "pending" ? "pending" : "answered",
-    read: !!node?.read,
-    created_at: node?.created_at ?? null,
-    extensions: node?.extensions === undefined ? {} : (cloneExtensions ? cloneJson(node.extensions) : node.extensions),
-  };
+/** @param {Partial<PersistedNode> | null | undefined} node @param {{ cloneExtensions?: boolean }} [_options] @returns {PersistedNode} */
+export function toPersistedNode(node, _options = {}) {
+  return projectNode(/** @type {Record<string, any>} */ (node || {}), "persist");
 }
 
 /** @param {unknown} raw @param {{ clone?: boolean }} [options] */
@@ -101,9 +86,20 @@ function validatePersistedNode(node) {
   if (node.base_url_source !== null && !["explicit", "frontmatter", "inherited"].includes(node.base_url_source)) {
     throw new Error(`Persisted node ${node.id} base_url_source is invalid`);
   }
-  if (!node.position || typeof node.position !== "object") throw new Error(`Persisted node ${node.id} position must be an object`);
-  if (node.size !== null && typeof node.size !== "object") throw new Error(`Persisted node ${node.id} size must be object or null`);
+  validateLegacyAskOrigin(node.origin, node.id);
+  if (!node.position || typeof node.position !== "object" || Array.isArray(node.position)
+    || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) {
+    throw new Error(`Persisted node ${node.id} position must contain finite x and y numbers`);
+  }
+  if (node.size !== null && (!node.size || typeof node.size !== "object" || Array.isArray(node.size)
+    || !Number.isFinite(node.size.w) || !Number.isFinite(node.size.h) || node.size.w <= 0 || node.size.h <= 0)) {
+    throw new Error(`Persisted node ${node.id} size must contain positive finite w and h numbers or be null`);
+  }
+  if (!Number.isFinite(node.font_scale) || node.font_scale <= 0) throw new Error(`Persisted node ${node.id} font_scale must be a positive number`);
+  if (typeof node.collapsed !== "boolean") throw new Error(`Persisted node ${node.id} collapsed must be a boolean`);
   if (node.status !== "pending" && node.status !== "answered") throw new Error(`Persisted node ${node.id} status is invalid`);
+  if (typeof node.read !== "boolean") throw new Error(`Persisted node ${node.id} read must be a boolean`);
+  if (node.created_at !== null && typeof node.created_at !== "string") throw new Error(`Persisted node ${node.id} created_at must be string or null`);
   if (!node.extensions || typeof node.extensions !== "object" || Array.isArray(node.extensions)) {
     throw new Error(`Persisted node ${node.id} extensions must be a JSON object`);
   }

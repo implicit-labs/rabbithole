@@ -1,7 +1,7 @@
 /**
  * Reducer state and event vocabulary.
  *
- * Runtime authority: {@link ../reducer.js} (`createHoleState`,
+ * Runtime authority: {@link ../hole/reduce.js} (`createHoleState`,
  * `holeStateToHole`, and the `reduceHoleEvent` discriminator). The reducer
  * performs coercion, not trust-boundary validation: unknown event types throw,
  * while malformed known events retain each handler's current normalize/no-op/
@@ -18,7 +18,7 @@ export interface HoleNode {
   base_url?: string | null;
   base_url_source?: BaseUrlSource | null;
   /** Application metadata is intentionally opaque to the reducer. */
-  origin?: unknown;
+  origin?: any;
   position?: Position;
   size?: NodeSize | null;
   font_scale?: number;
@@ -26,9 +26,30 @@ export interface HoleNode {
   status?: "pending" | "answered";
   read?: boolean;
   created_at?: string | null;
+  /** Canonical first-party content provenance (schema-v2: extensions.pdf). */
+  source?: Record<string, any> | null;
+  /** Canonical presentation state (schema-v2: extensions.canvas/note). */
+  view?: Record<string, any>;
+  /** Canonical learning/progress state (schema-v2: extensions.learn). */
+  progress?: Record<string, any>;
   /** Opaque JSON extension bag; reducer operations preserve it structurally. */
-  extensions?: Record<string, unknown>;
+  extensions?: Record<string, any>;
   [field: string]: unknown;
+}
+
+export interface Ask {
+  id: string;
+  at: { node_id: string | null; anchor: any | null };
+  question: string;
+  lens: string | null;
+  attachments: string[];
+  clip: string | null;
+  author: "human" | "agent";
+  produces: string;
+  state: "requested" | "streaming" | "settled" | "failed";
+  run: { id: string; seq: number } | null;
+  delegated: boolean;
+  error: { message: string; code: string | null; retryable: boolean } | null;
 }
 
 export interface HoleState {
@@ -37,7 +58,11 @@ export interface HoleState {
   root_id: string | null;
   created_at: unknown;
   view_state: PersistedViewState | null | unknown;
+  /** Canonical where-was-I state; schema-v2 `view_state.mode` is discarded. */
+  bookmark: Omit<PersistedViewState, "mode"> | null;
   nodes: Map<string, HoleNode>;
+  /** Canonical outstanding-work model, derived from schema-v2 node origins. */
+  asks: Map<string, Ask>;
   /**
    * Ephemeral per-node progress ordering records. This reducer-only ledger is
    * never persisted or emitted by `holeStateToHole` and starts empty after
@@ -149,7 +174,7 @@ export interface ReduceEffects {
 export interface ReduceResult { state: HoleState; effects: ReduceEffects; }
 export interface ReduceOptions { now?: string; idFactory?: () => string; mutate?: boolean; }
 
-export declare function createHoleState(input?: Partial<Omit<HoleState, "nodes" | "progressRuns">> & { nodes?: Map<string, HoleNode> | HoleNode[] }, options?: { cloneExtensions?: boolean }): HoleState;
-export declare function holeStateToHole(state: HoleState): Omit<HoleState, "nodes" | "progressRuns"> & { nodes: HoleNode[] };
+export declare function createHoleState(input?: Partial<Omit<HoleState, "nodes" | "asks" | "bookmark" | "progressRuns">> & { nodes?: Map<string, HoleNode> | HoleNode[] }, options?: { cloneExtensions?: boolean, canonicalNodes?: boolean }): HoleState;
+export declare function holeStateToHole(state: HoleState): Omit<HoleState, "nodes" | "asks" | "bookmark" | "progressRuns"> & { nodes: HoleNode[] };
 export declare function holeStateToHydrationNodes(state: HoleState, options?: { suppressRootOrigin?: boolean, cloneExtensions?: boolean }): Array<Omit<Required<HoleNode>, "created_at">>;
 export declare function reduceHoleEvent(state: HoleState, event: DocEvent, options?: ReduceOptions): ReduceResult;

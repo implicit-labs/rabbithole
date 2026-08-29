@@ -1,3 +1,5 @@
+import { systemClock } from "../../core/clock.js";
+
 const WIRED = new WeakMap();
 const VARIANTS = new Set(["banner", "hint", "toast"]);
 const TIMED = new Set(["hint", "toast"]);
@@ -6,6 +8,7 @@ const TIMED = new Set(["hint", "toast"]);
  * Wires an existing notice shell without replacing it or its children.
  * Timed notices pause while hovered or while keyboard focus remains inside.
  */
+/** @param {HTMLElement} element @param {{variant?: string}} [options] */
 export function wireNotice(element, { variant } = {}) {
   if (!element) throw new Error("Notice requires an element");
   if (!VARIANTS.has(variant)) throw new Error("Unknown Notice variant: " + variant);
@@ -17,8 +20,9 @@ export function wireNotice(element, { variant } = {}) {
 
   const messageEl = element.querySelector("[data-notice-message]") || element;
   const titleEl = element.querySelector("[data-notice-title]");
-  const actionEl = element.querySelector("[data-notice-action]");
-  const dismissEl = element.querySelector("[data-notice-dismiss]");
+  const actionEl = /** @type {HTMLElement | null} */ (element.querySelector("[data-notice-action]"));
+  const dismissEl = /** @type {HTMLElement | null} */ (element.querySelector("[data-notice-dismiss]"));
+  /** @type {ReturnType<typeof setTimeout> | 0} */
   let timer = 0;
   let deadline = 0;
   let remaining = 0;
@@ -58,8 +62,8 @@ export function wireNotice(element, { variant } = {}) {
   function startTimer(token) {
     clearTimer();
     if (!TIMED.has(variant) || remaining <= 0) return;
-    deadline = Date.now() + remaining;
-    timer = setTimeout(function() {
+    deadline = systemClock.now() + remaining;
+    timer = setTimeout(function () {
       timer = 0;
       if (token === run) {
         const callback = expire;
@@ -70,7 +74,7 @@ export function wireNotice(element, { variant } = {}) {
   }
   function pauseTimer() {
     if (!timer) return;
-    remaining = Math.max(0, deadline - Date.now());
+    remaining = Math.max(0, deadline - systemClock.now());
     clearTimer();
   }
   function resumeTimer() {
@@ -80,7 +84,16 @@ export function wireNotice(element, { variant } = {}) {
   function isVisible() {
     return element.classList.contains(variant === "hint" ? "flash" : "visible");
   }
-  function show({ title = "", message = "", actionLabel = "", onAction = null, onDismiss = null, onExpire = null, duration } = {}) {
+  /** @param {{title?: string, message?: string, actionLabel?: string, onAction?: (() => void) | null, onDismiss?: (() => void) | null, onExpire?: (() => void) | null, duration?: number}} [options] */
+  function show({
+    title = "",
+    message = "",
+    actionLabel = "",
+    onAction = null,
+    onDismiss = null,
+    onExpire = null,
+    duration,
+  } = {}) {
     run += 1;
     clearTimer();
     titleEl && (titleEl.textContent = String(title));
@@ -97,24 +110,30 @@ export function wireNotice(element, { variant } = {}) {
     if (!hovered && !focused) startTimer(run);
   }
 
-  element.addEventListener("mouseenter", function() { hovered = true; pauseTimer(); });
-  element.addEventListener("mouseleave", function() {
+  element.addEventListener("mouseenter", function () {
+    hovered = true;
+    pauseTimer();
+  });
+  element.addEventListener("mouseleave", function () {
     hovered = false;
     resumeTimer();
   });
-  element.addEventListener("focusin", function() { focused = true; pauseTimer(); });
-  element.addEventListener("focusout", function(event) {
-    focused = element.contains(event.relatedTarget);
+  element.addEventListener("focusin", function () {
+    focused = true;
+    pauseTimer();
+  });
+  element.addEventListener("focusout", function (event) {
+    focused = event.relatedTarget instanceof Node && element.contains(event.relatedTarget);
     resumeTimer();
   });
-  actionEl?.addEventListener("click", async function() {
+  actionEl?.addEventListener("click", async function () {
     const callback = action;
     const token = run;
     clearTimer();
     if (callback) await callback();
     if (token === run) hide();
   });
-  dismissEl?.addEventListener("click", function() {
+  dismissEl?.addEventListener("click", function () {
     const callback = dismiss;
     hide();
     callback?.();

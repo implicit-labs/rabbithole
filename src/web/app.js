@@ -1,6 +1,6 @@
-import { CANVAS_SHELL } from "../core/html/shell.js";
-import { providerFor, settingsForProvider } from "./brain/provider-registry.js";
-import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings/preferences-store.js";
+import { systemClock } from "../core/clock.js";
+import { providerFor, settingsForProvider } from "./provider/provider-registry.js";
+import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings/settings.js";
 import { getApiKey } from "./settings/credential-store.js";
 import { takeBridgeTokenFromFragment } from "./settings/bridge-pairing.js";
 import { getGenerationSetupStatus, invalidateGenerationSetup } from "./settings/setup-readiness.js";
@@ -8,10 +8,9 @@ import { installTestSeam } from "./test-seam.js";
 import { IdbStore } from "./store/idb-store.js";
 import { openDialog } from "../ui/primitives/dialog.js";
 import { openPopover } from "../ui/primitives/popover.js";
-import { buttonMarkup, iconButtonMarkup } from "../core/html/button-markup.js";
-import { BUNNY_MARK_SVG, iconSvg } from "../core/html/icons.js";
 import { escapeHtml } from "../core/utils.js";
-import { wireNotice } from "../ui/primitives/notice.js";
+import { iconSvg } from "../core/html/icons.js";
+import { closestEl } from "../ui/dom.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
 import { initSettingsSheet, registerSettingsSection } from "../ui/settings-sheet.js";
 import { applyTheme, toggleTheme } from "../ui/preferences.js";
@@ -25,12 +24,25 @@ import {
   getFrozenStylesheet,
 } from "./snapshot-runtime.js";
 import { currentCanvasRuntime, loadCanvasRuntime, warmCanvasRuntime } from "./canvas-runtime-loader.js";
+import { mountWebShell } from "./shell/shell.js";
+import {
+  autoGrowTextarea,
+  formatRelativeDate,
+  isAuthLikeError,
+  isEditableTarget,
+  isMarkdownFile,
+  isPdfFile,
+  isRabbitholeFile,
+  isSingleHttpUrl,
+  isSnapshotFile,
+  safeLocalStorageGet,
+  safeLocalStorageSet,
+} from "./app/utilities.js";
 
 const LAST_HOLE_KEY = "rh-last-hole";
 const GITHUB_REPO_API_URL = "https://api.github.com/repos/shlokkhemani/rabbithole";
 const GITHUB_STARS_CACHE_KEY = "rh-github-stars-v1";
 const GITHUB_STARS_CACHE_TTL = 6 * 60 * 60 * 1000;
-const TOOLBAR_BUNNY_MARK_SVG = iconSvg("bunny", { size: 16 });
 
 const store = new IdbStore();
 let currentHost = null;
@@ -119,84 +131,8 @@ async function boot() {
   });
 }
 
-/* Web-only taskbar controls. The shared shell ships what every host can drive; these
-   two need a hole library and a way to create one, which only the web app has. A
-   function, not a const: renderShell runs before module-level bindings settle. */
-function webToolbarChrome() {
-  return `${iconButtonMarkup({ id: "t-rail", title: "Rabbitholes · S", ariaLabel: "Toggle rabbitholes", ariaExpanded: "false", ariaControls: "web-rail", svgIconHtml: iconSvg("rail") })}` +
-    `${iconButtonMarkup({ id: "t-new", title: "New Rabbithole · N", ariaLabel: "New Rabbithole", svgIconHtml: iconSvg("new") })}`;
-}
-
 function renderShell() {
-  document.documentElement.classList.add("web-canvas-active");
-  document.body.classList.add("mode-canvas", "web-shell");
-  document.body.innerHTML = `<div id="canvas-root">${CANVAS_SHELL}</div>
-    <aside id="web-rail" class="web-rail" aria-label="Rabbitholes" tabindex="-1"></aside>
-    <div id="composer-modal" class="composer-modal" hidden>
-      <div class="composer-card" id="composer-card" tabindex="-1">
-        <section id="composer-start" class="composer-start">
-          <header class="composer-start-head">
-            <span class="composer-title-mark" aria-hidden="true">${BUNNY_MARK_SVG}</span>
-            <h1 id="composer-title">Enter a Rabbithole</h1>
-          </header>
-          <div class="composer-paths" role="group" aria-label="Choose how to begin">
-            <button class="composer-path" id="composer-path-ask" type="button" data-path="ask">
-              <span class="composer-path-icon" aria-hidden="true">${iconSvg("question")}</span>
-              <span class="composer-path-copy"><strong>Ask a question</strong><small>Begin with something you want to understand.</small></span>
-              <span class="composer-path-arrow" aria-hidden="true">→</span>
-            </button>
-            <button class="composer-path" id="composer-path-file" type="button" data-path="file">
-              <span class="composer-path-icon" aria-hidden="true">${iconSvg("file")}</span>
-              <span class="composer-path-copy"><strong>Open a document</strong><small>Bring in a PDF or Markdown file from your device.</small></span>
-              <span class="composer-path-arrow" aria-hidden="true">→</span>
-            </button>
-            <button class="composer-path" id="composer-path-paste" type="button" data-path="paste">
-              <span class="composer-path-icon" aria-hidden="true">${iconSvg("paste")}</span>
-              <span class="composer-path-copy"><strong>Paste text or Markdown</strong><small>Start from your clipboard.</small></span>
-              <span class="composer-path-arrow" aria-hidden="true">→</span>
-            </button>
-            <button class="composer-path" id="composer-path-url" type="button" data-path="url">
-              <span class="composer-path-icon" aria-hidden="true">${iconSvg("link")}</span>
-              <span class="composer-path-copy"><strong>Open a link</strong><small>Start from an article, paper, or webpage.</small></span>
-              <span class="composer-path-arrow" aria-hidden="true">→</span>
-            </button>
-          </div>
-        </section>
-        <section id="composer-entry" class="composer-entry" hidden>
-          <button id="composer-back" class="composer-back" type="button"><span aria-hidden="true">←</span> All options</button>
-          <header class="composer-entry-head">
-            <h2 id="composer-entry-title"></h2>
-            <p id="composer-entry-copy"></p>
-          </header>
-          <textarea id="composer-input" rows="1" autocomplete="off" spellcheck="true"></textarea>
-          <div class="composer-entry-actions">
-            <button id="composer-primary" class="web-primary" type="button"></button>
-          </div>
-        </section>
-        <input id="file-md" type="file" accept=".md,.markdown,.pdf,.rabbithole,.html,text/markdown,text/plain,text/html,application/pdf,application/json" hidden>
-        <div id="ingest-status" class="ingest-status" aria-live="polite" aria-atomic="true"></div>
-      </div>
-    </div>
-    <div id="blank-start" class="blank-start" hidden>
-      <span id="blank-start-new-wrap" class="blank-start-new-wrap">
-        ${buttonMarkup({ bare: true, id: "blank-start-new", className: "blank-start-new", label: "New Rabbithole", kbdHint: "N", svgIconHtml: iconSvg("plus") })}
-        <span id="blank-start-status" class="blank-start-tooltip" role="tooltip">Set up AI before starting a Rabbithole.</span>
-      </span>
-      ${buttonMarkup({ bare: true, id: "blank-start-setup", className: "blank-start-setup", label: "Set up AI" })}
-    </div>
-    <nav id="project-menu" class="project-menu popover-surface" role="menu" aria-label="Rabbithole project" hidden>
-      <div class="project-menu-head" role="presentation">
-        <span class="project-menu-mark" aria-hidden="true">${BUNNY_MARK_SVG}</span>
-        <span><strong>Rabbithole</strong><small>Open source · MIT</small></span>
-      </div>
-      <a class="project-menu-item" role="menuitem" href="/about/" target="_blank" rel="noopener noreferrer"><span>About Rabbithole</span><span aria-hidden="true">↗</span></a>
-      <a class="project-menu-item" role="menuitem" href="/about/#install" target="_blank" rel="noopener noreferrer"><span>Install &amp; self-host</span><span aria-hidden="true">↗</span></a>
-      <a class="project-menu-item project-menu-github" role="menuitem" href="https://github.com/shlokkhemani/rabbithole" target="_blank" rel="noopener noreferrer"><span>GitHub</span><span class="project-menu-meta"><span id="project-github-stars" class="github-star-count" aria-label="GitHub stars"><span aria-hidden="true">★</span> Stars</span><span aria-hidden="true">↗</span></span></a>
-    </nav>
-    <div id="web-toast" class="web-toast"><span data-notice-message></span>${buttonMarkup({ bare: true, label: "Action", hidden: true, dataAttrs: { noticeAction: "" } })}</div>`;
-  toastNotice = wireNotice(document.getElementById("web-toast"), { variant: "toast" });
-  document.getElementById("tb-app")?.insertAdjacentHTML("afterbegin",
-    `${iconButtonMarkup({ className: "toolbar-brand", id: "t-project", title: "About Rabbithole and project links", ariaLabel: "Rabbithole project menu", ariaHaspopup: "menu", ariaControls: "project-menu", ariaExpanded: "false", svgIconHtml: TOOLBAR_BUNNY_MARK_SVG })}<span class="sep toolbar-brand-sep"></span>${webToolbarChrome()}`);
+  toastNotice = mountWebShell();
   railOpen = false;
   applyRailState();
   syncRailPosition();
@@ -229,7 +165,7 @@ function initAppChrome() {
   // the "waiting to pair" panel advance the moment another tab pairs.
   window.addEventListener("storage", (event) => {
     if (event.key !== SETTINGS_KEY) return;
-    refreshCurrentBrain();
+    refreshCurrentProvider();
     syncGenerationSetupUi();
     settingsController?.syncSubscriptionStream();
   });
@@ -239,23 +175,27 @@ function initAppChrome() {
     initialBridgePairing = false;
     consumeInitialBridgePairing();
     if (!initialBridgePairing) return;
-    refreshCurrentBrain();
+    refreshCurrentProvider();
     beginBridgePairingSetup();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") void currentHost?.flushSave();
   });
   window.addEventListener("pagehide", () => {
-    void currentHost?.flushSave();
-    store.close();
+    // UI node/view updates have their own short debounce before they reach the
+    // direct host. Start that flush first so flushSave captures the newest
+    // state synchronously, then keep IndexedDB open until both writes settle.
+    const uiFlush = currentUi?.flush();
+    const hostFlush = currentHost?.flushSave();
+    void Promise.allSettled([uiFlush, hostFlush].filter(Boolean)).finally(() => store.close());
   });
   document.getElementById("t-rail")?.addEventListener("click", () => toggleRail());
-  document.getElementById("t-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: event.currentTarget }));
+  document.getElementById("t-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: /** @type {HTMLElement} */ (event.currentTarget) }));
   const projectTrigger = document.getElementById("t-project");
   const projectMenu = document.getElementById("project-menu");
   projectTrigger?.addEventListener("click", () => projectMenuPopover ? closeProjectMenu() : openProjectMenu());
   projectMenu?.addEventListener("click", (event) => {
-    if (event.target.closest("a")) closeProjectMenu({ restoreFocus: false });
+    if (closestEl(event.target, "a")) closeProjectMenu({ restoreFocus: false });
   });
   projectMenu?.addEventListener("keydown", moveProjectMenuFocus);
   const settingsTrigger = document.getElementById("t-settings");
@@ -266,20 +206,20 @@ function initAppChrome() {
   initSettingsSheet({ hostLabel: "Web" });
   settingsTrigger?.addEventListener("pointerenter", warmSettingsRuntime, { passive: true });
   settingsTrigger?.addEventListener("focus", warmSettingsRuntime, { passive: true });
-  document.getElementById("blank-start-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: event.currentTarget }));
-  document.getElementById("blank-start-setup")?.addEventListener("click", (event) => openModelSetup({ trigger: event.currentTarget }));
+  document.getElementById("blank-start-new")?.addEventListener("click", (event) => requestNewRabbithole({ source: "button", trigger: /** @type {HTMLElement} */ (event.currentTarget) }));
+  document.getElementById("blank-start-setup")?.addEventListener("click", (event) => openModelSetup({ trigger: /** @type {HTMLElement} */ (event.currentTarget) }));
   syncGenerationSetupUi();
   rail?.addEventListener("click", async (event) => {
-    const row = event.target?.closest?.(".rail-row");
+    const row = closestEl(event.target, ".rail-row");
     if (!row) return;
     const id = row.dataset.hole;
-    if (event.target.closest(".rail-delete")) {
+    if (closestEl(event.target, ".rail-delete")) {
       event.preventDefault();
       event.stopPropagation();
       await deleteHoleFromRail(id);
       return;
     }
-    if (event.target.closest(".rail-open")) {
+    if (closestEl(event.target, ".rail-open")) {
       event.preventDefault();
       if (!id || id === currentHoleId) return;
       await currentHost?.flushSave();
@@ -342,7 +282,7 @@ async function loadGithubStars() {
   const cached = readGithubStarsCache();
   if (cached) {
     renderGithubStars(cached.count);
-    if (Date.now() - cached.updatedAt < GITHUB_STARS_CACHE_TTL) return;
+    if (systemClock.now() - cached.updatedAt < GITHUB_STARS_CACHE_TTL) return;
   }
   if (githubStarsPromise) return githubStarsPromise;
   githubStarsPromise = fetch(GITHUB_REPO_API_URL, {
@@ -352,7 +292,7 @@ async function loadGithubStars() {
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
     const count = Number((await response.json())?.stargazers_count);
     if (!Number.isFinite(count) || count < 0) throw new Error("GitHub returned an invalid star count");
-    const value = { count: Math.floor(count), updatedAt: Date.now() };
+    const value = { count: Math.floor(count), updatedAt: systemClock.now() };
     safeLocalStorageSet(GITHUB_STARS_CACHE_KEY, JSON.stringify(value));
     renderGithubStars(value.count);
   }).catch(() => {}).finally(() => {
@@ -419,9 +359,9 @@ async function openHistoryLocation() {
 
 function initComposer() {
   const modal = document.getElementById("composer-modal");
-  const input = document.getElementById("composer-input");
+  const input = /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input"));
   const primary = document.getElementById("composer-primary");
-  const fileInput = document.getElementById("file-md");
+  const fileInput = /** @type {HTMLInputElement} */ (document.getElementById("file-md"));
 
   input.addEventListener("input", () => {
     autoGrowTextarea(input, composerInputMaxHeight());
@@ -457,7 +397,7 @@ function initComposer() {
     });
   }
   modal.addEventListener("drop", async (event) => {
-    const file = event.dataTransfer?.files?.[0];
+    const file = /** @type {DragEvent} */ (event).dataTransfer?.files?.[0];
     if (file) await createFromFile(file);
   });
 }
@@ -466,7 +406,7 @@ function initGlobalDrops() {
   const viewport = document.getElementById("viewport");
   for (const type of ["dragenter", "dragover"]) {
     viewport.addEventListener(type, (event) => {
-      if (currentHoleId || !event.dataTransfer?.types?.includes("Files")) return;
+      if (currentHoleId || !/** @type {DragEvent} */ (event).dataTransfer?.types?.includes("Files")) return;
       event.preventDefault();
       if (getGenerationSetupStatus().ready) document.body.classList.add("blank-dragging");
     });
@@ -480,7 +420,7 @@ function initGlobalDrops() {
   }
   viewport.addEventListener("drop", async (event) => {
     if (currentHoleId) return;
-    const file = event.dataTransfer?.files?.[0];
+    const file = /** @type {DragEvent} */ (event).dataTransfer?.files?.[0];
     if (!file) return;
     if (!getGenerationSetupStatus().ready) {
       openModelSetup({ trigger: document.getElementById("blank-start-setup") });
@@ -491,6 +431,7 @@ function initGlobalDrops() {
   });
 }
 
+/** @param {{source?: string, value?: string, trigger?: HTMLElement | null}} [options] */
 function requestNewRabbithole({ source = "button", value = "", trigger } = {}) {
   if (!getGenerationSetupStatus().ready) {
     openModelSetup({ trigger });
@@ -499,9 +440,10 @@ function requestNewRabbithole({ source = "button", value = "", trigger } = {}) {
   openComposer({ source, value, trigger });
 }
 
+/** @param {{trigger?: HTMLElement | null, status?: string, onReady?: Function | null}} [options] */
 async function openModelSetup({ trigger, status = "", onReady = null } = {}) {
   const blankSetup = document.getElementById("blank-start-setup");
-  const safeTrigger = trigger?.disabled ? (blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings")) : trigger;
+  const safeTrigger = trigger instanceof HTMLButtonElement && trigger.disabled ? (blankSetup?.offsetParent !== null ? blankSetup : document.getElementById("t-settings")) : trigger;
   const controller = await loadSettingsController();
   controller.open({ trigger: safeTrigger || document.getElementById("t-settings"), purpose: status ? "recovery" : "setup", status, onReady });
 }
@@ -536,13 +478,14 @@ function syncGenerationSetupUi() {
   if (status) status.hidden = setup.ready;
 }
 
+/** @param {{source?: string, value?: string, trigger?: HTMLElement | null}} [options] */
 function openComposer({ source = "button", value = "", trigger } = {}) {
   if (!getGenerationSetupStatus().ready) {
     openModelSetup({ trigger });
     return;
   }
   const modal = document.getElementById("composer-modal");
-  const input = document.getElementById("composer-input");
+  const input = /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input"));
   const card = document.getElementById("composer-card");
 
   composerPath = "";
@@ -598,7 +541,7 @@ function selectComposerPath(path, { value = "" } = {}) {
   }[path];
   if (!config) return;
   composerPath = path;
-  const input = document.getElementById("composer-input");
+  const input = /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input"));
   document.getElementById("composer-start").hidden = true;
   document.getElementById("composer-entry").hidden = false;
   document.getElementById("composer-card").dataset.path = path;
@@ -621,12 +564,12 @@ function showComposerStart() {
   document.getElementById("composer-card").removeAttribute("data-path");
   document.getElementById("composer-entry").hidden = true;
   document.getElementById("composer-start").hidden = false;
-  document.getElementById("composer-input").value = "";
+  /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input")).value = "";
   document.getElementById("composer-card").focus({ preventScroll: true });
 }
 
 async function runComposer() {
-  const input = document.getElementById("composer-input");
+  const input = /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input"));
   const value = input.value.trim();
   if (composerPath === "url") return createFromUrl(value);
   if (composerPath === "ask") return createFromAsk(value);
@@ -795,11 +738,11 @@ async function maybeAuthorDocument({
   const settings = loadSettings();
   const key = getApiKey(settings);
   setIngestStatus("Improving structure with the model...", "busy");
-  const brain = runtime.createBrain(settings, key);
+  const provider = runtime.createProvider(settings, key);
   const root = hole.nodes[0];
   root.status = "pending";
   root.markdown = "";
-  const host = new runtime.DirectRabbitholeHost({ store, hole, brain });
+  const host = new runtime.DirectRabbitholeHost({ store, hole, provider });
   return host.authorDocument({
     title,
     markdown,
@@ -850,12 +793,12 @@ async function mountHole(hole, { replace = false } = {}) {
     currentPdfTranscriptionCapability = workspaceRuntime.pdfTranscriptionCapability(loadSettings());
   }
   const settings = loadSettings();
-  const brain = brainForSettings(settings);
+  const provider = providerForSettings(settings);
   const host = new workspaceRuntime.DirectRabbitholeHost({
     store,
     hole,
-    brain,
-    brainRequiredError: brainRequiredErrorForSettings(settings),
+    provider,
+    providerRequiredError: providerRequiredErrorForSettings(settings),
     registerAssetUrl: (name, blob) => currentAssetLease?.register(name, blob),
     revokeAssetUrl: (name) => currentAssetLease?.revoke(name),
     onToast: (notice) => { if (currentHost === host) showToast(notice); },
@@ -962,7 +905,7 @@ async function renderRail({ refresh = true, firstHoleId = null } = {}) {
   if (!rail) return;
   if (refresh || !railSummaries) railSummaries = await store.listHoles();
   const summaries = firstHoleId
-    ? [...railSummaries].sort((a, b) => (b.hole_id === firstHoleId) - (a.hole_id === firstHoleId))
+    ? [...railSummaries].sort((a, b) => Number(b.hole_id === firstHoleId) - Number(a.hole_id === firstHoleId))
     : railSummaries;
   lastHoleCount = summaries.length;
   let inner = rail.querySelector(":scope > .rail-inner");
@@ -972,7 +915,7 @@ async function renderRail({ refresh = true, firstHoleId = null } = {}) {
     list = document.createElement("div"); list.className = "rail-list"; list.id = "rail-list";
     inner.appendChild(list); rail.replaceChildren(inner);
   }
-  const rows = new Map(Array.from(list.querySelectorAll(".rail-row"), (row) => [row.dataset.hole, row]));
+  const rows = new Map(Array.from(/** @type {NodeListOf<HTMLElement>} */ (list.querySelectorAll(".rail-row")), (row) => [row.dataset.hole, row]));
   const next = summaries.map((summary) => {
     const row = rows.get(summary.hole_id) || createRailRow(summary.hole_id);
     patchRailRow(row, summary);
@@ -1100,13 +1043,13 @@ function applyRailState() {
   }
 }
 
-function refreshCurrentBrain(settings = loadSettings()) {
+function refreshCurrentProvider(settings = loadSettings()) {
   if (!currentHost) return;
-  currentHost.brain = brainForSettings(settings);
-  currentHost.brainRequiredError = brainRequiredErrorForSettings(settings);
+  currentHost.provider = providerForSettings(settings);
+  currentHost.providerRequiredError = providerRequiredErrorForSettings(settings);
 }
 
-function brainForSettings(settings) {
+function providerForSettings(settings) {
   const runtime = loadedWorkspaceRuntime;
   if (!runtime) return null;
   const preset = providerFor(settings.preset);
@@ -1115,10 +1058,10 @@ function brainForSettings(settings) {
   if (preset.id === "subscriptions" && !key) return null;
   if (preset.requires_base_url && !runtime.isHttpUrl(settings.base_url)) return null;
   if (!String(settings.model || preset.model || "").trim()) return null;
-  return runtime.createBrain(settings, key);
+  return runtime.createProvider(settings, key);
 }
 
-function brainRequiredErrorForSettings(settings) {
+function providerRequiredErrorForSettings(settings) {
   return providerFor(settings.preset).id === "subscriptions"
     ? { message: "Connect your Claude or ChatGPT plan to keep asking.", code: "subscription_unpaired" }
     : null;
@@ -1143,7 +1086,7 @@ async function refreshPdfTranscriptionCapability(settings = loadSettings()) {
   if (detected.recommendedModel) {
     const next = { ...settings, transcribe_model: detected.recommendedModel };
     saveSettings({ ...next, api_key: getApiKey(settings) });
-    refreshCurrentBrain(next);
+    refreshCurrentProvider(next);
     detected = await runtime.detectPdfTranscriptionCapability(next);
     if (token !== pdfTranscriptionCheckToken) return currentPdfTranscriptionCapability;
   }
@@ -1259,12 +1202,12 @@ function loadSettingsRuntime() {
           const current = loadSettings();
           saveSettings({ ...current, model, transcribe_model: transcribeModel, api_key: getApiKey(current) });
           settingsController?.completeLocalSetup?.();
-          refreshCurrentBrain();
+          refreshCurrentProvider();
           syncGenerationSetupUi();
           if (currentHoleNeedsPdfTranscription()) await refreshPdfTranscriptionCapability();
         },
         onSettingsChange: () => {
-          refreshCurrentBrain();
+          refreshCurrentProvider();
           syncGenerationSetupUi();
           if (currentHoleNeedsPdfTranscription()) void refreshPdfTranscriptionCapability();
           else void loadWorkspaceRuntime().then((runtime) => {
@@ -1331,7 +1274,7 @@ function warmWorkspaceRuntime() {
 }
 
 function retryBranch(node, retry) {
-  refreshCurrentBrain();
+  refreshCurrentProvider();
   retry?.();
   showToast({ message: `Retrying "${node?.title || "ask"}".` });
 }
@@ -1377,6 +1320,7 @@ async function createLiveAssetData(holeId) {
   };
 }
 
+/** @param {{message?: string, actionLabel?: string, timeoutMs?: number, onAction?: Function | null}} [options] */
 function showToast({ message, actionLabel = "", timeoutMs = 4000, onAction = null } = {}) {
   toastNotice?.show({ message, actionLabel, onAction, duration: timeoutMs });
 }
@@ -1397,92 +1341,10 @@ function setBlankZoom(value) {
   if (label && !currentHoleId) label.textContent = `${Math.round(blankZoom * 100)}%`;
 }
 
-function isPdfFile(file) {
-  const name = String(file?.name || "").toLowerCase();
-  const type = String(file?.type || "").toLowerCase();
-  return /\.pdf$/.test(name) || type === "application/pdf";
-}
-
-function isRabbitholeFile(file) {
-  return /\.rabbithole$/i.test(file?.name || "");
-}
-
-function isSnapshotFile(file) {
-  const name = String(file?.name || "").toLowerCase();
-  const type = String(file?.type || "").toLowerCase();
-  return /\.html?$/.test(name) || type === "text/html";
-}
-
-function isMarkdownFile(file) {
-  const name = String(file?.name || "").toLowerCase();
-  const type = String(file?.type || "").toLowerCase();
-  return /\.(md|markdown)$/.test(name) ||
-    type === "text/markdown" || type === "text/plain" || type === "application/json";
-}
-
-function isSingleHttpUrl(value) {
-  const text = String(value || "").trim();
-  if (!text || /\s/.test(text)) return false;
-  try {
-    const url = new URL(text);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function formatRelativeDate(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return "Updated at an unknown time";
-  const deltaSeconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const abs = Math.abs(deltaSeconds);
-  const ranges = [
-    [60, "second", 1],
-    [60 * 60, "minute", 60],
-    [60 * 60 * 24, "hour", 60 * 60],
-    [60 * 60 * 24 * 30, "day", 60 * 60 * 24],
-    [60 * 60 * 24 * 365, "month", 60 * 60 * 24 * 30],
-    [Infinity, "year", 60 * 60 * 24 * 365],
-  ];
-  try {
-    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-    const [, unit, divisor] = ranges.find(([limit]) => abs < limit);
-    const formatted = formatter.format(Math.round(deltaSeconds / divisor), unit);
-    return `Updated ${formatted}`;
-  } catch {
-    return date.toLocaleString(undefined, { month: "short", day: "numeric" });
-  }
-}
-
-function isAuthLikeError(err) {
-  return err?.status === 401 ||
-    err?.status === 403 ||
-    err?.code === "missing_key" ||
-    /api key|401|403|unauthorized|forbidden/i.test(err?.message || String(err));
-}
-
-function autoGrowTextarea(textarea, maxHeight) {
-  textarea.style.height = "auto";
-  textarea.style.height = `${Math.min(maxHeight, textarea.scrollHeight)}px`;
-  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
-}
-
 function composerInputMaxHeight() {
   return composerPath === "paste" ? 360 : 240;
 }
 
-function isEditableTarget(target) {
-  return !!target?.closest?.("input, textarea, select, [contenteditable='true']");
-}
-
 function applyInitialWebTheme() {
   try { applyTheme(); } catch {}
-}
-
-function safeLocalStorageGet(key) {
-  try { return localStorage.getItem(key) || ""; } catch { return ""; }
-}
-
-function safeLocalStorageSet(key, value) {
-  try { localStorage.setItem(key, value); } catch {}
 }

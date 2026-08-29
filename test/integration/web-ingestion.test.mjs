@@ -1,3 +1,4 @@
+/** @protects web ingestion capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -63,6 +64,7 @@ const transcribeBodies = [];
 let transcribeMode = "stream";
 let localVisionAvailable = true;
 let holdNextAnswer = false;
+/** @type {null | (() => void)} */
 let releaseHeldAnswer = null;
 let rejectNextInheritedImage = false;
 await page.route("http://localhost:11434/v1/models", (route) => route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ data: [{ id: "llama3.2" }, { id: "llama3.2-vision" }] }) }));
@@ -89,7 +91,7 @@ await page.route("http://localhost:11434/v1/chat/completions", async (route) => 
   }
   if (holdNextAnswer) {
     holdNextAnswer = false;
-    await new Promise((resolve) => { releaseHeldAnswer = resolve; });
+    await new Promise((resolve) => { releaseHeldAnswer = () => resolve(); });
     releaseHeldAnswer = null;
   }
   await route.fulfill({ status: 200, headers: { ...corsHeaders(), "Content-Type": "text/event-stream" }, body: sse(["# PDF branch\n\n", "Streamed from selected prose."]) });
@@ -103,9 +105,9 @@ try {
   requests.length = 0;
   const pdfBytes = await readAttentionPdf();
   await dropPdf(page, pdfBytes, "AtTeNtIoN-Is-AlL-YoU-NeEd.PdF", "");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
   await page.waitForFunction(() => {
-    const canvas = document.querySelector(".node .rh-pdf-canvas-generation canvas");
+    const canvas = document.querySelector(".card .rh-pdf-canvas-generation canvas");
     return !!canvas && canvas.width > 0 && canvas.height > 0;
   });
 
@@ -120,7 +122,7 @@ try {
     const { names: assets, sizes } = await window.__rabbitholeTest.inspectAssets(holeId);
     const raw = await window.__rabbitholeTest.readStoredHole(holeId);
     const root = raw.nodes.find((node) => !node.parent_id);
-    const canvas = document.querySelector(".node .rh-pdf-canvas-generation canvas");
+    const canvas = document.querySelector(".card .rh-pdf-canvas-generation canvas");
     const rect = canvas.getBoundingClientRect();
     return { assets, sizes, root, backingRatio: canvas.width / rect.width, raw: JSON.stringify(raw) };
   });
@@ -138,25 +140,25 @@ try {
 
   const localZoomBefore = await page.evaluate(() => ({
     world: document.querySelector("#world").style.transform,
-    width: document.querySelector(".node .rh-pdf-page").getBoundingClientRect().width,
-    label: document.querySelector(".node .rh-pdf-zoom-value").textContent,
+    width: document.querySelector(".card .rh-pdf-page").getBoundingClientRect().width,
+    label: document.querySelector(".card .rh-pdf-zoom-value").textContent,
   }));
-  await page.locator(".node .rh-pdf-scroll").hover();
+  await page.locator(".card .rh-pdf-scroll").hover();
   await page.keyboard.down("Control");
   await page.mouse.wheel(0, -100);
   await page.keyboard.up("Control");
-  await page.waitForFunction((label) => document.querySelector(".node .rh-pdf-zoom-value")?.textContent !== label, localZoomBefore.label);
+  await page.waitForFunction((label) => document.querySelector(".card .rh-pdf-zoom-value")?.textContent !== label, localZoomBefore.label);
   const localZoom = { before: localZoomBefore, after: await page.evaluate(() => ({
     world: document.querySelector("#world").style.transform,
-    width: document.querySelector(".node .rh-pdf-page").getBoundingClientRect().width,
-    label: document.querySelector(".node .rh-pdf-zoom-value").textContent,
+    width: document.querySelector(".card .rh-pdf-page").getBoundingClientRect().width,
+    label: document.querySelector(".card .rh-pdf-zoom-value").textContent,
   })) };
   assert.equal(localZoom.after.world, localZoom.before.world, "Ctrl+wheel over a PDF must never zoom the canvas camera");
   assert.notEqual(localZoom.after.label, localZoom.before.label, "Ctrl+wheel must update local PDF zoom");
   assert(localZoom.after.width > localZoom.before.width, "local PDF zoom must enlarge the source-rendered page");
-  await page.click(".node .rh-pdf-zoom-value");
+  await page.click(".card .rh-pdf-zoom-value");
   const selected = await page.evaluate(() => {
-    const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
+    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
     const text = span.firstChild, range = document.createRange();
     range.setStart(text, 0); range.setEnd(text, "Attention".length);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
@@ -167,9 +169,9 @@ try {
   assert.equal(selected, "Attention");
   await page.waitForSelector("#ask.visible");
   await page.click('#ask-actions .lens[data-lens="explain"]');
-  const mark = page.locator(".node .rh-pdf-mark.mark-ready").first();
+  const mark = page.locator(".card .rh-pdf-mark.mark-ready").first();
   await mark.waitFor();
-  assert.equal(await page.locator(".node .rh-pdf-convert").count(), 0, "creating the first branch should immediately remove the text-version action");
+  assert.equal(await page.locator(".card .rh-pdf-convert").count(), 0, "creating the first branch should immediately remove the text-version action");
   assert.equal(answerBodies.length, 2, "vision rejection should trigger exactly one text-only retry");
   assert.equal(answerCallsAfterImport, 0, "PDF import may inspect local model capabilities but must not invoke model inference");
   assert(Array.isArray(answerBodies[0].messages.at(-1).content), "paper text selection should ship multimodal content parts");
@@ -192,17 +194,17 @@ try {
   assert.equal(firstClip.cropAsset, undefined, "v2 provenance stores coordinates, never a crop image");
   assert.equal(firstClip.markdown.includes("asset:"), false, "clip provenance must not enter the answer body");
 
-  const boxToggle = page.locator(".node .rh-pdf-box-toggle").first();
+  const boxToggle = page.locator(".card .rh-pdf-box-toggle").first();
   assert.equal(await boxToggle.textContent(), "Ask about an area");
   assert.equal(await boxToggle.getAttribute("aria-label"), "Ask about an area of the PDF");
   await boxToggle.click();
-  await page.waitForSelector(".node .rh-pdf.rh-pdf-box-mode");
+  await page.waitForSelector(".card .rh-pdf.rh-pdf-box-mode");
   assert.equal(await boxToggle.getAttribute("aria-pressed"), "true");
   await page.keyboard.press("Escape");
-  await page.waitForFunction(() => !document.querySelector(".node .rh-pdf.rh-pdf-box-mode"));
+  await page.waitForFunction(() => !document.querySelector(".card .rh-pdf.rh-pdf-box-mode"));
   assert.equal(await boxToggle.getAttribute("aria-pressed"), "false", "Escape must exit region-select mode");
   await boxToggle.click();
-  const secondPage = page.locator(".node .rh-pdf-page[data-page='2']").first();
+  const secondPage = page.locator(".card .rh-pdf-page[data-page='2']").first();
   await secondPage.scrollIntoViewIfNeeded();
   const pageBox = await secondPage.boundingBox();
   await page.mouse.move(pageBox.x + pageBox.width * .05, pageBox.y + pageBox.height * .65);
@@ -212,11 +214,11 @@ try {
   await page.waitForSelector("#ask.visible");
   holdNextAnswer = true;
   await page.click('#ask-actions .lens[data-lens="explain"]');
-  await page.waitForFunction(() => document.querySelectorAll(".node").length >= 3);
+  await page.waitForFunction(() => document.querySelectorAll(".card").length >= 3);
   const pendingBoxClip = await page.evaluate(async () => {
     const hole = await window.__rabbitholeTest.readStoredHole();
     const node = hole.nodes.filter((entry) => entry.parent_id).at(-1);
-    const card = document.querySelector(`.node[data-id="${node.id}"]`);
+    const card = document.querySelector(`.card[data-id="${node.id}"]`);
     return {
       id: node.id,
       cropAsset: node.origin?.crop_asset,
@@ -227,8 +229,8 @@ try {
   assert.equal(pendingBoxClip.pending, true, "provider response should still be held while the clip is visible");
   for (let i = 0; i < 100 && !releaseHeldAnswer; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert(releaseHeldAnswer, "box answer route should be held for the pending-origin assertion");
-  releaseHeldAnswer();
-  await page.waitForFunction(() => document.querySelectorAll(".node .rh-pdf-mark.mark-ready").length >= 2);
+  releaseHeldAnswer?.();
+  await page.waitForFunction(() => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= 2);
   await page.waitForFunction(() => document.querySelectorAll(".rh-pdf-box-draft").length === 0, undefined, { timeout: 5000 });
   assert.equal(answerBodies.length, 3);
   assert(Array.isArray(answerBodies[2].messages.at(-1).content), "box ask should ship its crop as an image part");
@@ -250,12 +252,12 @@ try {
   assert.deepEqual(boxClip.assetNames, [pdfState.root.extensions.pdf.source.asset], "portable state must contain the source PDF, never interaction crops");
   assert.equal(boxClip.markdown.includes("asset:"), false, "answer markdown must stay clean of crop provenance");
 
-  const boxCard = page.locator(`.node[data-id="${boxClip.id}"]`);
+  const boxCard = page.locator(`.card[data-id="${boxClip.id}"]`);
   rejectNextInheritedImage = true;
   await boxCard.locator(".nc-handle").evaluate((el) => el.click());
   await boxCard.locator(".nc-inner textarea").fill("What follows from this clip?");
   await boxCard.locator('.ask-commit[data-commit="ask"]').evaluate((el) => el.click());
-  await page.waitForFunction(() => window.__rabbitholeTest && document.querySelectorAll(".node").length >= 4);
+  await page.waitForFunction(() => window.__rabbitholeTest && document.querySelectorAll(".card").length >= 4);
   for (let i = 0; i < 100 && answerBodies.length < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert(Array.isArray(answerBodies[3].messages.at(-1).content), "follow-up from a clip card must inherit its image");
   assert.equal(answerBodies[3].messages.at(-1).content[1].image_url.url, boxImageUrl, "follow-ups must re-render the same source region deterministically");
@@ -263,7 +265,7 @@ try {
   assert.equal(typeof answerBodies[4].messages.at(-1).content, "string", "inherited images must use the same text-only retry path");
 
   await page.evaluate((clipId) => {
-    const dc = document.querySelector(`.node[data-id="${clipId}"] .doc-content`);
+    const dc = document.querySelector(`.card[data-id="${clipId}"] .doc-content`);
     const walker = document.createTreeWalker(dc, NodeFilter.SHOW_TEXT);
     let text; while ((text = walker.nextNode()) && !text.data.includes("Streamed")) {}
     const start = text.data.indexOf("Streamed"), range = document.createRange();
@@ -278,9 +280,9 @@ try {
   assert(Array.isArray(answerBodies[5].messages.at(-1).content), "text selection from a clip card must inherit its image");
   assert.equal(answerBodies[5].messages.at(-1).content[1].image_url.url, boxImageUrl);
 
-  await boxCard.locator(".node-more").evaluate((el) => el.click());
+  await boxCard.locator(".card-more").evaluate((el) => el.click());
   await page.locator("#cardmenu").locator("#cm-delete").evaluate((el) => el.click());
-  await page.waitForFunction((id) => !document.querySelector(`.node[data-id="${id}"]`), boxClip.id);
+  await page.waitForFunction((id) => !document.querySelector(`.card[data-id="${id}"]`), boxClip.id);
   await page.waitForSelector("#branch-undo:not(.visible)", { state: "attached", timeout: 8000 });
   assert.deepEqual((await page.evaluate(async () => (await window.__rabbitholeTest.inspectAssets()).names)), [pdfState.root.extensions.pdf.source.asset], "deleting a branch must not delete the source still owned by the PDF root");
   await reloadReadyApp(page);
@@ -374,10 +376,10 @@ try {
   await page.click("#t-new");
   const attentionTwoPages = await readAttentionPdfTwoPage();
   await dropPdf(page, attentionTwoPages, "attention-convert.pdf");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
-  await page.click(".node .rh-pdf-convert");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
+  await page.click(".card .rh-pdf-convert");
   await page.waitForFunction(() => {
-    const dc = document.querySelector(".node .doc-content:not(.rh-pdf)");
+    const dc = document.querySelector(".card .doc-content:not(.rh-pdf)");
     if (!dc || !dc.textContent.includes("Converted Doc")) return false;
     const img = dc.querySelector("img[alt='Attention diagram']");
     return !!img && img.complete && img.naturalWidth > 0;
@@ -398,7 +400,7 @@ try {
   assert(convertedState.names.includes("fig-p002-1.png"));
   await reloadReadyApp(page);
   await page.waitForFunction(() => {
-    const dc = document.querySelector(".node .doc-content:not(.rh-pdf)");
+    const dc = document.querySelector(".card .doc-content:not(.rh-pdf)");
     return !!dc && dc.textContent.includes("Converted Doc");
   });
 
@@ -407,14 +409,14 @@ try {
   await gotoReadyApp(page, baseUrl);
   await page.click("#t-new");
   await dropPdf(page, attentionTwoPages, "attention-cancel.pdf");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
-  await page.click(".node .rh-pdf-convert");
-  await page.waitForSelector(".node .rh-pdf-convert-progress");
-  assert.match(await page.textContent(".node .rh-pdf-convert-progress"), /Creating text version/);
-  assert((await page.locator(".node .rh-pdf-convert-progress .sk-line").count()) > 0, "converting must show the loading skeleton");
-  assert(!(await page.textContent(".node .doc-content")).includes("Attention Is All You Need"), "the raw paper extraction must not render while converting");
-  await page.click(".node .rh-pdf-convert-cancel");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
+  await page.click(".card .rh-pdf-convert");
+  await page.waitForSelector(".card .rh-pdf-convert-progress");
+  assert.match(await page.textContent(".card .rh-pdf-convert-progress"), /Creating text version/);
+  assert((await page.locator(".card .rh-pdf-convert-progress .sk-line").count()) > 0, "converting must show the loading skeleton");
+  assert(!(await page.textContent(".card .doc-content")).includes("Attention Is All You Need"), "the raw paper extraction must not render while converting");
+  await page.click(".card .rh-pdf-convert-cancel");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
   const abortedState = await page.evaluate(async () => {
     const hole = await window.__rabbitholeTest.readStoredHole();
     return hole.nodes.find((node) => !node.parent_id);
@@ -424,9 +426,9 @@ try {
   transcribeMode = "stream";
 
   // ---- Convert is disabled once the document has branches ------------------
-  await page.waitForFunction(() => [...document.querySelectorAll(".node .rh-pdf-textlayer span")].some((el) => el.textContent === "Attention Is All You Need"));
+  await page.waitForFunction(() => [...document.querySelectorAll(".card .rh-pdf-textlayer span")].some((el) => el.textContent === "Attention Is All You Need"));
   const askSelected = await page.evaluate(() => {
-    const span = [...document.querySelectorAll(".node .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
+    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
     const text = span.firstChild, range = document.createRange();
     range.setStart(text, 0); range.setEnd(text, 9);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
@@ -437,18 +439,18 @@ try {
   assert.equal(askSelected, "Attention");
   await page.waitForSelector("#ask.visible");
   await page.click('#ask-actions .lens[data-lens="explain"]');
-  await page.locator(".node .rh-pdf-mark.mark-ready").first().waitFor();
+  await page.locator(".card .rh-pdf-mark.mark-ready").first().waitFor();
   await reloadReadyApp(page);
-  assert.equal(await page.locator(".node .rh-pdf-convert").count(), 0, "the text-version action must stay absent after reloading a branched PDF");
+  assert.equal(await page.locator(".card .rh-pdf-convert").count(), 0, "the text-version action must stay absent after reloading a branched PDF");
 
   // ---- Scanned PDFs surface the convert affordance -------------------------
   await gotoReadyApp(page, baseUrl);
   await page.click("#t-new");
   await dropPdf(page, buildTinyPdf(["", ""]), "scanned.pdf");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
-  assert.equal(await page.locator(".node .rh-pdf-scanned-note").count(), 0, "a scanned PDF must not add explanatory copy to the control bar");
-  assert.equal(await page.locator(".node .rh-pdf-box-toggle").isEnabled(), true, "area selection must remain available for a scanned PDF");
-  await page.waitForSelector(".node .rh-pdf-convert.primary:not(:disabled)");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='2']");
+  assert.equal(await page.locator(".card .rh-pdf-scanned-note").count(), 0, "a scanned PDF must not add explanatory copy to the control bar");
+  assert.equal(await page.locator(".card .rh-pdf-box-toggle").isEnabled(), true, "area selection must remain available for a scanned PDF");
+  await page.waitForSelector(".card .rh-pdf-convert.primary:not(:disabled)");
   const scannedBody = await page.evaluate(async () => (await window.__rabbitholeTest.readStoredHole()).nodes[0].markdown);
   assert.match(scannedBody, /\*\(page 1: no extractable text\)\*/, "scanned pages must carry the body marker");
 
@@ -457,10 +459,10 @@ try {
   await gotoReadyApp(page, baseUrl);
   await page.click("#t-new");
   await dropPdf(page, attentionTwoPages, "attention-no-local-vision.pdf");
-  await page.waitForSelector(".node .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
-  await page.waitForSelector(".node .rh-pdf-convert:disabled");
-  assert.equal(await page.locator(".node .rh-pdf-transcription-note").count(), 0, "model setup guidance must not displace PDF controls");
-  assert.equal(await page.locator(".node .rh-pdf-convert").getAttribute("title"), "Install a local model that supports vision to enable PDF transcription.");
+  await page.waitForSelector(".card .doc-content.rh-pdf .rh-pdf-page[data-page='1']");
+  await page.waitForSelector(".card .rh-pdf-convert:disabled");
+  assert.equal(await page.locator(".card .rh-pdf-transcription-note").count(), 0, "model setup guidance must not displace PDF controls");
+  assert.equal(await page.locator(".card .rh-pdf-convert").getAttribute("title"), "Install a local model that supports vision to enable PDF transcription.");
 
   // ---- A corrupt PDF fails with an actionable message, no stranded hole ----
   await gotoReadyApp(page, baseUrl);
@@ -497,7 +499,7 @@ try {
       "PDF import couldn't start because part of Rabbithole failed to load. Reload Rabbithole and try again — your PDF is not the problem.",
     );
     await dropPdf(retryPage, retryPdf, "runtime-second-attempt.pdf");
-    await retryPage.waitForSelector(".node .rh-pdf-page[data-page='1']");
+    await retryPage.waitForSelector(".card .rh-pdf-page[data-page='1']");
     assert(runtimeRequests >= 2, "retry must use a fresh PDF.js module request after a transient load failure");
   } finally {
     await retryContext.close();
@@ -574,12 +576,14 @@ async function dropPdf(page, bytes, name = "math-fixture.pdf", type = "applicati
 async function setFetchProxy(page, url) {
   await page.evaluate((value) => {
     const settings = JSON.parse(localStorage.getItem("rh-web-settings") || "{}");
-    localStorage.setItem("rh-web-settings", JSON.stringify({ ...settings, fetch_proxy_url: value }));
+    const next = JSON.stringify({ ...settings, fetch_proxy_url: value });
+    localStorage.setItem("rh-web-settings", next);
+    window.dispatchEvent(new StorageEvent("storage", { key: "rh-web-settings", newValue: next }));
   }, url);
 }
 
 async function waitForCanvasText(page, text) {
-  await page.locator(".node", { hasText: text }).first().waitFor();
+  await page.locator(".card", { hasText: text }).first().waitFor();
 }
 
 function articleHtml(title) {

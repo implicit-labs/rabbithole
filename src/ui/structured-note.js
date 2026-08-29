@@ -1,20 +1,27 @@
-import { sanitizeMarkdownImageUrl, sanitizeMarkdownLinkUrl } from "../core/markdown-renderer.js";
 import { resolveMarkdownUrl } from "../core/base-url.js";
+import { sanitizeMarkdownImageUrl, sanitizeMarkdownLinkUrl } from "../core/markdown-renderer.js";
 import { renderMarkdownForSurface, resolveAssetUrl } from "./renderer.js";
 
 function escapeText(value) {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/([`*_[\]<>])/g, "\\$1");
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_[\]<>])/g, "\\$1");
 }
 
 function decodeUtf8Base64(value) {
   try {
     const binary = atob(String(value || ""));
-    return new TextDecoder().decode(Uint8Array.from(binary, character => character.charCodeAt(0)));
-  } catch { return ""; }
+    return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
+  } catch {
+    return "";
+  }
 }
 
 function compactBlocks(parts) {
-  return parts.map(part => String(part || "").trimEnd()).filter(Boolean).join("\n\n");
+  return parts
+    .map((part) => String(part || "").trimEnd())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function inlineMarkdown(node) {
@@ -24,13 +31,22 @@ function inlineMarkdown(node) {
   if (element.matches("button, .code-copy, .rh-img-handle")) return "";
   if (element.matches(".rh-img-frame")) return inlineMarkdown(element.querySelector("img"));
   if (element.matches(".katex, .katex-display") && element.dataset.mathSource != null) {
-    return element.matches(".katex-display") ? "$$\n" + element.dataset.mathSource + "\n$$" : "$" + element.dataset.mathSource + "$";
+    return element.matches(".katex-display")
+      ? "$$\n" + element.dataset.mathSource + "\n$$"
+      : "$" + element.dataset.mathSource + "$";
   }
   if (element.matches("img")) {
     const raw = element.dataset.markdownSrc || element.getAttribute("src") || "";
     const source = raw.startsWith("/assets/") ? "asset:" + raw.slice("/assets/".length) : raw;
     const title = element.getAttribute("title");
-    return "![" + String(element.getAttribute("alt") || "").replace(/]/g, "\\]") + "](" + source + (title ? ' "' + title.replace(/"/g, '\\"') + '"' : "") + ")";
+    return (
+      "![" +
+      String(element.getAttribute("alt") || "").replace(/]/g, "\\]") +
+      "](" +
+      source +
+      (title ? ' "' + title.replace(/"/g, '\\"') + '"' : "") +
+      ")"
+    );
   }
   if (element.matches("br")) return "  \n";
   const content = Array.from(element.childNodes, inlineMarkdown).join("");
@@ -49,21 +65,37 @@ function inlineMarkdown(node) {
 function listMarkdown(list) {
   const ordered = list.tagName === "OL";
   const start = Number(list.getAttribute("start")) || 1;
-  return Array.from(list.children).filter(child => child.tagName === "LI").map((item, index) => {
-    const nested = Array.from(item.children).filter(child => child.matches("ul, ol"));
-    const body = Array.from(item.childNodes).filter(child => !nested.includes(child)).map(inlineMarkdown).join("").trim();
-    const marker = ordered ? String(start + index) + ". " : "- ";
-    const continuation = nested.map(child => listMarkdown(child).split("\n").map(line => "  " + line).join("\n")).join("\n");
-    return marker + body + (continuation ? "\n" + continuation : "");
-  }).join("\n");
+  return Array.from(list.children)
+    .filter((child) => child.tagName === "LI")
+    .map((item, index) => {
+      const nested = Array.from(item.children).filter((child) => child.matches("ul, ol"));
+      const body = Array.from(item.childNodes)
+        .filter((child) => !nested.includes(child))
+        .map(inlineMarkdown)
+        .join("")
+        .trim();
+      const marker = ordered ? String(start + index) + ". " : "- ";
+      const continuation = nested
+        .map((child) =>
+          listMarkdown(child)
+            .split("\n")
+            .map((line) => "  " + line)
+            .join("\n"),
+        )
+        .join("\n");
+      return marker + body + (continuation ? "\n" + continuation : "");
+    })
+    .join("\n");
 }
 
 function tableMarkdown(table) {
   const rows = Array.from(table.querySelectorAll("tr"));
   if (!rows.length) return "";
-  const values = rows.map(row => Array.from(row.children).map(cell => inlineMarkdown(cell).trim().replace(/\|/g, "\\|")));
-  const width = Math.max(...values.map(row => row.length));
-  const line = row => "| " + Array.from({ length: width }, (_unused, index) => row[index] || "").join(" | ") + " |";
+  const values = rows.map((row) =>
+    Array.from(row.children).map((cell) => inlineMarkdown(cell).trim().replace(/\|/g, "\\|")),
+  );
+  const width = Math.max(...values.map((row) => row.length));
+  const line = (row) => "| " + Array.from({ length: width }, (_unused, index) => row[index] || "").join(" | ") + " |";
   return [line(values[0]), line(Array(width).fill("---")), ...values.slice(1).map(line)].join("\n");
 }
 
@@ -73,15 +105,25 @@ function blockMarkdown(element) {
     return "```" + element.dataset.viz + id + "\n" + decodeUtf8Base64(element.dataset.src) + "\n```";
   }
   if (element.matches(".katex-display[data-math-source]")) return "$$\n" + element.dataset.mathSource + "\n$$";
-  if (element.matches("h1, h2, h3, h4, h5, h6")) return "#".repeat(Number(element.tagName.slice(1))) + " " + inlineMarkdown(element).trim();
+  if (element.matches("h1, h2, h3, h4, h5, h6"))
+    return "#".repeat(Number(element.tagName.slice(1))) + " " + inlineMarkdown(element).trim();
   if (element.matches("p")) return inlineMarkdown(element).trimEnd();
   if (element.matches("pre")) {
     const code = element.querySelector("code");
-    const language = Array.from(code?.classList || []).find(name => name.startsWith("language-"))?.slice(9) || "";
-    return "```" + language + "\n" + String(code?.textContent || element.textContent || "").replace(/\n$/, "") + "\n```";
+    const language =
+      Array.from(code?.classList || [])
+        .find((name) => name.startsWith("language-"))
+        ?.slice(9) || "";
+    return (
+      "```" + language + "\n" + String(code?.textContent || element.textContent || "").replace(/\n$/, "") + "\n```"
+    );
   }
   if (element.matches("ul, ol")) return listMarkdown(element);
-  if (element.matches("blockquote")) return compactBlocks(Array.from(element.children, blockMarkdown)).split("\n").map(line => "> " + line).join("\n");
+  if (element.matches("blockquote"))
+    return compactBlocks(Array.from(element.children, blockMarkdown))
+      .split("\n")
+      .map((line) => "> " + line)
+      .join("\n");
   if (element.matches("table")) return tableMarkdown(element);
   if (element.matches("hr")) return "---";
   if (element.matches(".rh-img-frame, img")) return inlineMarkdown(element);
@@ -94,15 +136,29 @@ export function serializeStructuredNote(element) {
 
 function annotateSourceMetadata(element, markdown) {
   const source = String(markdown || "");
-  const imageSources = Array.from(source.matchAll(/!\[[^\]]*\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g), match => match[1]);
-  element.querySelectorAll("img").forEach((image, index) => { if (imageSources[index]) image.dataset.markdownSrc = imageSources[index]; });
-  const linkSources = Array.from(source.matchAll(/(?<!!)\[[^\]]*\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g), match => match[1]);
-  element.querySelectorAll("a[href]").forEach((link, index) => { if (linkSources[index]) link.dataset.markdownHref = linkSources[index]; });
-  const displayMath = Array.from(source.matchAll(/(?:\$\$\s*([\s\S]*?)\s*\$\$|\\\[\s*([\s\S]*?)\s*\\\])/g), match => match[1] ?? match[2] ?? "");
-  element.querySelectorAll(":scope > .katex-display, :scope > p > .katex-display").forEach((math, index) => { if (displayMath[index] != null) math.dataset.mathSource = displayMath[index]; });
+  const imageSources = Array.from(source.matchAll(/!\[[^\]]*\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g), (match) => match[1]);
+  element.querySelectorAll("img").forEach((image, index) => {
+    if (imageSources[index]) image.dataset.markdownSrc = imageSources[index];
+  });
+  const linkSources = Array.from(source.matchAll(/(?<!!)\[[^\]]*\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g), (match) => match[1]);
+  element.querySelectorAll("a[href]").forEach((link, index) => {
+    if (linkSources[index]) link.dataset.markdownHref = linkSources[index];
+  });
+  const displayMath = Array.from(
+    source.matchAll(/(?:\$\$\s*([\s\S]*?)\s*\$\$|\\\[\s*([\s\S]*?)\s*\\\])/g),
+    (match) => match[1] ?? match[2] ?? "",
+  );
+  element.querySelectorAll(":scope > .katex-display, :scope > p > .katex-display").forEach((math, index) => {
+    if (displayMath[index] != null) math.dataset.mathSource = displayMath[index];
+  });
   const withoutDisplay = source.replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]/g, "");
-  const inlineMath = Array.from(withoutDisplay.matchAll(/(?:\$([^$\n]+)\$|\\\((.+?)\\\))/g), match => match[1] ?? match[2] ?? "");
-  element.querySelectorAll(".katex:not(.katex-display .katex)").forEach((math, index) => { if (inlineMath[index] != null) math.dataset.mathSource = inlineMath[index]; });
+  const inlineMath = Array.from(
+    withoutDisplay.matchAll(/(?:\$([^$\n]+)\$|\\\((.+?)\\\))/g),
+    (match) => match[1] ?? match[2] ?? "",
+  );
+  element.querySelectorAll(".katex:not(.katex-display .katex)").forEach((math, index) => {
+    if (inlineMath[index] != null) math.dataset.mathSource = inlineMath[index];
+  });
 }
 
 /** One persistent DOM surface. Read/edit changes only contenteditable and a caret. */
@@ -140,7 +196,9 @@ export function mountStructuredNote(element, options) {
     const link = event.target?.closest?.("a[href]");
     if (!link) return;
     event.preventDefault();
-    const href = sanitizeMarkdownLinkUrl(resolveMarkdownUrl(link.dataset.markdownHref || link.getAttribute("href"), { baseUrl: options?.baseUrl || null }));
+    const href = sanitizeMarkdownLinkUrl(
+      resolveMarkdownUrl(link.dataset.markdownHref || link.getAttribute("href"), { baseUrl: options?.baseUrl || null }),
+    );
     if (href) window.open(href, href.startsWith("#") ? "_self" : "_blank", "noopener,noreferrer");
   }
   element.addEventListener("input", changed);
@@ -148,30 +206,48 @@ export function mountStructuredNote(element, options) {
   element.addEventListener("click", click);
   element.classList.add("structured-note");
   element.setAttribute("aria-label", options?.ariaLabel || "Note");
-  if (options?.html != null) { element.innerHTML = options.html; annotateSourceMetadata(element, markdown); }
-  else render(markdown, false);
+  if (options?.html != null) {
+    element.innerHTML = options.html;
+    annotateSourceMetadata(element, markdown);
+  } else render(markdown, false);
   element.contentEditable = editable ? "true" : "false";
 
   const controller = {
     element,
-    get editable() { return editable; },
-    get markdown() { return markdown; },
+    get editable() {
+      return editable;
+    },
+    get markdown() {
+      return markdown;
+    },
     setEditable(value) {
       editable = !!value;
       element.classList.toggle("note-editor", editable);
       element.contentEditable = editable ? "true" : "false";
-      element.setAttribute("aria-label", editable ? (options?.editAriaLabel || "Edit note") : (options?.ariaLabel || "Note"));
+      element.setAttribute(
+        "aria-label",
+        editable ? options?.editAriaLabel || "Edit note" : options?.ariaLabel || "Note",
+      );
       if (editable) element.focus({ preventScroll: true });
     },
-    replaceMarkdown(source) { render(source, false); },
-    setOnChange(callback) { onChange = typeof callback === "function" ? callback : null; },
-    focusAt() { this.setEditable(true); placeCaret(element, false); },
+    replaceMarkdown(source) {
+      render(source, false);
+    },
+    setOnChange(callback) {
+      onChange = typeof callback === "function" ? callback : null;
+    },
+    focusAt() {
+      this.setEditable(true);
+      placeCaret(element, false);
+    },
     focusAtCoords(left, top) {
       this.setEditable(true);
       const range = document.caretRangeFromPoint?.(Number(left) || 0, Number(top) || 0);
       const selection = window.getSelection();
-      if (range && element.contains(range.startContainer)) { selection.removeAllRanges(); selection.addRange(range); }
-      else placeCaret(element, false);
+      if (range && element.contains(range.startContainer)) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } else placeCaret(element, false);
     },
     insertImage(source, alt) {
       const raw = String(source || "");
@@ -182,8 +258,14 @@ export function mountStructuredNote(element, options) {
       if (/^asset:paste-[a-f0-9-]+\.(?:png|jpg)$/.test(raw)) image.dataset.rhPasted = "1";
       const selection = window.getSelection();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      if (range && element.contains(range.commonAncestorContainer)) { range.deleteContents(); range.insertNode(image); range.setStartAfter(image); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); }
-      else element.appendChild(image);
+      if (range && element.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        range.insertNode(image);
+        range.setStartAfter(image);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } else element.appendChild(image);
       changed();
       element.focus({ preventScroll: true });
     },
@@ -194,7 +276,7 @@ export function mountStructuredNote(element, options) {
       element.removeEventListener("keydown", keydown);
       element.removeEventListener("click", click);
       delete element._rhStructuredNote;
-    }
+    },
   };
   element._rhStructuredNote = controller;
   return controller;

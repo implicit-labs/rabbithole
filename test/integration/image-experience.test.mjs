@@ -1,3 +1,4 @@
+/** @protects image experience capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -8,7 +9,7 @@ import { renderMarkdownToHtml } from "../../src/core/markdown.js";
 import { extractSnapshotPayload, SNAPSHOT_PAYLOAD_OPEN } from "../../src/core/portable-import.js";
 import { validatePortableProjection } from "../../src/core/portable-projection.js";
 import { buildCanvasHtml } from "../../src/node/html/canvas.js";
-import { CANVAS_STYLES } from "../../src/core/html/styles.js";
+import { CANVAS_STYLES } from "../support/design-css.mjs";
 import { addAssetsToHole, defaultFsStore } from "../../src/node/fs-store.js";
 import { createSession, closeAllSessions } from "../../src/node/sessions.js";
 
@@ -91,8 +92,9 @@ async function runPageFixtures() {
     assertIncludes(lightboxSource, "LIGHTBOX_MAX_ZOOM = 6", "shared lightbox zoom should clamp at the requested upper bound");
     assertIncludes(imageUxSource, "openLightbox({", "image UX should delegate previews to the shared lightbox");
     assertIncludes(imageUxSource, 'img.closest(".viz, .viz-mounted")', "show-fence images should be skipped by image UX mount");
-    assertIncludes(liveHtml, 'html[data-theme="dark"] .md .rh-img-frame', "served page should include dark-mode image matte CSS");
-    assertIncludes(liveHtml, '.md .rh-img-frame[data-rh-resized="1"] { display: block; margin-left: auto; margin-right: auto; }', "resized images should center in the content column");
+    assertIncludes(CANVAS_STYLES, 'html[data-theme="dark"] .md .rh-img-frame', "canvas CSS should define the dark-mode image matte");
+    assertIncludes(CANVAS_STYLES, '.md .rh-img-frame[data-rh-resized="1"] { display: block; margin-left: auto; margin-right: auto; }', "resized images should center in the content column");
+    assertIncludes(liveHtml, "--image-matte", "served page should carry the bundled image-matte CSS");
     assert(!CANVAS_STYLES.includes('html[data-theme="dark"] .md img'), "matte selector should not target every .md img directly");
 
     const scriptPath = path.join(process.env.RABBITHOLE_DIR, "image-client.js");
@@ -103,7 +105,7 @@ async function runPageFixtures() {
     const exported = await fetch(`${session.url}/export`);
     assert.equal(exported.status, 200);
     const exportHtml = await exported.text();
-    assertIncludes(exportHtml, 'html[data-theme="dark"] .md .rh-img-frame', "export should retain dark-mode image matte CSS");
+    assertIncludes(exportHtml, "--image-matte", "export should retain bundled image-matte CSS");
     console.log("ok image ux: served client, matte CSS, export CSS");
   } finally {
     await closeAllSessions("image_experience_test_complete");

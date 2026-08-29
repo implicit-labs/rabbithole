@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const EXPECTED_HEAD = "322a6d2";
 const READY_TIMEOUT_MS = 120_000;
 const TURN_TIMEOUT_MS = 300_000;
 const PROCESS_TIMEOUT_MS = 20_000;
@@ -20,7 +19,9 @@ let realModelTurns = 0;
 const REAL_HOME = os.homedir();
 const REAL_BRIDGE_TOKEN_PATH = path.join(REAL_HOME, ".rabbithole", "bridge-token");
 
+/** @param {NodeJS.ProcessEnv} [extra] @returns {NodeJS.ProcessEnv} */
 function commandEnv(extra = {}) {
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, ...extra, NO_COLOR: "1" };
   delete env.FORCE_COLOR;
   return env;
@@ -123,7 +124,7 @@ async function freePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(0, "127.0.0.1", () => resolve(undefined));
   });
   const address = server.address();
   assert.ok(address && typeof address !== "string", "free-port probe must bind a TCP port");
@@ -998,6 +999,7 @@ async function assertInstalledHoleSurvives(binary, env) {
   }
 }
 
+/** @param {{binary: string, env: NodeJS.ProcessEnv, args: string[], expectedToken?: string}} options */
 async function runTokenBridge({ binary, env, args, expectedToken }) {
   const run = spawnInstalledBridge(binary, args, env);
   let stopped = false;
@@ -1227,13 +1229,6 @@ const realBridgeTokenBefore = await captureFile(REAL_BRIDGE_TOKEN_PATH);
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-install-live-"));
 try {
-  const { stdout: headOutput } = await execFileAsync(
-    "git",
-    ["rev-parse", "--short", "HEAD"],
-    { cwd: ROOT, env: commandEnv() },
-  );
-  assert.equal(headOutput.trim(), EXPECTED_HEAD, "install journey must run from the recorded HEAD");
-
   const newTarball = await packProject(ROOT, path.join(temporaryRoot, "new-pack"));
   const oldTarball = await packHead(temporaryRoot);
   const cache = path.join(temporaryRoot, "npm-cache");

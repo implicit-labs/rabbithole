@@ -1,12 +1,12 @@
-import { providerFor, settingsForProvider, PROVIDERS } from "../brain/provider-registry.js";
-import { loadSettings, saveSettings } from "./preferences-store.js";
+import { providerFor, settingsForProvider, PROVIDERS } from "../provider/provider-registry.js";
+import { loadSettings, saveSettings } from "./settings.js";
 import { getApiKey } from "./credential-store.js";
 import { setKeyStatus, validateKeyForPreset } from "./key-validation.js";
 import { getGenerationSetupStatus, markGenerationSetupComplete } from "./setup-readiness.js";
-import { loadModelCatalog, searchModels, formatModelPrice, prettyModelId, SUGGESTED_MODEL_IDS, RECOMMENDED_MODEL_ID } from "../brain/model-catalog.js";
-import { discoverLocalModels } from "../brain/local-model-catalog.js";
-import { addressSpaceOf, fetchOpenAICompatibleModels, isHttpUrl } from "../brain/model-endpoint.js";
-import { PDF_TRANSCRIPTION_HELP, localVisionModels, pdfTranscriptionCapability } from "../brain/pdf-transcription.js";
+import { loadModelCatalog, searchModels, formatModelPrice, prettyModelId, SUGGESTED_MODEL_IDS, RECOMMENDED_MODEL_ID } from "../provider/model-catalog.js";
+import { discoverLocalModels } from "../provider/local-model-catalog.js";
+import { addressSpaceOf, fetchOpenAICompatibleModels, isHttpUrl } from "../provider/model-endpoint.js";
+import { PDF_TRANSCRIPTION_HELP, localVisionModels, pdfTranscriptionCapability } from "../provider/pdf-transcription.js";
 import {
   BRIDGE_AGENT_LABELS,
   BRIDGE_COMMAND,
@@ -22,13 +22,14 @@ import {
   pingBridge,
   planLabel,
   reasoningLabel,
-} from "../brain/bridge-catalog.js";
+} from "../provider/bridge-catalog.js";
 import { escapeHtml } from "../../core/utils.js";
 import { closeSettingsSheet, openSettingsSheet } from "../../ui/settings-sheet.js";
 import { fieldMarkup, wireField } from "../../ui/primitives/field.js";
 import { comboboxMarkup, wireCombobox } from "../../ui/primitives/combobox.js";
 import { isCommandEnter } from "../../ui/input-intent.js";
 import { iconSvg } from "../../core/html/icons.js";
+import { createBridgeConnection } from "./bridge-connection.js";
 
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/keys";
 /* One line under the endpoint field: what to type, replaced by what happened. */
@@ -52,13 +53,14 @@ const PROVIDER_ROWS = Object.freeze([
 ]);
 
 function providerRowMarkup(row, selected) {
-  return `<div class="provider-item${selected ? " selected" : ""}" data-provider-item="${row.id}"><button type="button" class="provider-row" role="radio" data-provider="${row.id}" aria-checked="${selected}" tabindex="${selected ? 0 : -1}"><span class="provider-dot" aria-hidden="true"></span><span class="provider-copy"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.detail)}</small></span><span class="provider-chip" data-provider-chip hidden></span></button><div class="provider-body"><div class="provider-body-slot"></div></div></div>`;
+  return `<div class="provider-item${selected ? " selected" : ""}" data-provider-item="${row.id}"><${BUTTON_TAG} type="button" class="provider-row" role="radio" data-provider="${row.id}" aria-checked="${selected}" tabindex="${selected ? 0 : -1}"><span class="provider-dot" aria-hidden="true"></span><span class="provider-copy"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.detail)}</small></span><span class="provider-chip" data-provider-chip hidden></span></button><div class="provider-body"><div class="provider-body-slot"></div></div></div>`;
 }
 
 function eyeSvg(open) {
   return iconSvg(open ? "eye-off" : "eye");
 }
 
+/** @param {{trigger?: HTMLElement | null, onSettingsChange?: () => void, openOllamaRecovery?: (options: any) => void}} [options] */
 export function createModelSettings({
   trigger: defaultTrigger,
   onSettingsChange = () => {},
@@ -82,25 +84,43 @@ export function createModelSettings({
   let endpointDiscoveryToken = 0;
   let bridgeState = null;
   let bridgeView = "idle";
-  let bridgeStream = null;
-  let bridgeStreamKey = "";
-  let bridgeReconnectTimer = 0;
-  let bridgeReconnectDelay = 0;
-  let bridgeReconnectPending = false;
-  let bridgeImmediateReconnectAvailable = true;
   let lastBridgeFrameKey = "";
   let lastBridgeRenderKey = "";
   let bridgeRecoveryAgent = "";
   let bridgeUnauthorized = false;
-  let bridgeProbeUp = false;
-  let bridgeProbeTimer = 0;
-  let bridgeProbeGeneration = 0;
-  let bridgeProbeInFlight = false;
   let pairingSetupPending = false;
   let pairingSetupComplete = null;
   let conditionalComboboxes = [];
   let openrouterKeyValid = false;
   let lastKeyCommit = { value: null, result: false };
+  const bridgeConnection = createBridgeConnection({
+    loadSettings,
+    isSubscription: (settings) => providerFor(settings.preset).id === "subscriptions",
+    consumeEvents: consumeBridgeEvents,
+    ping: pingBridge,
+    nextDelay: nextBridgeReconnectDelay,
+    pingInterval: BRIDGE_PING_INTERVAL_MS,
+    probeWanted: () => !!surface
+      && providerFor(loadSettings().preset).id === "subscriptions"
+      && (bridgeView === "re_pair" || bridgeView === "bridge_down" || bridgeView === "idle"),
+    reconnectFromProbe: () => bridgeView !== "re_pair",
+    onState: acceptBridgeState,
+    onView: setBridgeView,
+    onDisconnected: () => {
+      bridgeState = null;
+      lastBridgeFrameKey = "";
+    },
+    onUnauthorized: () => {
+      bridgeState = null;
+      lastBridgeFrameKey = "";
+      bridgeUnauthorized = true;
+      lastBridgeRenderKey = "";
+    },
+    onProbeChange: () => {
+      lastBridgeRenderKey = "";
+      renderConditionalSections();
+    },
+  });
 
   function applyPatch(patch) {
     const current = loadSettings();
@@ -131,7 +151,7 @@ export function createModelSettings({
         : preset.id === "subscriptions"
           ? ` Page images go through ${BRIDGE_AGENT_LABELS[agentId] || "your selected agent"} on this computer.`
           : " Page images go to OpenRouter.";
-    return `<span class="settings-label-with-info"><span class="settings-label" id="transcribe-model-label">PDF transcription</span><span class="settings-info"><button class="settings-info-trigger" type="button" aria-label="About PDF transcription" aria-describedby="transcribe-model-help">${infoIcon}</button><span class="settings-info-tooltip" id="transcribe-model-help" role="tooltip">${escapeHtml(PDF_TRANSCRIPTION_HELP + destination)}</span></span></span>`;
+    return `<span class="settings-label-with-info"><span class="settings-label" id="transcribe-model-label">PDF transcription</span><span class="settings-info"><${BUTTON_TAG} class="settings-info-trigger" type="button" aria-label="About PDF transcription" aria-describedby="transcribe-model-help">${infoIcon}</button><span class="settings-info-tooltip" id="transcribe-model-help" role="tooltip">${escapeHtml(PDF_TRANSCRIPTION_HELP + destination)}</span></span></span>`;
   }
 
   function transcriptionStatusCopy(capability) {
@@ -151,7 +171,7 @@ export function createModelSettings({
    * with the saved value and silently discarded.
    */
   function textBeingTyped(host) {
-    const el = document.activeElement;
+    const el = document.activeElement instanceof HTMLInputElement ? document.activeElement : null;
     if (!el || el.tagName !== "INPUT" || el.type === "checkbox" || !host.contains(el)) return null;
     return { id: el.id, value: el.value, start: el.selectionStart, end: el.selectionEnd };
   }
@@ -171,7 +191,7 @@ export function createModelSettings({
     }
     if (!element) return null;
     if (element.id) return { kind: "id", value: element.id };
-    if (element.dataset?.reasoning) return { kind: "reasoning", value: element.dataset.reasoning };
+    if (element instanceof HTMLElement && element.dataset?.reasoning) return { kind: "reasoning", value: element.dataset.reasoning };
     return null;
   }
 
@@ -230,7 +250,7 @@ export function createModelSettings({
       settings.token,
       purpose,
       recoveryStatus,
-      bridgeProbeUp,
+      bridgeConnection.snapshot().probeUp,
       bridgeUnauthorized,
     ]);
     if (renderKey === lastBridgeRenderKey) return;
@@ -257,7 +277,7 @@ export function createModelSettings({
         : bridgeAgentStateMarkup(agent);
     const ready = state === "ready" && models.some((model) => model.id === settings.model);
     const finish = ready && (purpose !== "settings" || !getGenerationSetupStatus(settings).ready)
-      ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button">${getGenerationSetupStatus(settings).ready ? "Done" : "Finish setup"}</button></div>`
+      ? `<div class="settings-section settings-complete-section"><${BUTTON_TAG} id="complete-model-setup" class="web-primary" type="button">${getGenerationSetupStatus(settings).ready ? "Done" : "Finish setup"}</button></div>`
       : "";
     setSubscriptionHtml(host, `${recovery}<div id="bridge-surface" class="bridge-surface" data-state="${escapeHtml(state)}"><div class="bridge-agent-body">${body}</div></div>${finish}`);
   }
@@ -293,7 +313,7 @@ export function createModelSettings({
       ? `<div class="settings-section model-section"><div class="settings-row"><span class="settings-label" id="model-select-label">Model</span>${comboboxMarkup({ id: "model-select", valueId: "model-select-name", labelledBy: "model-select-label", value: currentModel, label: currentModel, title: currentModel, iconHtml: chevron })}</div></div>`
       : preset.id === "custom_endpoint"
         ? `<div class="settings-section model-section local-model-section"><div class="settings-row"><span class="settings-label" id="endpoint-model-label">Model</span>${comboboxMarkup({ id: "endpoint-model", labelledBy: "endpoint-model-label", value: currentModel, label: currentModel || "Choose a model", title: currentModel, iconHtml: chevron })}</div></div>`
-        : `<div class="settings-section model-section local-model-section"><div class="settings-row"><span class="settings-label" id="local-model-label">Model</span>${comboboxMarkup({ id: "local-model", labelledBy: "local-model-label", value: currentModel, label: currentModel, title: currentModel, iconHtml: chevron })}</div><small class="field-hint">${escapeHtml(localDiscoveryCopy())}${localDiscovery === "error" || localDiscovery === "empty" ? ` <button id="local-model-setup" class="settings-text-action" type="button">Set up Local</button>` : ""}</small></div>`;
+        : `<div class="settings-section model-section local-model-section"><div class="settings-row"><span class="settings-label" id="local-model-label">Model</span>${comboboxMarkup({ id: "local-model", labelledBy: "local-model-label", value: currentModel, label: currentModel, title: currentModel, iconHtml: chevron })}</div><small class="field-hint">${escapeHtml(localDiscoveryCopy())}${localDiscovery === "error" || localDiscovery === "empty" ? ` <${BUTTON_TAG} id="local-model-setup" class="settings-text-action" type="button">Set up Local</button>` : ""}</small></div>`;
     const keySection = preset.requires_key || preset.allows_key ? `<div class="settings-section key-section">${fieldMarkup({ id: "api-key", type: "password", label: preset.key_label || `${preset.label} key`, value: getApiKey(settings), placeholder: apiKeyPlaceholder(settings.preset), autocomplete: "off", autocapitalize: "none", autocorrect: "off", inputmode: "text", enterkeyhint: "done", spellcheck: "false", toggleId: "api-key-toggle", toggleHtml: eyeSvg(false), labelAfterHtml: preset.id === "openrouter" ? `<a class="key-get" href="${OPENROUTER_KEYS_URL}" target="_blank" rel="noreferrer">Get a key →</a>` : "", status: { id: "api-key-status", className: "key-status idle visible", text: keyIdleWhisper(preset) } })}<label class="settings-row remember-row" for="session-only"><span class="switch-copy"><strong>Remember on this device</strong><small>Turn off on shared computers.</small></span><span class="switch" aria-hidden="true"><input id="session-only" type="checkbox" role="switch" ${settings.session_only === false ? "checked" : ""}><span class="switch-track"></span></span></label></div>` : "";
     const endpointSection = preset.id === "local"
       ? `<details class="settings-advanced"><summary>Connection settings</summary><div class="settings-advanced-grid">${fieldMarkup({ id: "provider-base", label: "Endpoint", value: settings.base_url || "", placeholder: "http://localhost:11434/v1", hint: "Use an OpenAI-compatible endpoint." })}</div></details>`
@@ -302,12 +322,12 @@ export function createModelSettings({
         : "";
     const transcriptionSection = purpose === "setup"
       ? ""
-      : `<div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(preset)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: preset.id === "local" ? "transcribe-model-status" : "", value: transcribeDisabled ? "" : transcribeModel, label: transcribeLabel, title: transcribeDisabled ? localCapability.reason : transcribeModel, iconHtml: chevron, disabled: transcribeDisabled })}</div>${preset.id === "local" ? `<small id="transcribe-model-status" class="field-hint transcription-status ${escapeHtml(localCapability.status)}">${escapeHtml(transcriptionStatusCopy(localCapability))}${localDiscovery === "success" && !localCapability.available && localCapability.status !== "checking" ? ` <button id="local-vision-retry" class="settings-text-action" type="button">Recheck</button>` : ""}</small>` : ""}</div>`;
+      : `<div class="settings-section model-section transcription-model-section"><div class="settings-row">${transcriptionHelpMarkup(preset)}${comboboxMarkup({ id: "transcribe-model", labelledBy: "transcribe-model-label", describedBy: preset.id === "local" ? "transcribe-model-status" : "", value: transcribeDisabled ? "" : transcribeModel, label: transcribeLabel, title: transcribeDisabled ? localCapability.reason : transcribeModel, iconHtml: chevron, disabled: transcribeDisabled })}</div>${preset.id === "local" ? `<small id="transcribe-model-status" class="field-hint transcription-status ${escapeHtml(localCapability.status)}">${escapeHtml(transcriptionStatusCopy(localCapability))}${localDiscovery === "success" && !localCapability.available && localCapability.status !== "checking" ? ` <${BUTTON_TAG} id="local-vision-retry" class="settings-text-action" type="button">Recheck</button>` : ""}</small>` : ""}</div>`;
     const typed = textBeingTyped(host);
     setConditionalHtml(host, `${recoveryStatus ? `<div class="settings-section settings-recovery" role="status">${escapeHtml(recoveryStatus)}</div>` : ""}
       ${preset.id === "custom_endpoint" ? `${endpointSection}${keySection}${modelSection}` : `${modelSection}${keySection}${endpointSection}`}
       ${transcriptionSection}
-      ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><button id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`);
+      ${purpose !== "settings" || !getGenerationSetupStatus(settings).ready ? `<div class="settings-section settings-complete-section"><${BUTTON_TAG} id="complete-model-setup" class="web-primary" type="button"${localModelReady && endpointReady ? "" : " disabled"}>Finish setup</button></div>` : ""}`);
     restoreTextBeingTyped(host, typed);
     wireConditionalSections(host);
   }
@@ -358,7 +378,7 @@ export function createModelSettings({
     const reasoning = model.reasoning.options.includes(saved.reasoning)
       ? saved.reasoning
       : model.reasoning.default;
-    const imageModels = models.filter((entry) => entry.images);
+    const imageModels = models.filter((entry) => entry.vision);
     const transcribeModel = imageModels.find((entry) => entry.id === saved.transcribe_model)?.id
       || imageModels[0]?.id
       || "";
@@ -429,7 +449,7 @@ export function createModelSettings({
   }
 
   function bridgePairingFieldMarkup({ inline }) {
-    return `<div class="bridge-pair-grid settings-advanced-grid">${fieldMarkup({ id: "bridge-pairing-token", label: "Pairing link", value: "", placeholder: "https://rabbithole.ing/#bridge=…", autocomplete: "off", autocapitalize: "none", autocorrect: "off", spellcheck: "false", status: { id: "bridge-pair-status", className: "key-status idle", text: "" } })}<button id="bridge-pair" class="web-primary"${inline ? " data-state-action" : ""} type="button">Connect</button></div>`;
+    return `<div class="bridge-pair-grid settings-advanced-grid">${fieldMarkup({ id: "bridge-pairing-token", label: "Pairing link", value: "", placeholder: "https://rabbithole.ing/#bridge=…", autocomplete: "off", autocapitalize: "none", autocorrect: "off", spellcheck: "false", status: { id: "bridge-pair-status", className: "key-status idle", text: "" } })}<${BUTTON_TAG} id="bridge-pair" class="web-primary"${inline ? " data-state-action" : ""} type="button">Connect</button></div>`;
   }
 
   /*
@@ -441,7 +461,7 @@ export function createModelSettings({
    */
   function bridgePairingMarkup() {
     const heading = `<h3>${escapeHtml(BRIDGE_DOWN_HEADING)}</h3>`;
-    if (bridgeProbeUp) {
+    if (bridgeConnection.snapshot().probeUp) {
       const lead = bridgeUnauthorized
         ? "This browser lost its pairing. Click the link in the bridge’s terminal to pair again — or paste it here:"
         : "Now click the link in your terminal to connect this page — or paste it here:";
@@ -459,7 +479,7 @@ export function createModelSettings({
   }
 
   function bridgeCommandMarkup(command) {
-    return `<div class="bridge-command"><code>${escapeHtml(command)}</code><button data-copy-command="${escapeHtml(command)}" data-state-action class="settings-text-action" type="button">Copy</button></div>`;
+    return `<div class="bridge-command"><code>${escapeHtml(command)}</code><${BUTTON_TAG} data-copy-command="${escapeHtml(command)}" data-state-action class="settings-text-action" type="button">Copy</button></div>`;
   }
 
   function bridgeAgentStateMarkup(agent) {
@@ -485,7 +505,7 @@ export function createModelSettings({
   }
 
   function bridgeTranscriptionMarkup(settings, agentId) {
-    const models = bridgeModelsFor(agentId).filter((model) => model.images);
+    const models = bridgeModelsFor(agentId).filter((model) => model.vision);
     const unavailable = !models.length;
     const reason = `${BRIDGE_AGENT_LABELS[agentId]} doesn’t offer a vision-capable model for PDF transcription.`;
     const model = unavailable ? "" : settings.transcribe_model;
@@ -497,164 +517,7 @@ export function createModelSettings({
     const options = model?.reasoning?.options || [];
     if (!options.length) return "";
     const active = options.includes(settings.reasoning) ? settings.reasoning : model.reasoning.default;
-    return `<div class="settings-section reasoning-section"><span class="settings-label" id="reasoning-label">Reasoning</span><div class="reasoning-choice" role="group" aria-labelledby="reasoning-label">${options.map((option) => `<button type="button" data-reasoning="${escapeHtml(option)}" aria-pressed="${option === active}">${escapeHtml(reasoningLabel(option))}</button>`).join("")}</div></div>`;
-  }
-
-  function stopBridgeStream() {
-    document.removeEventListener("visibilitychange", handleBridgeVisibilityChange);
-    clearTimeout(bridgeReconnectTimer);
-    bridgeReconnectTimer = 0;
-    bridgeReconnectDelay = 0;
-    bridgeReconnectPending = false;
-    bridgeImmediateReconnectAvailable = true;
-    bridgeStream?.abort();
-    bridgeStream = null;
-    bridgeStreamKey = "";
-  }
-
-  /*
-   * The ping probe runs only while a disconnected panel is on screen. It is
-   * not the state transport (§6.2 still holds — the stream is the only state
-   * source); it answers the one question the stream cannot: "is a bridge
-   * even there?" for a client that has no token, or a fast "it's back" for a
-   * paired client between reconnect backoffs.
-   */
-  function probeableView() {
-    return bridgeView === "re_pair" || bridgeView === "bridge_down" || bridgeView === "idle";
-  }
-
-  function stopBridgeProbe() {
-    bridgeProbeGeneration += 1;
-    clearTimeout(bridgeProbeTimer);
-    bridgeProbeTimer = 0;
-    bridgeProbeUp = false;
-  }
-
-  function scheduleBridgeProbe(delay) {
-    clearTimeout(bridgeProbeTimer);
-    bridgeProbeTimer = setTimeout(() => {
-      bridgeProbeTimer = 0;
-      void runBridgeProbe();
-    }, delay);
-  }
-
-  async function runBridgeProbe() {
-    if (!surface || !probeableView()) return;
-    if (document.hidden) {
-      scheduleBridgeProbe(BRIDGE_PING_INTERVAL_MS);
-      return;
-    }
-    const generation = bridgeProbeGeneration;
-    bridgeProbeInFlight = true;
-    const up = await pingBridge(loadSettings().base_url);
-    bridgeProbeInFlight = false;
-    if (generation !== bridgeProbeGeneration || !surface || !probeableView()) return;
-    if (up !== bridgeProbeUp) {
-      bridgeProbeUp = up;
-      lastBridgeRenderKey = "";
-      renderConditionalSections();
-      if (up && bridgeView !== "re_pair" && bridgeStreamKey) {
-        requestBridgeReconnect(bridgeStreamKey, 0);
-      }
-    }
-    scheduleBridgeProbe(BRIDGE_PING_INTERVAL_MS);
-  }
-
-  function syncBridgeProbe() {
-    const wanted = !!surface && providerFor(loadSettings().preset).id === "subscriptions" && probeableView();
-    if (!wanted) {
-      stopBridgeProbe();
-      return;
-    }
-    if (!bridgeProbeTimer && !bridgeProbeInFlight) scheduleBridgeProbe(0);
-  }
-
-  function handleBridgeVisibilityChange() {
-    if (document.hidden) {
-      if (bridgeReconnectTimer) {
-        clearTimeout(bridgeReconnectTimer);
-        bridgeReconnectTimer = 0;
-        bridgeReconnectPending = true;
-      }
-      return;
-    }
-    if (!bridgeReconnectPending || bridgeStream || !bridgeStreamKey) return;
-    bridgeReconnectPending = false;
-    connectBridgeStream(bridgeStreamKey);
-  }
-
-  function requestBridgeReconnect(connectionKey, delay) {
-    if (bridgeStreamKey !== connectionKey) return;
-    bridgeReconnectPending = true;
-    if (document.hidden) return;
-    if (delay === 0) {
-      queueMicrotask(() => {
-        if (!bridgeReconnectPending || bridgeStream || bridgeStreamKey !== connectionKey || document.hidden) return;
-        bridgeReconnectPending = false;
-        connectBridgeStream(connectionKey);
-      });
-      return;
-    }
-    bridgeReconnectTimer = setTimeout(() => {
-      bridgeReconnectTimer = 0;
-      if (!bridgeReconnectPending || bridgeStream || bridgeStreamKey !== connectionKey || document.hidden) return;
-      bridgeReconnectPending = false;
-      connectBridgeStream(connectionKey);
-    }, delay);
-  }
-
-  function bridgeStreamEnded(connectionKey, reason = "closed") {
-    if (bridgeStreamKey !== connectionKey) return;
-    bridgeState = null;
-    lastBridgeFrameKey = "";
-    if (reason === "unauthorized") {
-      stopBridgeStream();
-      bridgeUnauthorized = true;
-      lastBridgeRenderKey = "";
-      setBridgeView("re_pair");
-      renderConditionalSections();
-      return;
-    }
-    setBridgeView("bridge_down");
-    if (bridgeImmediateReconnectAvailable) {
-      bridgeImmediateReconnectAvailable = false;
-      requestBridgeReconnect(connectionKey, 0);
-      return;
-    }
-    bridgeReconnectDelay = nextBridgeReconnectDelay(bridgeReconnectDelay);
-    requestBridgeReconnect(connectionKey, bridgeReconnectDelay);
-  }
-
-  function connectBridgeStream(connectionKey) {
-    if (bridgeStream || bridgeStreamKey !== connectionKey) return;
-    const settings = loadSettings();
-    const token = String(settings.token || "").trim();
-    if (
-      providerFor(settings.preset).id !== "subscriptions"
-      || `${settings.base_url}\n${token}` !== connectionKey
-    ) {
-      stopBridgeStream();
-      return;
-    }
-    const controller = new AbortController();
-    bridgeStream = controller;
-    void consumeBridgeEvents(settings.base_url, token, {
-      signal: controller.signal,
-      onState: (state) => {
-        if (bridgeStream !== controller || controller.signal.aborted) return;
-        bridgeReconnectDelay = 0;
-        bridgeImmediateReconnectAvailable = true;
-        acceptBridgeState(state);
-      },
-    }).then((result) => {
-      if (bridgeStream !== controller || controller.signal.aborted) return;
-      bridgeStream = null;
-      bridgeStreamEnded(connectionKey, result.reason);
-    }).catch((error) => {
-      if (bridgeStream !== controller || controller.signal.aborted || error?.name === "AbortError") return;
-      bridgeStream = null;
-      bridgeStreamEnded(connectionKey);
-    });
+    return `<div class="settings-section reasoning-section"><span class="settings-label" id="reasoning-label">Reasoning</span><div class="reasoning-choice" role="group" aria-labelledby="reasoning-label">${options.map((option) => `<${BUTTON_TAG} type="button" data-reasoning="${escapeHtml(option)}" aria-pressed="${option === active}">${escapeHtml(reasoningLabel(option))}</button>`).join("")}</div></div>`;
   }
 
   function setBridgeView(view) {
@@ -693,27 +556,25 @@ export function createModelSettings({
 
   function startBridgeStream() {
     const settings = loadSettings();
-    if (providerFor(settings.preset).id !== "subscriptions") {
-      stopBridgeStream();
-      return;
-    }
     const token = String(settings.token || "").trim();
-    if (!token) {
-      stopBridgeStream();
+    const connectionKey = `${settings.base_url}\n${token}`;
+    if (!token || providerFor(settings.preset).id !== "subscriptions" || bridgeConnection.snapshot().streamKey !== connectionKey) {
       bridgeState = null;
       lastBridgeFrameKey = "";
-      setBridgeView("re_pair");
-      return;
     }
-    const connectionKey = `${settings.base_url}\n${token}`;
-    if (bridgeStreamKey === connectionKey) return;
-    stopBridgeStream();
-    bridgeState = null;
-    lastBridgeFrameKey = "";
-    bridgeStreamKey = connectionKey;
-    document.addEventListener("visibilitychange", handleBridgeVisibilityChange);
-    setBridgeView("starting");
-    connectBridgeStream(connectionKey);
+    bridgeConnection.start();
+  }
+
+  function stopBridgeStream() {
+    bridgeConnection.stopStream();
+  }
+
+  function stopBridgeProbe() {
+    bridgeConnection.stopProbe();
+  }
+
+  function syncBridgeProbe() {
+    bridgeConnection.syncProbe();
   }
 
   function completeBridgeRecoveryIfReady() {
@@ -771,7 +632,7 @@ export function createModelSettings({
     wireField(host, { id: "api-key", toggleId: "api-key-toggle", renderToggle: eyeSvg });
     wireField(host, { id: "bridge-pairing-token" });
     const keyInput = host.querySelector("#api-key");
-    let timer = 0;
+    /** @type {ReturnType<typeof setTimeout> | 0} */ let timer = 0;
     if (keyInput) {
       keyInput.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => commitSettingsKey(), 350); });
       keyInput.addEventListener("paste", () => setTimeout(() => commitSettingsKey(), 0));
@@ -901,10 +762,11 @@ export function createModelSettings({
     if (!row) return;
     const settings = loadSettings();
     if (row.preset !== providerFor(settings.preset).id) {
-      switchProvider(row.preset, row.agent || "");
+      switchProvider(row.preset, "agent" in row ? row.agent : "");
       return;
     }
-    if (row.agent && row.agent !== selectedBridgeAgent(settings)) switchBridgeAgent(row.agent);
+    const agent = "agent" in row ? row.agent : "";
+    if (agent && agent !== selectedBridgeAgent(settings)) switchBridgeAgent(agent);
   }
 
   function switchProvider(id, agentId = "") {
@@ -1080,14 +942,16 @@ export function createModelSettings({
     await callback?.();
   }
 
-  function renderCatalogModelRow(model, { current, recommended = false, group = "", itemIndex = -1 } = {}) {
+  /** @param {any} model @param {{current?: string, recommended?: boolean, group?: string, itemIndex?: number}} [options] */
+  function renderCatalogModelRow(model, { current = "", recommended = false, group = "", itemIndex = -1 } = {}) {
     const selected = model.id === current;
-    return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<button type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span>${recommended ? `<span class="model-chip">Recommended</span>` : ""}<span class="model-option-price">${escapeHtml(formatModelPrice(model))}</span></button>`;
+    return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<${BUTTON_TAG} type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span>${recommended ? `<span class="model-chip">Recommended</span>` : ""}<span class="model-option-price">${escapeHtml(formatModelPrice(model))}</span></button>`;
   }
 
-  function renderBridgeModelRow(model, { current, group = "", itemIndex = -1 } = {}) {
+  /** @param {any} model @param {{current?: string, group?: string, itemIndex?: number}} [options] */
+  function renderBridgeModelRow(model, { current = "", group = "", itemIndex = -1 } = {}) {
     const selected = model.id === current;
-    return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<button type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span><span class="model-option-price">${escapeHtml(model.images ? "vision" : "")}</span></button>`;
+    return `${group ? `<div class="model-group-label">${escapeHtml(group)}</div>` : ""}<${BUTTON_TAG} type="button" class="model-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-value="${escapeHtml(model.id)}" data-label="${escapeHtml(model.name)}" data-item-index="${itemIndex}" title="${escapeHtml(model.id)}"><span class="model-check" aria-hidden="true">${selected ? "✓" : ""}</span><span class="model-option-name">${escapeHtml(model.name)}</span><span class="model-option-price">${escapeHtml(model.vision ? "vision" : "")}</span></button>`;
   }
 
   function filterBridgeModels(models, query) {
@@ -1097,7 +961,7 @@ export function createModelSettings({
   }
 
   function renderExactModelRow(query) {
-    return `<button type="button" class="model-option model-use-custom" role="option" aria-selected="false" data-value="${escapeHtml(query)}" data-label="${escapeHtml(query)}" data-free-text="true" title="${escapeHtml(query)}"><span class="model-check" aria-hidden="true"></span><span class="model-option-name">Use “${escapeHtml(query)}”</span><span class="model-option-price">as-is</span></button>`;
+    return `<${BUTTON_TAG} type="button" class="model-option model-use-custom" role="option" aria-selected="false" data-value="${escapeHtml(query)}" data-label="${escapeHtml(query)}" data-free-text="true" title="${escapeHtml(query)}"><span class="model-check" aria-hidden="true"></span><span class="model-option-name">Use “${escapeHtml(query)}”</span><span class="model-option-price">as-is</span></button>`;
   }
 
   function modelNote(kind, content) {
@@ -1189,7 +1053,7 @@ export function createModelSettings({
     } else if (preset.id === "subscriptions") {
       wire(modelComboboxOptions({
         id: "transcribe-model", labelledBy: "transcribe-model-label", placeholder: "Choose a vision model…",
-        load: async () => bridgeModelsFor(selectedBridgeAgent()).filter((model) => model.images),
+        load: async () => bridgeModelsFor(selectedBridgeAgent()).filter((model) => model.vision),
         filter: filterBridgeModels,
         renderOption: (entry) => renderBridgeModelRow(entry.model, { current: loadSettings().transcribe_model, ...entry }),
         current: () => loadSettings().transcribe_model,
@@ -1424,3 +1288,4 @@ function keyIdleWhisper(preset) {
   return `Stored only in this browser, sent directly to ${preset.label}.`;
 }
 function apiKeyPlaceholder(presetId) { return presetId === "openrouter" ? "sk-or-v1-…" : "API key"; }
+import { BUTTON_TAG } from "../../core/html/markup.js";

@@ -1,3 +1,4 @@
+/** @protects assets capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
@@ -16,7 +17,6 @@ import {
   resolveAsset,
 } from "../../src/node/fs-store.js";
 import { toolDefinitions } from "../../src/node/tools/manifest.js";
-import { buildMcpInputSchema } from "../../src/node/mcp/schema.js";
 
 process.env.RABBITHOLE_NO_BROWSER = "1";
 process.env.RABBITHOLE_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-assets-"));
@@ -162,17 +162,17 @@ function runToolInputCapFixture() {
   const answer = toolDefinitions.find((tool) => tool.name === "answer_branch");
   assert(open);
   assert(answer);
-  const openSchema = z.object(buildMcpInputSchema(open.input));
-  const answerSchema = z.object(buildMcpInputSchema(answer.input));
+  const openSchema = z.object(open.input);
+  const answerSchema = z.object(answer.input);
 
   assert.throws(
     () => openSchema.parse({ title: "T".repeat(2001), content: "Body" }),
-    (error) => error?.issues?.some((issue) => issue.path.join(".") === "title" && /2000/.test(issue.message)),
+    (/** @type {any} */ error) => error?.issues?.some((issue) => issue.path.join(".") === "title" && /2000/.test(issue.message)),
     "over-cap title should identify title and its 2000-character maximum",
   );
   assert.throws(
     () => answerSchema.parse({ session_id: "session", request_id: "request", content: "x".repeat(10485761) }),
-    (error) => error?.issues?.some((issue) => issue.path.join(".") === "content" && /10485760/.test(issue.message)),
+    (/** @type {any} */ error) => error?.issues?.some((issue) => issue.path.join(".") === "content" && /10485760/.test(issue.message)),
     "over-cap content should identify content and its 10 MB maximum",
   );
 

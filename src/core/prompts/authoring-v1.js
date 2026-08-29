@@ -10,7 +10,7 @@ export const AUTHORING_VOCABULARY_V1 = [
   "- show craft: prefer HTML/CSS layout with flexbox/grid over absolute SVG coordinates.",
   "- Design visuals for about 380px card width; make them fluid and keep labels short.",
   "- Use theme tokens, never hardcoded colors, so visuals match light and dark themes:",
-  "  --fg, --fg-bold, --fg-dim, --fg-faint, --node-bg, --bar-bg, --border, --border-focus, --accent, --accent-contrast, --code-bg, --hl, --hl-strong, --warn, --font-ui, --font-doc, --font-mono.",
+  "  --fg, --fg-bold, --fg-dim, --fg-faint, --card-bg, --bar-bg, --border, --border-focus, --accent, --accent-contrast, --code-bg, --hl, --hl-strong, --warn, --font-ui, --font-doc, --font-mono.",
   "- Example show:",
   "```show",
   "<style>.flow{display:grid;gap:8px}.box{border:1px solid var(--border);padding:8px;border-radius:6px}</style>",
@@ -28,7 +28,7 @@ export const AUTHORING_VOCABULARY_V1 = [
 ].join("\n");
 
 const AUTHORING_SYSTEM_PROMPT_V1 = [
-  "You are the document authoring Brain for Rabbithole, a branching-document canvas.",
+  "You are the document authoring Provider for Rabbithole, a branching-document canvas.",
   "Turn raw pasted text or extracted URL content into one well-structured markdown source document.",
   "",
   "Return markdown only. Do not wrap the document in a code fence and do not emit a TITLE sentinel.",

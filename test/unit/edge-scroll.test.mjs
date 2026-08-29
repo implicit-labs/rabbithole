@@ -1,3 +1,4 @@
+/** @protects edge scroll capability contracts. */
 import assert from "node:assert/strict";
 import { EDGE_BAND, EDGE_MAX_SPEED, createEdgeScroller, edgeVelocity } from "../../src/ui/edge-scroll.js";
 
@@ -58,7 +59,7 @@ const frames = [];
 let now = 0;
 globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
 globalThis.cancelAnimationFrame = (id) => { frames[id - 1] = null; };
-globalThis.performance = { now: () => now };
+(/** @type {any} */ (globalThis)).performance = { now: () => now };
 
 function runFrame(ms) {
   now += ms;

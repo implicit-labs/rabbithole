@@ -7,7 +7,7 @@ export function loadMermaidRuntime() {
   if (globalThis.mermaid) return Promise.resolve(globalThis.mermaid);
   if (!runtimePromise) {
     runtimePromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-rabbithole-runtime="mermaid"]');
+      const existing = /** @type {HTMLScriptElement | null} */ (document.querySelector('script[data-rabbithole-runtime="mermaid"]'));
       const script = existing || document.createElement("script");
       const finish = () => {
         if (globalThis.mermaid) resolve(globalThis.mermaid);

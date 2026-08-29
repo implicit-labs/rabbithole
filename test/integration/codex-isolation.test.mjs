@@ -1,3 +1,4 @@
+/** @protects codex isolation capability contracts. */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -46,7 +47,7 @@ const stub = http.createServer((req, res) => {
 });
 await new Promise((resolve, reject) => {
   stub.once("error", reject);
-  stub.listen(0, "127.0.0.1", resolve);
+  stub.listen({ port: 0, host: "127.0.0.1" }, () => resolve());
 });
 const stubPort = stub.address().port;
 const providerConfig = [

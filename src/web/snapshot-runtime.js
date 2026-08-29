@@ -2,7 +2,7 @@ const sourcePromises = new Map();
 
 function versionedAssetUrl(name) {
   const url = new URL(name, document.baseURI);
-  const app = document.querySelector('script[type="module"][src*="app.js"]');
+  const app = /** @type {HTMLScriptElement | null} */ (document.querySelector('script[type="module"][src*="app.js"]'));
   if (app?.src) {
     const version = new URL(app.src, document.baseURI).searchParams.get("v");
     if (version) url.searchParams.set("v", version);

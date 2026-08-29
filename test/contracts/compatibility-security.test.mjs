@@ -1,3 +1,4 @@
+/** @protects compatibility security capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -55,18 +56,20 @@ try {
 
 function verifySetupReadinessFingerprint() {
   const completed = {
-    preset: "custom",
+    preset: "local",
     base_url: "http://localhost:11434/v1",
     model: "llama3.2",
     session_only: true,
   };
   completed.generation_setup = setupFingerprint(completed);
   assert.equal(getGenerationSetupStatus(completed).ready, true, "matching setup fingerprint should be ready");
-  for (const [field, patch] of [
+  /** @type {Array<[string, Record<string, string>]>} */
+  const setupChanges = [
     ["provider", { preset: "openrouter" }],
     ["endpoint", { base_url: "http://localhost:12345/v1" }],
     ["model", { model: "qwen3:8b" }],
-  ]) {
+  ];
+  for (const [field, patch] of setupChanges) {
     const status = getGenerationSetupStatus({ ...completed, ...patch });
     assert.deepEqual({ ready: status.ready, reason: status.reason }, { ready: false, reason: "setup_incomplete" }, `${field} changes should invalidate completed setup`);
   }

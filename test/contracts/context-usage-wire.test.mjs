@@ -1,9 +1,10 @@
+/** @protects context usage wire capability contracts. */
 import assert from "node:assert/strict";
 import { CANVAS_SHELL } from "../../src/core/html/shell.js";
-import { CANVAS_STYLES } from "../../src/core/html/styles.js";
-import { RabbitHoleSession } from "../../src/node/transport/session.js";
+import { CANVAS_STYLES } from "../support/design-css.mjs";
+import { RabbitholeSession } from "../../src/node/transport/session.js";
 
-const session = new RabbitHoleSession({
+const session = new RabbitholeSession({
   holeId: "context-wire-hole",
   title: "Context wire",
   rootId: "root",

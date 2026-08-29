@@ -64,15 +64,15 @@ export function inferBaseUrlFromFrontmatter(markdown) {
   const entries = {};
   let closed = false;
   for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i];
+    const line = lines[i] ?? "";
     if (/^---[ \t]*$/.test(line)) {
       closed = true;
       break;
     }
     const match = /^([A-Za-z_][A-Za-z0-9_-]*)[ \t]*:[ \t]*(.*)$/.exec(line);
     if (!match) continue;
-    const key = match[1].toLowerCase();
-    if (!Object.prototype.hasOwnProperty.call(entries, key)) entries[key] = unquoteYamlValue(match[2]);
+    const key = (match[1] ?? "").toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(entries, key)) entries[key] = unquoteYamlValue(match[2] ?? "");
   }
   if (!closed) return null;
 

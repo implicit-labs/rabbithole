@@ -1,3 +1,4 @@
+/** @protects cross host journey capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -252,7 +253,7 @@ async function assertFrozenDockedNote(page, noteId) {
   await page.waitForSelector(`.note-dot[data-note="${noteId}"]`);
   assert.equal(await page.locator(`mark[data-child="${noteId}"].mark-note`).count(), 1,
     "a frozen snapshot keeps the docked note's wash");
-  assert.equal(await page.locator(`.node[data-id="${noteId}"]`).count(), 0,
+  assert.equal(await page.locator(`.card[data-id="${noteId}"]`).count(), 0,
     "a docked note must not turn into a card in a snapshot");
   await page.locator(`.note-dot[data-note="${noteId}"]`).click();
   await page.waitForSelector("#notepop.visible");
@@ -262,7 +263,7 @@ async function assertFrozenDockedNote(page, noteId) {
     "a snapshot offers no place-on-canvas and no delete");
   await page.locator(`.note-dot[data-note="${noteId}"]`).dblclick();
   assert.equal(await page.locator("#notepop .note-editor").count(), 0, "a snapshot cannot be edited");
-  await page.click(".node.root .node-more");
+  await page.click(".card.root .card-more");
   assert.equal(await page.locator("#cm-note").count(), 0,
     "the card menu carries no Add note — the card composer is the only way to write one, and a snapshot has no composer");
   await page.keyboard.press("Escape");

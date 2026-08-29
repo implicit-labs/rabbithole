@@ -1,13 +1,14 @@
+/** @protects pdf conversion capability contracts. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import * as napiCanvas from "@napi-rs/canvas";
 import { DirectRabbitholeHost, createHoleFromMarkdown } from "../../src/web/transport/direct-host.js";
-import { ProviderError } from "../../src/web/brain/errors.js";
+import { ProviderError } from "../../src/web/provider/errors.js";
 import { readAttentionPdf } from "../support/attention-pdf.mjs";
-globalThis.FileReader ||= class { readAsDataURL(blob) { blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`; this.onload?.(); }); } };
+(/** @type {any} */ (globalThis)).FileReader ||= class { constructor() { this.result = null; this.onload = null; } readAsDataURL(blob) { blob.arrayBuffer().then((bytes) => { this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString("base64")}`; this.onload?.(); }); } };
 for (const name of ["DOMMatrix", "DOMPoint", "DOMRect", "Path2D", "ImageData"]) if (!globalThis[name] && napiCanvas[name]) globalThis[name] = napiCanvas[name];
-globalThis.document ||= { baseURI: "file:///", getElementById: () => null, createElement(tag) { if (tag !== "canvas") throw new Error(`Unexpected element ${tag}`); const canvas = napiCanvas.createCanvas(1, 1); canvas.toBlob = (callback) => callback(new Blob([canvas.toBuffer("image/png")], { type: "image/png" })); return canvas; } };
-globalThis.location ||= { protocol: "file:" };
+(/** @type {any} */ (globalThis)).document ||= { baseURI: "file:///", getElementById: () => null, createElement(tag) { if (tag !== "canvas") throw new Error(`Unexpected element ${tag}`); const canvas = napiCanvas.createCanvas(1, 1); canvas.toBlob = (callback) => callback(new Blob([/** @type {any} */ (canvas.toBuffer("image/png"))], { type: "image/png" })); return canvas; } };
+(/** @type {any} */ (globalThis)).location ||= { protocol: "file:" };
 
 const ORIGINAL = "# PDF\n\nOriginal body line";
 const assets = new Map();
@@ -33,17 +34,17 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
 
 // ---- capability gate rejects conversion before starting --------------------
 {
-  const brain = { async *transcribePages() { throw new Error("must not run"); } };
-  const host = new DirectRabbitholeHost({ store, hole: fixture(), brain, getPdfTranscriptionCapability: () => ({ available: false, reason: "Install a local vision model." }) });
+  const provider = { async *transcribePages() { throw new Error("must not run"); } };
+  const host = new DirectRabbitholeHost({ store, hole: fixture(), provider, getPdfTranscriptionCapability: () => ({ available: false, reason: "Install a local vision model." }) });
   const result = await host.handleBrowserEvent({ type: "convert_pdf", node_id: host.state.root_id });
   assert.deepEqual(result, { ok: false, error: "Install a local vision model." });
-  assert.equal(host.state.nodes.get(host.state.root_id).extensions.pdf.converting, false);
+  assert.equal(host.state.nodes.get(host.state.root_id).source.converting, false);
 }
 
 // ---- streamed commit, converted flag, and stash preservation ---------------
 {
-  const brain = { async *transcribePages({ pages, tail }) { assert.equal(pages.length, 2); assert.equal(tail, ""); yield { type: "text", delta: "# Converted\n\nFaithful text." }; } };
-  const host = new DirectRabbitholeHost({ store, hole: fixture(), brain }), rootId = host.state.root_id, events = [];
+  const provider = { async *transcribePages({ pages, tail }) { assert.equal(pages.length, 2); assert.equal(tail, ""); yield { type: "text", delta: "# Converted\n\nFaithful text." }; } };
+  const host = new DirectRabbitholeHost({ store, hole: fixture(), provider }), rootId = host.state.root_id, events = [];
   host.onEvent = (event) => events.push(event);
   const note = await host.handleBrowserEvent({
     type: "node_create",
@@ -57,10 +58,10 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   assert.equal(note.ok, true);
   const start = await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
   assert.equal(start.ok, true, `a note child must not block web PDF conversion: ${start.error || ""}`);
-  await settle(() => host.state.nodes.get(rootId).extensions.pdf.converted);
+  await settle(() => host.state.nodes.get(rootId).source.converted);
   const node = host.state.nodes.get(rootId);
   assert.equal(node.markdown, "# Converted\n\nFaithful text.");
-  const pdf = node.extensions.pdf;
+  const pdf = node.source;
   assert.equal(pdf.converted, true);
   assert.equal(pdf.pages.length, 2, "finish must preserve the page stash");
   assert.equal(pdf.lines.length, 1, "finish must preserve the provenance stash");
@@ -70,38 +71,38 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
 
 // ---- provider failure mid-run: restore + toast ------------------------------
 {
-  const brain = { async *transcribePages() { yield { type: "text", delta: "" }; throw new Error("model exploded"); } };
+  const provider = { async *transcribePages() { yield { type: "text", delta: "" }; throw new Error("model exploded"); } };
   const toasts = [];
-  const host = new DirectRabbitholeHost({ store, hole: fixture(), brain, onToast: (toast) => toasts.push(toast) });
+  const host = new DirectRabbitholeHost({ store, hole: fixture(), provider, onToast: (toast) => toasts.push(toast) });
   const rootId = host.state.root_id;
   await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
   await settle(() => toasts.length > 0);
   const node = host.state.nodes.get(rootId);
   assert.equal(node.markdown, ORIGINAL, "failure must restore the original body");
-  assert.equal(node.extensions.pdf.converting, false);
-  assert.equal(node.extensions.pdf.pages.length, 2, "failure restore must preserve the extension");
+  assert.equal(node.source.converting, false);
+  assert.equal(node.source.pages.length, 2, "failure restore must preserve the extension");
   assert.match(toasts[0].message, /PDF conversion failed: model exploded/);
 }
 
 // ---- bridge payload cap: halve once and preserve page order -----------------
 {
   const pageCounts = [];
-  const brain = { async *transcribePages({ pages }) {
+  const provider = { async *transcribePages({ pages }) {
     pageCounts.push(pages.length);
     if (pages.length === 5) throw new ProviderError("Too large.", { status: 413, code: "payload_too_large" });
     yield { type: "text", delta: pages.map((page) => `page ${page.n}`).join(", ") };
   } };
-  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 5 }), brain });
+  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 5 }), provider });
   const rootId = host.state.root_id;
   await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
-  await settle(() => host.state.nodes.get(rootId).extensions.pdf.converted);
+  await settle(() => host.state.nodes.get(rootId).source.converted);
   assert.deepEqual(pageCounts, [5, 3, 2], "payload_too_large retries one halved 3+2 batch");
   assert.equal(host.state.nodes.get(rootId).markdown, "page 1, page 2, page 3\n\npage 4, page 5");
 }
 
 // ---- cancel mid-run (after a committed batch): restore, no toast ------------
 {
-  const brain = { async *transcribePages({ pages }, signal) {
+  const provider = { async *transcribePages({ pages }, signal) {
     if (pages[0].n === 1) { yield { type: "text", delta: "# Batch one committed" }; return; }
     await new Promise((_, reject) => { const fail = () => reject(new DOMException("Aborted", "AbortError")); if (signal.aborted) fail(); else signal.addEventListener("abort", fail, { once: true }); });
   } };
@@ -110,31 +111,31 @@ const settle = async (predicate) => { for (let i = 0; i < 1000 && !predicate(); 
   captureToast({ message: "toast-capture-probe" });
   assert.equal(toasts[0].message, "toast-capture-probe");
   toasts.length = 0;
-  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 6 }), brain, onToast: captureToast });
+  const host = new DirectRabbitholeHost({ store, hole: fixture({ pages: 6 }), provider, onToast: captureToast });
   const rootId = host.state.root_id;
   await host.handleBrowserEvent({ type: "convert_pdf", node_id: rootId });
   await settle(() => host.state.nodes.get(rootId).markdown.includes("Batch one"));
-  assert.equal(host.state.nodes.get(rootId).extensions.pdf.converting, true, `conversion ended before cancellation: ${toasts.map((toast) => toast.message).join("; ")}`);
+  assert.equal(host.state.nodes.get(rootId).source.converting, true, `conversion ended before cancellation: ${toasts.map((toast) => toast.message).join("; ")}`);
   await host.handleBrowserEvent({ type: "convert_cancel", node_id: rootId });
-  await settle(() => !host.state.nodes.get(rootId).extensions.pdf.converting);
+  await settle(() => !host.state.nodes.get(rootId).source.converting);
   const node = host.state.nodes.get(rootId);
   assert.equal(node.markdown, ORIGINAL, "cancel after a committed batch must restore the original body");
-  assert.equal(node.extensions.pdf.converting, false);
-  assert.equal(node.extensions.pdf.pages.length, 6, "cancel restore must preserve the extension");
+  assert.equal(node.source.converting, false);
+  assert.equal(node.source.pages.length, 6, "cancel restore must preserve the extension");
   assert.deepEqual(toasts, [], "a deliberate cancel is not an error");
 }
 
 // ---- hydration restore, including a dirty mid-run persisted body -----------
 {
-  const clean = new DirectRabbitholeHost({ store, hole: fixture({ converting: true }), brain: null });
+  const clean = new DirectRabbitholeHost({ store, hole: fixture({ converting: true }), provider: null });
   assert.equal(clean.state.nodes.get(clean.state.root_id).markdown, ORIGINAL);
-  assert.equal(clean.state.nodes.get(clean.state.root_id).extensions.pdf.converting, false);
+  assert.equal(clean.state.nodes.get(clean.state.root_id).source.converting, false);
 
-  const dirty = new DirectRabbitholeHost({ store, hole: fixture({ converting: true, markdown: "# Half-streamed junk" }), brain: null });
+  const dirty = new DirectRabbitholeHost({ store, hole: fixture({ converting: true, markdown: "# Half-streamed junk" }), provider: null });
   const restored = dirty.state.nodes.get(dirty.state.root_id);
   assert.equal(restored.markdown, ORIGINAL, "hydration must restore even when the persisted body is the mid-run stream");
-  assert.equal(restored.extensions.pdf.converting, false);
-  assert.equal(restored.extensions.pdf.pages.length, 2);
+  assert.equal(restored.source.converting, false);
+  assert.equal(restored.source.pages.length, 2);
 }
 
 console.log("ok PDF conversion: note-child gate, streamed commit, one halved payload retry, failure/cancel restore, and clean/dirty hydration restore");
