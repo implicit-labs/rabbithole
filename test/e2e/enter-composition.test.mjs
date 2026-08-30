@@ -127,8 +127,8 @@ async function verifyPendingRootStandaloneComposer() {
       "later stream chunks must preserve the saved note anchor");
 
     await page.locator('.card[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
-    assert.equal(await page.locator('.card[data-id="selected-attachment"] .origin-quote').innerText(), "“quoted source”",
-      "a selection ask must quote its selected source while retaining attachment thumbnails");
+    assert.equal(await page.locator('.card[data-id="selected-attachment"] .origin-quote').innerText(), "“What is shown?”",
+      "a selection ask must quote its human question while retaining attachment thumbnails");
 
     const sourceCard = page.locator('.card[data-id="selected-attachment"]');
     await sourceCard.locator(".nc-handle").evaluate((button) => button.click());

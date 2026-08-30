@@ -59,6 +59,10 @@ export function presetLabelForOrigin(origin) {
   return askPreset(set, origin.lens)?.label || String(origin.lens);
 }
 
+export function displayQuestionForOrigin(origin) {
+  return String(origin?.question || "").trim() || presetLabelForOrigin(origin);
+}
+
 /*
  * The Quick questions section is the product wearing its own clothes: each
  * preset set renders inside a faithful, full-width replica of its real surface
@@ -299,7 +303,7 @@ export function mountAskingSettings(host) {
       if (!active || active.set !== surface.set) return;
       const keyEvent = /** @type {KeyboardEvent} */ (event);
       if (keyEvent.key !== "Enter") return;
-      if (!/** @type {Element} */ (event.target).matches?.("[data-preset-label]")) return;
+      if (!(/** @type {Element} */ (event.target).matches?.("[data-preset-label]"))) return;
       keyEvent.preventDefault();
       closeEditor({ focusButton: true });
     });

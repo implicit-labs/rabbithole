@@ -1,5 +1,5 @@
 import { composerActionsMarkup } from "../../core/html/markup.js";
-import { presetLabelForOrigin } from "../ask-presets.js";
+import { displayQuestionForOrigin } from "../ask-presets.js";
 import { applyComposerState } from "../composer-state.js";
 import { buildDocContent, CANVAS_BASE, nodes, READER_BASE, rootId, sessionPhase } from "../core.js";
 import { isCommandEnter } from "../input-intent.js";
@@ -17,24 +17,13 @@ export function fillBody(node) {
   if (previous && previous._rhDispose) previous._rhDispose();
   body.classList.remove("pdf-body");
   body.innerHTML = "";
-  if (node.origin && node.origin.kind !== "note" && node.origin.selected_text) {
+  const originQuestion = displayQuestionForOrigin(node.origin);
+  if (node.origin && node.origin.kind !== "note" && (originQuestion || originAttachmentNames(node).length)) {
     const q = document.createElement("div");
     q.className = "origin-quote";
-    q.textContent = "“" + node.origin.selected_text + "”";
+    q.textContent = originQuestion ? "“" + originQuestion + "”" : "Pasted image";
     appendOriginAttachmentThumbnails(q, node);
     body.appendChild(q);
-  } else if (
-    node.origin &&
-    node.origin.kind !== "note" &&
-    (node.origin.question || node.origin.lens || originAttachmentNames(node).length)
-  ) {
-    const fq = document.createElement("div");
-    fq.className = "origin-quote";
-    fq.textContent = node.origin.lens
-      ? "Follow-up — " + presetLabelForOrigin(node.origin) + (node.origin.question ? " — " + node.origin.question : "")
-      : node.origin.question || "Pasted image";
-    appendOriginAttachmentThumbnails(fq, node);
-    body.appendChild(fq);
   }
   const crop = buildOriginCrop(node, "card");
   if (crop) body.appendChild(crop);

@@ -1,4 +1,26 @@
 const layers = [];
+const consumedPointers = new Set();
+
+function onConsumedPointerEnd(event) {
+  if (!consumedPointers.has(event.pointerId)) return;
+  consumedPointers.delete(event.pointerId);
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (!consumedPointers.size) {
+    document.removeEventListener("pointerup", onConsumedPointerEnd, true);
+    document.removeEventListener("pointercancel", onConsumedPointerEnd, true);
+  }
+}
+
+function consumePointerGesture(event) {
+  if (!consumedPointers.size) {
+    document.addEventListener("pointerup", onConsumedPointerEnd, true);
+    document.addEventListener("pointercancel", onConsumedPointerEnd, true);
+  }
+  consumedPointers.add(event.pointerId);
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
 
 export function focusElement(element) {
   if (!element || !element.isConnected || typeof element.focus !== "function") return false;
@@ -33,7 +55,7 @@ function onPointerdown(event) {
   )
     return;
   if (layer.ignoreOutsidePointer?.(event)) return;
-  if (layer.preventOutsidePointerDefault) event.preventDefault();
+  if (layer.preventOutsidePointerDefault) consumePointerGesture(event);
   layer.onClose("outside-pointer");
   if (layer.restoreFocus)
     layer.focusTimer = setTimeout(function () {

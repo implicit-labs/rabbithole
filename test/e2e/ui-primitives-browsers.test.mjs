@@ -35,16 +35,20 @@ async function verifyLayerAndAnchor(page, engine) {
   const result = await page.evaluate(async (base) => {
     const { registerLayer } = await import(base + "/src/ui/overlay/layer-stack.js");
     const trigger = document.getElementById("trigger"), one = document.getElementById("one"), two = document.getElementById("two");
-    trigger.focus(); const closed = [];
+    trigger.focus(); const closed = []; const outsidePointers = [];
+    for (const type of ["pointerdown", "pointerup"])
+      document.getElementById("outside").addEventListener(type, () => { outsidePointers.push(type); });
     const unregisterOne = registerLayer({ element: one, trigger, onClose: (reason) => closed.push("one:" + reason) });
     const unregisterTwo = registerLayer({ element: two, trigger, onClose: (reason) => closed.push("two:" + reason) });
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     unregisterTwo();
-    document.getElementById("outside").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    for (const type of ["pointerdown", "pointerup"])
+      document.getElementById("outside").dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7 }));
     unregisterOne();
-    return { closed, active: document.activeElement.id };
+    return { closed, active: document.activeElement.id, outsidePointers };
   }, baseUrl);
   assert.deepEqual(result.closed, ["two:escape", "one:outside-pointer"], `${engine}: layers close top-first by Escape/outside pointer`);
+  assert.deepEqual(result.outsidePointers, [], `${engine}: a dismissing layer consumes the full pointer gesture before the underlying target`);
   assert.equal(result.active, "trigger", `${engine}: layer teardown restores trigger focus`);
 
   await reset(page, '<style>#surface,#virtual{position:fixed;width:180px;height:90px;--surface-gap:12px;--surface-edge:16px}</style><button id="anchor" style="position:fixed;left:600px;top:450px;width:30px;height:20px">A</button><div id="surface"></div><div id="virtual"></div>');

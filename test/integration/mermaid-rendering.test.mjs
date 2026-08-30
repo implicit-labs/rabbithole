@@ -82,6 +82,12 @@ async function verifySelfContainedMcpPage() {
   await selectVisualText(page, "flow1", "Safe");
   await page.waitForSelector("#ask.visible");
   assert.equal(await page.locator(".rh-lightbox").count(), 0, "drag-selecting Mermaid text must not open fullscreen");
+  await clickMermaidVisual(page, "flow1");
+  await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
+  assert.equal(await page.locator(".rh-lightbox").count(), 0,
+    "the first diagram click outside a selection popover must dismiss it without opening fullscreen");
+  await selectVisualText(page, "flow1", "Safe");
+  await page.waitForSelector("#ask.visible");
   await page.click('#ask .lens[data-lens="explain"]');
   await page.waitForFunction(() => {
     const mount = document.querySelector('.viz-mermaid[data-block-id="flow1"]');
@@ -102,6 +108,12 @@ async function verifySelfContainedMcpPage() {
   assert.equal(await peerPage.evaluate(() => document.querySelector('.viz-mermaid[data-block-id="flow1"]')?.shadowRoot?.querySelector(".rh-viz-mark")?.textContent || ""), "1",
     "a connected peer that received the branch must refresh the visual's chip without remounting it");
 
+  await selectVisualText(page, "show1", oversizedShowSelection);
+  await page.waitForSelector("#ask.visible");
+  await clickShowVisual(page, "show1");
+  await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
+  assert.equal(await page.locator(".rh-lightbox").count(), 0,
+    "the first HTML visual click outside a selection popover must dismiss it without opening fullscreen");
   await clickShowVisual(page, "show1");
   await page.waitForSelector(".rh-lightbox .rh-lightbox-show");
   await selectVisualText(page, "show1", oversizedShowSelection, { lightbox: true });
@@ -124,6 +136,26 @@ async function verifySelfContainedMcpPage() {
     { block: { block_id: "flow1", selected_text: "Safe" }, question: "", lens: "explain", instruction: true },
     { block: { block_id: "show1", selected_text: oversizedShowSelection.slice(0, 2000) }, question: "Why is this target important?", lens: "example", instruction: true },
   ], "visual asks persist block identity and keep preset instructions separate from human questions");
+  assert.equal(await page.locator(`.card[data-id="${blockAsks[1].id}"] .origin-quote`).innerText(),
+    "“Why is this target important?”",
+    "an answer window must quote the human's question instead of the selected source text");
+
+  for (const blockId of ["flow1", "show1"]) {
+    assert.equal(await visualExpandOpacity(page, blockId), "0",
+      `${blockId} expand control must stay hidden until its visual is hovered`);
+    await hoverVisual(page, blockId);
+    await page.waitForFunction((id) => {
+      const host = document.querySelector(`#reader-main [data-block-id="${id}"]`);
+      const button = host?.shadowRoot?.querySelector(".rh-show-expand, .rh-mermaid-expand");
+      return button && getComputedStyle(button).opacity === "1";
+    }, blockId);
+    await page.mouse.move(0, 0);
+    await page.waitForFunction((id) => {
+      const host = document.querySelector(`#reader-main [data-block-id="${id}"]`);
+      const button = host?.shadowRoot?.querySelector(".rh-show-expand, .rh-mermaid-expand");
+      return button && getComputedStyle(button).opacity === "0";
+    }, blockId);
+  }
   const exported = await fetch(`${session.url}/export`);
   assert.equal(exported.status, 200);
   const html = await exported.text();
@@ -197,6 +229,34 @@ async function clickShowVisual(page, blockId) {
       clientX: rect.left + 2, clientY: rect.top + 2,
     }));
   }, blockId);
+}
+
+async function clickMermaidVisual(page, blockId) {
+  await page.evaluate((id) => {
+    const host = document.querySelector(`#reader-main .viz-mermaid[data-block-id="${id}"]`);
+    const target = host?.shadowRoot?.querySelector(".rh-mermaid svg");
+    if (!target) throw new Error(`Mermaid visual ${id} is not mounted`);
+    window.getSelection()?.removeAllRanges();
+    const rect = target.getBoundingClientRect();
+    for (const type of ["pointerdown", "pointerup"]) target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, composed: true, pointerId: 93, button: 0, isPrimary: true,
+      clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
+    }));
+  }, blockId);
+}
+
+async function visualExpandOpacity(page, blockId) {
+  return page.evaluate((id) => {
+    const host = document.querySelector(`#reader-main [data-block-id="${id}"]`);
+    const button = host?.shadowRoot?.querySelector(".rh-show-expand, .rh-mermaid-expand");
+    return button ? getComputedStyle(button).opacity : null;
+  }, blockId);
+}
+
+async function hoverVisual(page, blockId) {
+  await page.locator(
+    `#reader-main [data-block-id="${blockId}"] .rh-mermaid, #reader-main [data-block-id="${blockId}"] .rh-viz-content`,
+  ).first().hover();
 }
 
 async function verifyWebApp() {

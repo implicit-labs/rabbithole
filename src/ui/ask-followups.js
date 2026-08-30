@@ -324,7 +324,6 @@ function openAskSurface(anchor, owner) {
     anchor: surfaceAnchor,
     placement: mobile ? "top-center" : "bottom-start",
     restoreFocus: false,
-    preventOutsidePointerDefault: false,
     ignoreOutsidePointer: function (event) {
       return !!closestEl(event.target, ".rh-pdf-zoom-control");
     },

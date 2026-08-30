@@ -395,7 +395,7 @@ function wireShowSurface(root, _model, context, mountSpec) {
   const frame = root.closest?.(".rh-viz-frame");
   const expand = document.createElement("button");
   expand.type = "button";
-  expand.className = "rh-show-expand";
+  expand.className = "rh-visual-expand rh-show-expand";
   expand.setAttribute("aria-label", "Open visual fullscreen");
   expand.title = "Open fullscreen";
   expand.innerHTML = iconSvg("expand");
@@ -521,7 +521,7 @@ function mountMermaidAffordance(controller, target, svg) {
   if (!button) {
     button = document.createElement("button");
     button.type = "button";
-    button.className = "rh-mermaid-expand";
+    button.className = "rh-visual-expand rh-mermaid-expand";
     button.setAttribute("aria-label", "Open diagram fullscreen");
     button.title = "Open fullscreen";
     button.innerHTML = iconSvg("expand");
