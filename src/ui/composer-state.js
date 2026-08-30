@@ -1,7 +1,5 @@
 import { followupCommitFromEnter, isComposingText } from "./input-intent.js";
 
-const LENS_KEYS = { 1: "explain", 2: "eli5", 3: "example", 4: "deeper" };
-
 /**
  * @param {{ text: HTMLTextAreaElement, commits: Iterable<HTMLButtonElement>, lenses?: Iterable<HTMLButtonElement>, wrap: Element, hasDraft?: boolean | (() => boolean) }} elements
  * @param {{ phase: "frozen" | "closed" | "away" | "live", pending: boolean, disabled?: boolean, unavailable?: boolean }} state
@@ -34,8 +32,9 @@ export function applyComposerState(elements, state, copy) {
 }
 
 // The one interaction contract for every composer surface: commit buttons and
-// each surface's configured Enter gestures act on a draft, while lenses
-// (buttons or 1–4 keys) act on an empty box only. Callbacks receive the raw event; sources and submit guards stay
+// each surface's configured Enter gestures act on a draft, while presets can
+// submit either an implicit subject or a typed question. Number keys remain
+// shortcuts only while the editor is empty. Callbacks receive the raw event; sources and submit guards stay
 // with the mount, as does listener lifetime — pass the mount's scope.listen
 // when the surface outlives its module (raw addEventListener otherwise).
 /** @param {{ text: HTMLTextAreaElement, actions: Element,
@@ -56,13 +55,12 @@ export function wireComposerActions(surface) {
       return !!surface.text.value.trim();
     };
   const commitFromEnter = surface.commitFromEnter || followupCommitFromEnter;
-  const hasLenses = !!surface.actions.querySelector(".lens");
   listen(surface.actions, "click", function (e) {
     const target = /** @type {Element} */ (e.target);
     const button = target.closest ? /** @type {HTMLButtonElement | null} */ (target.closest("button")) : null;
     if (!button || button.disabled) return;
     if (button.dataset.commit && hasDraft()) surface.onCommit(button.dataset.commit, e);
-    else if (button.dataset.lens && surface.text.value === "") surface.onLens(button.dataset.lens, e);
+    else if (button.dataset.lens) surface.onLens(button.dataset.lens, e);
   });
   listen(surface.text, "keydown", function (e) {
     const commit = commitFromEnter(e);
@@ -81,21 +79,24 @@ export function wireComposerActions(surface) {
       if (available && (commit === "ask" || hasDraft())) surface.onCommit(commit, e);
       return;
     }
+    // Digits address the row positionally — "2" is whatever pill sits second —
+    // so hints stay truthful when the user has removed presets. A digit past
+    // the row's end is ordinary typing, not a dead shortcut.
     if (
-      hasLenses &&
       !isComposingText(e) &&
       surface.text.value === "" &&
       !e.metaKey &&
       !e.ctrlKey &&
       !e.altKey &&
       !e.shiftKey &&
-      LENS_KEYS[e.key]
+      /^[1-9]$/.test(e.key)
     ) {
-      e.preventDefault();
-      const lens = /** @type {HTMLButtonElement | null} */ (
-        surface.actions.querySelector('[data-lens="' + LENS_KEYS[e.key] + '"]')
+      const lens = /** @type {HTMLButtonElement | undefined} */ (
+        surface.actions.querySelectorAll(".lens[data-lens]")[Number(e.key) - 1]
       );
-      if (lens && !lens.disabled) surface.onLens(LENS_KEYS[e.key], e);
+      if (!lens) return;
+      e.preventDefault();
+      if (!lens.disabled) surface.onLens(lens.dataset.lens || "", e);
     }
   });
 }

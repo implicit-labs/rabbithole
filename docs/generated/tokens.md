@@ -91,7 +91,7 @@ Values are read from `src/design/tokens.css`; repeated theme overrides remain vi
 | `--transition-color` | `color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard)` |
 | `--shadow-card` | `0 6px 24px rgba(0, 0, 0, .45)` |
 | `--shadow-popover` | `0 1px 2px rgba(0, 0, 0, .08), 0 16px 40px -16px rgba(0, 0, 0, .4)` |
-| `--shadow-modal` | `0 20px 70px rgba(0, 0, 0, .48)` |
+| `--shadow-modal` | `0 16px 40px -12px rgba(0, 0, 0, .55)` |
 | `--surface-popover-bg` | `color-mix(in srgb, var(--bar-bg) 96%, transparent)` |
 | `--surface-popover-border` | `var(--border-default)` |
 | `--surface-popover-radius` | `var(--radius-popover)` |
@@ -247,7 +247,7 @@ Values are read from `src/design/tokens.css`; repeated theme overrides remain vi
 | `--sk-base` | `rgba(255, 255, 255, .06)` |
 | `--scrim` | `rgba(26, 25, 24, .62)` |
 | `--shadow-card` | `0 6px 24px rgba(0, 0, 0, .45)` |
-| `--shadow-modal` | `0 20px 70px rgba(0, 0, 0, .48)` |
+| `--shadow-modal` | `0 16px 40px -12px rgba(0, 0, 0, .55)` |
 | `--surface-edge` | `8px` |
 | `--surface-gap` | `8px` |
 | `--duration-instant` | `0ms` |

@@ -9,6 +9,7 @@ const tier = process.argv[2] || "all";
 const tiers = ["unit", "contracts", "integration", "e2e", "performance", "packaging"];
 const checks = {
   icons: [process.execPath, [path.join(rootDir, "scripts/generate-ionicons.mjs"), "--check"]],
+  css: [process.execPath, [path.join(rootDir, "scripts/check-css-integrity.mjs")]],
   types: [process.execPath, [path.join(rootDir, "scripts/check-types.mjs")]],
   purity: [process.execPath, [path.join(rootDir, "scripts/check-ui-purity.mjs")]],
   design: [process.execPath, [path.join(rootDir, "scripts/check-design.mjs")]],
@@ -28,6 +29,7 @@ if (tier === "all") {
 } else if (tiers.includes(tier)) {
   if (tier === "unit") jobs.push(
     { name: "check:icons", command: checks.icons },
+    { name: "check:css", command: checks.css },
     { name: "check:design", command: checks.design },
     { name: "check:design-doc", command: checks["design-doc"] },
     { name: "check:docs", command: checks.docs },

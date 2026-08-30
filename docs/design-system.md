@@ -9,6 +9,7 @@ and frozen snapshots.
 
 - One token sheet supplies canvas chrome, web chrome, light and dark themes,
   and frozen snapshots.
+- CSS files are real CSS, never templates—`${` is forbidden.
 - Chrome consumes named tokens. Per-screen magic design values are forbidden.
 - Structural literals remain legal: `0`, `1px`, `100%`, intrinsic dimensions,
   and component-local optical corrections.

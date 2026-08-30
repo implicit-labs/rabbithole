@@ -18,12 +18,14 @@ assert.equal(BUNNY_MARK_SVG, iconSvg("bunny"));
 assert.match(faviconSvg(), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
 assert.throws(() => iconSvg("missing"), /Unknown Rabbithole icon/);
 assert.throws(() => iconSvg("send", { size: 0 }), /positive number/);
-assert.equal(Object.keys(ICON_SELECTIONS).length, 38, "every Ionicons-sourced icon role belongs in the shared selection map");
+assert.equal(Object.keys(ICON_SELECTIONS).length, 36, "every Ionicons-sourced icon role belongs in the shared selection map");
 assert.match(iconSvg("more"), /<circle[^>]+r="48"/, "the card menu uses the filled vertical ellipsis");
 assert.equal((iconSvg("more").match(/cx="256"/g) || []).length, 3, "the card menu kebab stacks all three dots on one axis");
 assert.notEqual(iconSvg("trail"), iconSvg("copy"), "trail and document copy need distinct silhouettes");
 assert.notEqual(iconSvg("download"), iconSvg("package"), "snapshot download and portable export need distinct silhouettes");
 assert.notEqual(iconSvg("pin"), iconSvg("pin-active"), "available and active pin states need distinct silhouettes");
+assert.match(iconSvg("pin"), /d="M160 56h192v144l56 96H104l56-96V56z"/, "the available pin uses the product-owned flat head");
+assert.match(iconSvg("pin-active"), /d="M136 32h240v162l74 126H62l74-126V32z"/, "the active pin fills the same flat-headed family");
 assert.notEqual(iconSvg("locate"), iconSvg("canvas"), "locating an original card must not look like the graph canvas");
 assert.match(iconSvg("rail"), /stroke-width="48"/, "the product-owned rail panel stays on the Ionicons stroke grid");
 

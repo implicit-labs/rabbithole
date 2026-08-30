@@ -59,14 +59,14 @@ export function askOfNode(node) {
   if (!origin || typeof origin !== "object" || Array.isArray(origin)) return null;
   const raw = /** @type {Record<string, any>} */ (origin);
   const owned = raw.kind === "note" || "question" in raw || "selected_text" in raw || "anchor" in raw
-    || "branch_type" in raw || "lens" in raw || "attachment_assets" in raw || "crop_asset" in raw
+    || "branch_type" in raw || "lens" in raw || "instruction" in raw || "attachment_assets" in raw || "crop_asset" in raw
     || "web_root_question" in raw;
   if (!owned) return null;
   const isRootQuestion = typeof raw.web_root_question === "string";
-  const human = raw.kind === "note";
+  const note = raw.kind === "note";
   const question = isRootQuestion
     ? raw.web_root_question
-    : human ? String(node.markdown ?? "") : String(raw.question ?? "");
+    : note ? String(node.markdown ?? "") : String(raw.question ?? "");
   const attachmentAssets = normalizeAskAttachments(raw.attachment_assets);
   let clip = null;
   try { clip = raw.crop_asset == null ? null : validateAssetName(raw.crop_asset); } catch {}
@@ -76,13 +76,14 @@ export function askOfNode(node) {
     id: String(node.id),
     at: {
       node_id: isRootQuestion ? null : (node.parent_id == null ? null : String(node.parent_id)),
-      anchor: human || !isRootQuestion ? normalizeAnchor(raw.anchor) : null,
+      anchor: note || !isRootQuestion ? normalizeAnchor(raw.anchor) : null,
     },
     question,
     lens: typeof raw.lens === "string" ? raw.lens : null,
+    instruction: typeof raw.instruction === "string" ? raw.instruction : null,
     attachments: attachmentAssets,
     clip,
-    author: human ? "human" : "agent",
+    author: note && raw.author !== "agent" ? "human" : "agent",
     produces: String(node.id),
     state: status,
     run: null,
@@ -101,6 +102,7 @@ export function validateAsk(value) {
   if (ask.at.anchor !== null && !normalizeAnchor(ask.at.anchor)) throw new Error(`Ask ${ask.id} anchor is invalid`);
   if (typeof ask.question !== "string") throw new Error(`Ask ${ask.id} question must be a string`);
   if (ask.lens !== null && typeof ask.lens !== "string") throw new Error(`Ask ${ask.id} lens must be string or null`);
+  if (ask.instruction !== null && typeof ask.instruction !== "string") throw new Error(`Ask ${ask.id} instruction must be string or null`);
   validateAskAttachments(ask.attachments, `Ask ${ask.id} attachments`);
   if (ask.clip !== null) validateAssetName(ask.clip);
   if (ask.author !== "human" && ask.author !== "agent") throw new Error(`Ask ${ask.id} author is invalid`);
@@ -124,14 +126,16 @@ export function validateLegacyAskOrigin(origin, nodeId) {
   if (!origin || typeof origin !== "object" || Array.isArray(origin)) throw new Error(`Persisted node ${nodeId} origin must be object or null`);
   const raw = /** @type {Record<string, any>} */ (origin);
   const owned = raw.kind === "note" || "question" in raw || "selected_text" in raw || "anchor" in raw
-    || "branch_type" in raw || "lens" in raw || "attachment_assets" in raw || "crop_asset" in raw
+    || "branch_type" in raw || "lens" in raw || "instruction" in raw || "attachment_assets" in raw || "crop_asset" in raw
     || "web_root_question" in raw;
   if (!owned) return true;
   if (raw.kind !== undefined && raw.kind !== "note") throw new Error(`Persisted node ${nodeId} origin.kind is invalid`);
+  if (raw.author !== undefined && raw.author !== "human" && raw.author !== "agent") throw new Error(`Persisted node ${nodeId} origin.author is invalid`);
   for (const field of ["question", "selected_text", "web_root_question"]) {
     if (raw[field] !== undefined && typeof raw[field] !== "string") throw new Error(`Persisted node ${nodeId} origin.${field} must be a string`);
   }
   if (raw.lens !== undefined && raw.lens !== null && typeof raw.lens !== "string") throw new Error(`Persisted node ${nodeId} origin.lens must be string or null`);
+  if (raw.instruction !== undefined && raw.instruction !== null && typeof raw.instruction !== "string") throw new Error(`Persisted node ${nodeId} origin.instruction must be string or null`);
   if (raw.branch_type !== undefined && ![BRANCH_SELECTION, BRANCH_FOLLOWUP].includes(raw.branch_type)) throw new Error(`Persisted node ${nodeId} origin.branch_type is invalid`);
   if (raw.anchor !== undefined && raw.anchor !== null && !normalizeAnchor(raw.anchor)) throw new Error(`Persisted node ${nodeId} origin.anchor is invalid`);
   if (raw.attachment_assets !== undefined) {
@@ -152,6 +156,7 @@ export function makeTranscribeAsk(node, state) {
     at: { node_id: node.id, anchor: null },
     question: "Create a text version of this PDF.",
     lens: null,
+    instruction: null,
     attachments: [],
     clip: null,
     author: /** @type {const} */ ("agent"),
@@ -163,13 +168,15 @@ export function makeTranscribeAsk(node, state) {
   };
 }
 
-/** @param {HoleNode} node */
+/** @param {HoleNode} node @returns {Record<string, any>} */
 function noteEntry(node) {
+  const author = /** @type {{ author?: unknown } | null | undefined} */ (node.origin)?.author === "agent" ? "agent" : "human";
   return {
     note_id: node.id,
     on_node_id: node.parent_id,
     on_selected_text: (/** @type {{ selected_text?: string } | null | undefined} */ (node.origin))?.selected_text || null,
     content: node.markdown,
+    ...(author === "agent" ? { author } : {}),
     created_at: node.created_at,
   };
 }
@@ -180,12 +187,12 @@ function standaloneFirstByAge(a, b) {
   return scope || String(a.created_at || "").localeCompare(String(b.created_at || ""));
 }
 
-/** @param {NodeCollection} nodes */
+/** @param {NodeCollection} nodes @returns {Record<string, any>[]} */
 export function collectAllNotes(nodes) {
   return [...valuesOfNodes(nodes)].filter(isNoteNode).sort(standaloneFirstByAge).map(noteEntry);
 }
 
-/** @param {NodeCollection} nodes @param {string} parentId @param {{ includeLineage?: boolean }} [options] */
+/** @param {NodeCollection} nodes @param {string} parentId @param {{ includeLineage?: boolean }} [options] @returns {Record<string, any>[]} */
 export function collectRelevantNotes(nodes, parentId, options = {}) {
   const lineage = lineageNodesFromMap(nodes, parentId);
   const lineageIds = new Set(lineage.map((node) => node.id));

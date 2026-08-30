@@ -9,6 +9,7 @@
 | `npm run build:publish` | `node scripts/build-publish.mjs` |
 | `npm run calibrate:budgets` | `node test/support/calibrate-budgets.mjs` |
 | `npm run check:bridge-live` | `node scripts/bridge-live-check.mjs` |
+| `npm run check:css` | `node scripts/check-css-integrity.mjs` |
 | `npm run check:design` | `node scripts/check-design.mjs` |
 | `npm run check:design-doc` | `node scripts/generate-design-doc.mjs --check` |
 | `npm run check:dist` | `node scripts/check-dist.mjs` |

@@ -293,6 +293,7 @@ export class SessionAnswer extends SessionBroadcast {
       const contextParentId = node.parent_id ?? this.rootId;
       const parent = this.nodes.get(contextParentId);
       const origin = rawOrigin(node);
+      /** @type {any} */
       const event = {
         status: "branch_request",
         session_id: this.id,
@@ -303,6 +304,8 @@ export class SessionAnswer extends SessionBroadcast {
         selected_text: node.parent_id == null ? "" : (origin.selected_text || ""),
         question: origin.question || "",
         lens: origin.lens || null,
+        ...(origin.instruction ? { instruction: origin.instruction } : {}),
+        ...(origin.anchor?.block ? { anchor: { block: origin.anchor.block } } : {}),
         lineage: this.lineageTitles(contextParentId),
         saved: true, // asked while the agent was away; answer it like any other
       };

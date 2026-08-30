@@ -42,6 +42,7 @@ export class RabbitholeSession extends SessionAnswer {
     this.requests.pending(requestId, nodeId);
     const origin = rawOrigin(node);
 
+    /** @type {any} */
     const event = {
       status: "branch_request",
       session_id: this.id,
@@ -52,6 +53,8 @@ export class RabbitholeSession extends SessionAnswer {
       selected_text: origin.selected_text,
       question: origin.question,
       lens: origin.lens,
+      ...(origin.instruction ? { instruction: origin.instruction } : {}),
+      ...(origin.anchor?.block ? { anchor: { block: origin.anchor.block } } : {}),
       lineage: this.lineageTitles(contextParentId),
     };
 

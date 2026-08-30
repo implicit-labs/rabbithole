@@ -46,6 +46,7 @@ import { renderBreadcrumb, renderMarginNotes, renderReaderBody } from "./reader.
 import { refreshNodeHtml } from "./renderer.js";
 import { applyServerEvent } from "./store/apply-server-event.js";
 import { upgradeMarks, wrapInContainer } from "./text-marks.js";
+import { refreshVisualMarks } from "./visuals.js";
 
 // ===========================================================================
 // transport
@@ -474,6 +475,8 @@ function handleServer(msg) {
         if (pp && pp.bodyEl)
           wrapInContainer(pp.bodyEl.querySelector(".doc-content"), node.origin.anchor, node.id, "hl mark-pending");
       }
+      const blockId = node.origin?.anchor?.block?.block_id;
+      if (blockId && node.parent_id) refreshVisualMarks(node.parent_id, blockId);
     }
     if (result.type === "node_answered") {
       cancelQueuedStreamRender(node.id);

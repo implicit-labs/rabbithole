@@ -2,14 +2,17 @@
 // VISUAL FENCES
 // ===========================================================================
 import { getBlockType } from "../core/blocks.js";
+import { normalizeBlockAnchor } from "../core/hole/anchor.js";
 import { iconSvg } from "../core/html/icons.js";
 import { BUTTON_OPEN } from "../core/html/markup.js";
 import { escapeHtml } from "../core/utils.js";
+import { createCleanupScope } from "./kit/scope.js";
 import { disposeLightbox, openLightbox } from "./lightbox.js";
 import { visualStylesFor } from "./visual-style-runtime.js";
 
 let visualSurfaceCaches = {};
 const blockMounts = {};
+const mountedVisuals = new Set();
 let mermaidRuntimePromise = null;
 let mermaidRenderQueue = Promise.resolve();
 let mermaidRenderId = 0;
@@ -39,6 +42,16 @@ function defaultVisualHooks() {
     getNode: function () {
       return null;
     },
+    getBlockBranches: function () {
+      return [];
+    },
+    openBranch: function () {},
+    askSelection: function () {
+      return false;
+    },
+    canAsk: function () {
+      return false;
+    },
     loadMermaid: loadEmbeddedMermaidRuntime,
   };
 }
@@ -60,6 +73,8 @@ export function initVisuals(hooks) {
   visualHooks = Object.assign(defaultVisualHooks(), hooks || {});
 }
 export function disposeVisuals() {
+  for (const mounted of mountedVisuals) mounted.__rhVisualDispose?.();
+  mountedVisuals.clear();
   for (let i = 0; i < mermaidControllers.length; i++) mermaidControllers[i].dispose();
   disposeLightbox();
   visualSurfaceCaches = {};
@@ -82,6 +97,15 @@ export function registerBlockMount(type, mountSpec) {
   }
   if (mountSpec.wire !== undefined && typeof mountSpec.wire !== "function") {
     throw new TypeError('Block mount wire for "' + key + '" must be a function');
+  }
+  const selectionCapabilities = ["wireSelection", "packContext", "paintMark"];
+  const supplied = selectionCapabilities.filter((name) => mountSpec[name] !== undefined);
+  if (supplied.length && supplied.length !== selectionCapabilities.length) {
+    throw new TypeError('Askable block mount for "' + key + '" must provide wireSelection, packContext, and paintMark');
+  }
+  for (const name of supplied) {
+    if (typeof mountSpec[name] !== "function")
+      throw new TypeError("Block mount " + name + ' for "' + key + '" must be a function');
   }
   blockMounts[key] = mountSpec;
 }
@@ -129,8 +153,288 @@ function visualFallback(source, message) {
   wrap.appendChild(pre);
   return wrap;
 }
+
+function liveRange(candidate) {
+  if (!candidate) return null;
+  if (typeof candidate.cloneRange === "function") return candidate.cloneRange();
+  try {
+    const range = document.createRange();
+    range.setStart(candidate.startContainer, candidate.startOffset);
+    range.setEnd(candidate.endContainer, candidate.endOffset);
+    return range;
+  } catch (error) {
+    return null;
+  }
+}
+
+function rangeInsideRoot(range, root) {
+  return !!range && !!root?.contains && root.contains(range.startContainer) && root.contains(range.endContainer);
+}
+
+function shadowAwareSelection(root) {
+  const shadow = root?.getRootNode?.();
+  const documentSelection = window.getSelection?.();
+  const candidates = [];
+  if (documentSelection?.getComposedRanges) {
+    try {
+      candidates.push(...documentSelection.getComposedRanges({ shadowRoots: shadow?.host ? [shadow] : [] }));
+    } catch (error) {
+      try {
+        candidates.push(...documentSelection.getComposedRanges(shadow?.host ? shadow : undefined));
+      } catch (nestedError) {}
+    }
+  }
+  const shadowSelection = shadow?.getSelection?.();
+  if (shadowSelection && !shadowSelection.isCollapsed) {
+    for (let index = 0; index < shadowSelection.rangeCount; index++) candidates.push(shadowSelection.getRangeAt(index));
+  }
+  if (documentSelection && !documentSelection.isCollapsed) {
+    for (let index = 0; index < documentSelection.rangeCount; index++)
+      candidates.push(documentSelection.getRangeAt(index));
+  }
+  for (const candidate of candidates) {
+    const range = liveRange(candidate);
+    if (!rangeInsideRoot(range, root)) continue;
+    const text = range.toString().trim();
+    if (text) return { text, range };
+  }
+  return null;
+}
+
+function coarsePointer() {
+  try {
+    return !!window.matchMedia?.("(pointer: coarse)").matches;
+  } catch (error) {
+    return false;
+  }
+}
+
+function virtualRangeAnchor(range, contextElement) {
+  return {
+    contextElement,
+    getBoundingClientRect: function () {
+      return range.getBoundingClientRect();
+    },
+  };
+}
+
+function captureBlockAsk(root, context, mountSpec, selection) {
+  const selectedText = String(selection?.text || "").trim();
+  if (!selectedText || !context.block_id || !context.canAsk()) return false;
+  const packed = mountSpec.packContext({ selected_text: selectedText }, context);
+  if (!packed?.block) return false;
+  const anchor = selection.range
+    ? virtualRangeAnchor(selection.range, root)
+    : {
+        contextElement: root,
+        getBoundingClientRect: function () {
+          return selection.element.getBoundingClientRect();
+        },
+      };
+  return context.askSelection({
+    parentId: context.node_id,
+    selectedText,
+    blockAnchor: packed.block,
+    anchorRectEl: anchor,
+    range: selection.range || null,
+  });
+}
+
+function wireTextSelection(root, context, mountSpec, coarseTextElement) {
+  if (!root?.addEventListener || !context.canAsk()) return function () {};
+  let start = null;
+  function onPointerdown(event) {
+    if (
+      event.button !== 0 ||
+      event.isPrimary === false ||
+      event.target.closest?.(".rh-viz-mark, button, a, input, textarea, select")
+    ) {
+      start = null;
+      return;
+    }
+    start = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+  function onPointerup(event) {
+    if (!start || start.id !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    const dragged = dx * dx + dy * dy >= 25;
+    start = null;
+    const selected = shadowAwareSelection(root);
+    if (selected && captureBlockAsk(root, context, mountSpec, selected)) {
+      if (!dragged) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+    if (!dragged && coarsePointer()) {
+      const element = coarseTextElement(event.target, root);
+      const text = String(element?.textContent || "").trim();
+      if (element && text && captureBlockAsk(root, context, mountSpec, { text, element })) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+  }
+  function onPointercancel() {
+    start = null;
+  }
+  root.addEventListener("pointerdown", onPointerdown, true);
+  root.addEventListener("pointerup", onPointerup, true);
+  root.addEventListener("pointercancel", onPointercancel, true);
+  return function () {
+    root.removeEventListener("pointerdown", onPointerdown, true);
+    root.removeEventListener("pointerup", onPointerup, true);
+    root.removeEventListener("pointercancel", onPointercancel, true);
+  };
+}
+
+function mermaidTextElement(target, root) {
+  const element = target?.closest?.("text");
+  return element && root.contains(element) ? element : null;
+}
+
+function showTextElement(target, root) {
+  let element = target?.nodeType === 1 ? target : target?.parentElement;
+  while (element && element !== root) {
+    if (
+      !element.matches?.("style, script, button, a, input, textarea, select") &&
+      element.childElementCount === 0 &&
+      String(element.textContent || "").trim()
+    )
+      return element;
+    element = element.parentElement;
+  }
+  return null;
+}
+
+function packBlockContext(selection, context) {
+  return { block: normalizeBlockAnchor({ block_id: context.block_id, selected_text: selection.selected_text }) };
+}
+
+function paintBlockMark(root, _model, context) {
+  const frame = root?.closest?.(".rh-viz-frame");
+  if (!frame) return;
+  const branches = context.getBranches();
+  let chip = frame.querySelector(".rh-viz-mark");
+  if (!branches.length) {
+    chip?.remove();
+    return;
+  }
+  if (!chip) {
+    chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "rh-viz-mark";
+    chip.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = context.getBranches();
+      const branch = current[current.length - 1];
+      if (branch) context.openBranch(branch.id);
+    });
+    frame.appendChild(chip);
+  }
+  chip.textContent = String(branches.length);
+  chip.title =
+    branches.length === 1
+      ? "Open answer from this visual"
+      : `Open latest of ${branches.length} answers from this visual`;
+  chip.setAttribute("aria-label", chip.title);
+  chip.dataset.child = branches[branches.length - 1].id;
+}
+
+export function refreshVisualMarks(nodeId, blockId = "") {
+  for (const mounted of mountedVisuals) {
+    const record = mounted.__rhVisualMount;
+    if (!record || record.context.node_id !== nodeId || (blockId && record.context.block_id !== blockId)) continue;
+    record.mountSpec.paintMark?.(record.content, record.model, record.context);
+  }
+}
+
 function buildShowVisual(model) {
   return String(model == null ? "" : model);
+}
+
+function cloneShowVisual(content) {
+  const host = document.createElement("div");
+  host.className = "rh-lightbox-show";
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = visualStylesFor("show");
+  const frame = document.createElement("div");
+  frame.className = "rh-viz-frame";
+  const clone = content.cloneNode(true);
+  clone.classList.add("rh-viz-content");
+  frame.appendChild(clone);
+  shadow.append(style, frame);
+  return host;
+}
+
+function openShowLightbox(content, context, mountSpec, trigger) {
+  let selectionCleanup = function () {};
+  return openLightbox({
+    content: cloneShowVisual(content),
+    label: "Visual",
+    trigger,
+    variant: "diagram",
+    selectionEnabled: true,
+    onContentChange: function (host) {
+      selectionCleanup();
+      const root = host.shadowRoot?.querySelector(".rh-viz-content");
+      selectionCleanup = root ? mountSpec.wireSelection(root, context, mountSpec) : function () {};
+    },
+    onClose: function () {
+      selectionCleanup();
+    },
+  });
+}
+
+function wireShowSurface(root, _model, context, mountSpec) {
+  if (!root?.addEventListener) return function () {};
+  const frame = root.closest?.(".rh-viz-frame");
+  const expand = document.createElement("button");
+  expand.type = "button";
+  expand.className = "rh-show-expand";
+  expand.setAttribute("aria-label", "Open visual fullscreen");
+  expand.title = "Open fullscreen";
+  expand.innerHTML = iconSvg("expand");
+  frame?.appendChild(expand);
+  let start = null;
+  function onPointerdown(event) {
+    if (
+      event.button !== 0 ||
+      event.isPrimary === false ||
+      event.target.closest?.("button, a, input, textarea, select, .rh-viz-mark")
+    )
+      return;
+    start = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+  function onPointerup(event) {
+    if (!start || start.id !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    start = null;
+    if (dx * dx + dy * dy >= 25 || shadowAwareSelection(root)) return;
+    openShowLightbox(root, context, mountSpec, expand);
+  }
+  function onPointercancel() {
+    start = null;
+  }
+  root.addEventListener("pointerdown", onPointerdown);
+  root.addEventListener("pointerup", onPointerup);
+  root.addEventListener("pointercancel", onPointercancel);
+  expand.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    openShowLightbox(root, context, mountSpec, expand);
+  });
+  return function () {
+    root.removeEventListener("pointerdown", onPointerdown);
+    root.removeEventListener("pointerup", onPointerup);
+    root.removeEventListener("pointercancel", onPointercancel);
+    expand.remove();
+  };
 }
 
 function buildMermaidVisual() {
@@ -192,11 +496,20 @@ function openMermaidLightbox(controller, target, trigger) {
   const svg = target.querySelector("svg");
   if (!svg || !target.classList.contains("is-rendered")) return;
   const label = mermaidAccessibleName(svg);
+  let selectionCleanup = function () {};
   controller.lightbox = openLightbox({
     content: cloneMermaidSvg(svg),
     label: label,
     trigger: trigger,
     variant: "diagram",
+    selectionEnabled: true,
+    onContentChange: function (content) {
+      selectionCleanup();
+      selectionCleanup = controller.mountSpec.wireSelection(content, controller.context, controller.mountSpec);
+    },
+    onClose: function () {
+      selectionCleanup();
+    },
   });
 }
 
@@ -276,12 +589,14 @@ function trackMermaidController(controller) {
   mermaidThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
-function wireMermaid(root, source) {
+function wireMermaid(root, source, context, mountSpec) {
   const target = root.querySelector(".rh-mermaid");
   let renderVersion = 0;
   const generation = mermaidGeneration;
   const controller = {
     root: root,
+    context: context,
+    mountSpec: mountSpec,
     lightbox: null,
     dispose: function () {},
     render: function () {
@@ -327,10 +642,12 @@ function wireMermaid(root, source) {
 }
 
 function buildMountedVisual(descriptor, mountSpec, model, context) {
-  const host = document.createElement("div");
+  const host = /** @type {any} */ (document.createElement("div"));
   host.className = "viz-mounted viz-" + descriptor.type;
   host.setAttribute("data-viz-mounted", descriptor.type);
+  if (context.block_id) host.setAttribute("data-block-id", context.block_id);
   host.style.contain = descriptor.type === "mermaid" ? "layout style" : "content";
+  context.host = host;
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
   style.textContent = visualStylesFor(descriptor.type);
@@ -346,7 +663,22 @@ function buildMountedVisual(descriptor, mountSpec, model, context) {
   frame.appendChild(content);
   shadow.appendChild(style);
   shadow.appendChild(frame);
-  if (mountSpec.wire) mountSpec.wire(content, model, context);
+  const scope = createCleanupScope();
+  if (mountSpec.wireSelection && context.canAsk()) {
+    const cleanup = mountSpec.wireSelection(content, context, mountSpec);
+    if (typeof cleanup === "function") scope.addCleanup(cleanup);
+  }
+  if (mountSpec.wire) {
+    const cleanup = mountSpec.wire(content, model, context, mountSpec);
+    if (typeof cleanup === "function") scope.addCleanup(cleanup);
+  }
+  mountSpec.paintMark?.(content, model, context);
+  host.__rhVisualMount = { mountSpec, content, model, context };
+  host.__rhVisualDispose = function () {
+    scope.dispose();
+    mountedVisuals.delete(host);
+  };
+  mountedVisuals.add(host);
   return host;
 }
 function getSurfaceCache(surfaceKey) {
@@ -394,7 +726,10 @@ export function mountVisuals(containerEl, surfaceKey) {
     if (!cache[item.key]) cache[item.key] = [];
     let mounted = cache[item.key][idx];
     const signature = visualCacheKey(item.type, item.encoded);
-    if (mounted && mounted.__rhVisualSignature !== signature) mounted = null;
+    if (mounted && mounted.__rhVisualSignature !== signature) {
+      mounted.__rhVisualDispose?.();
+      mounted = null;
+    }
     if (!mounted) {
       const descriptor = getBlockType(item.type);
       const mountSpec = blockMounts[item.type];
@@ -422,6 +757,18 @@ export function mountVisuals(containerEl, surfaceKey) {
             node_id: nodeId,
             block_id: item.blockId,
             state: currentState && typeof currentState === "object" ? currentState : {},
+            canAsk: function () {
+              return !!item.blockId && !!nodeId && visualHooks.canAsk();
+            },
+            askSelection: function (options) {
+              return visualHooks.askSelection(options);
+            },
+            getBranches: function () {
+              return visualHooks.getBlockBranches(nodeId, item.blockId);
+            },
+            openBranch: function (branchId) {
+              return visualHooks.openBranch(branchId);
+            },
             recordBlockState: function (nextState) {
               if (!item.blockId || !nodeId) return Promise.resolve({ ok: true });
               if (node) {
@@ -447,13 +794,36 @@ export function mountVisuals(containerEl, surfaceKey) {
   }
   for (const ckey in cache) {
     if (!Object.prototype.hasOwnProperty.call(cache, ckey)) continue;
-    if (!present[ckey]) delete cache[ckey];
-    else cache[ckey].length = present[ckey];
+    if (!present[ckey]) {
+      for (const mounted of cache[ckey]) mounted?.__rhVisualDispose?.();
+      delete cache[ckey];
+    } else {
+      for (let index = present[ckey]; index < cache[ckey].length; index++) cache[ckey][index]?.__rhVisualDispose?.();
+      cache[ckey].length = present[ckey];
+    }
   }
 }
 
-registerBlockMount("show", { renderHtml: buildShowVisual });
-registerBlockMount("mermaid", { renderHtml: buildMermaidVisual, wire: wireMermaid });
+const showMount = {
+  renderHtml: buildShowVisual,
+  wire: wireShowSurface,
+  wireSelection: function (root, context, mountSpec) {
+    return wireTextSelection(root, context, mountSpec, showTextElement);
+  },
+  packContext: packBlockContext,
+  paintMark: paintBlockMark,
+};
+const mermaidMount = {
+  renderHtml: buildMermaidVisual,
+  wire: wireMermaid,
+  wireSelection: function (root, context, mountSpec) {
+    return wireTextSelection(root, context, mountSpec, mermaidTextElement);
+  },
+  packContext: packBlockContext,
+  paintMark: paintBlockMark,
+};
+registerBlockMount("show", showMount);
+registerBlockMount("mermaid", mermaidMount);
 
 export function buildCheckVisual(model) {
   const options = model.options

@@ -96,11 +96,13 @@ html[data-theme="dark"] .md .rh-img-frame > img { color: var(--image-matte-ink);
 .rh-lightbox-dialog { display: contents; }
 .rh-lightbox-viewport { display: flex; align-items: center; justify-content: center; animation: rh-lightbox-content-in var(--duration-enter) var(--ease-out); }
 .rh-lightbox-content { transform: translate(var(--rh-pan-x, 0px), var(--rh-pan-y, 0px)) scale(var(--rh-zoom, 1)); transform-origin: center center; cursor: grab; user-select: none; -webkit-user-select: none; }
+.rh-lightbox-selection .rh-lightbox-content { cursor: text; user-select: text; -webkit-user-select: text; }
 .rh-lightbox-content:active { cursor: grabbing; }
 .rh-lightbox-img { display: block; max-width: min(92vw, calc(100vw - 112px)); max-height: 92vh; border-radius: 8px; }
 html[data-theme="dark"] .rh-lightbox-img:not([data-rh-pasted="1"]) { padding: 8px; background: var(--image-matte); border: 1px solid color-mix(in srgb, var(--border) 60%, var(--image-matte)); }
 .rh-lightbox-diagram-viewport { position: relative; z-index: var(--layer-local-base); box-sizing: border-box; overflow: visible; padding: clamp(12px, 2vw, 24px); color: var(--fg); }
 .rh-lightbox-diagram { display: block; width: 100%; height: 100%; flex: none; }
+.rh-lightbox-show { display: block; width: min(1100px, calc(100vw - 112px)); max-width: 92vw; max-height: 90vh; overflow: auto; }
 .rh-lightbox-close { position: fixed; top: 14px; right: 14px; z-index: var(--layer-local-high); display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--border-focus); border-radius: var(--radius-control-lg); background: var(--card-bg); color: var(--fg-bold); box-shadow: var(--shadow-popover); cursor: pointer; transition: var(--transition-color); }
 .rh-lightbox-close:hover { background: var(--bar-bg); }
 .rh-lightbox-close:focus { outline: none; }
@@ -170,7 +172,7 @@ body.agent-down .stream-caret, body.session-over .stream-caret { animation: none
   .math-pending::after, .viz-pending::after { animation: none; }
   .rh-lightbox, .rh-lightbox-viewport { animation: none; }
   .commit-actions, .ask-commit, .doc-content mark.hl::after, .composer-inner, .tool-icon,
-  .card${""}::after, .card.card-enter, .nc-handle, .nc-inner, #ask, .anchored-menu, #branch-undo, #banner { transition: none !important; }
+  .card::after, .card.card-enter, .nc-handle, .nc-inner, #ask, .anchored-menu, #branch-undo, #banner { transition: none !important; }
   #ask, .anchored-menu, #branch-undo, #banner, .card.card-enter { transform: none; }
   .card.card-enter { opacity: 1; }
 }
@@ -322,7 +324,7 @@ body.mode-flight #viewport { display: block; }
    the head carries its own top radius instead. */
 .card { --card-head-bg: var(--card-head); position: absolute; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
 .card.card-note { --card-head-bg: var(--note-card-head); background: var(--note-card-bg); border-color: var(--note-card-border); }
-.card${""}::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1); }
+.card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1); }
 .card.card-enter { opacity: 0; transform: translateY(8px); transition: opacity var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1), transform var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1); }
 .card.card-enter.entered { opacity: 1; transform: translateY(0); }
 .card.root { border-color: var(--border-focus); }
@@ -417,7 +419,7 @@ body.mode-flight #viewport { display: block; }
   padding: 3.5px 11px 4.5px; cursor: pointer; opacity: 0; pointer-events: none; box-shadow: 0 4px 10px -6px var(--shadow-alpha-30);
   transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
 @media (hover: hover) and (pointer: fine) {
-  .card${""}:hover .nc-handle { opacity: 1; pointer-events: auto; }
+  .card:hover .nc-handle { opacity: 1; pointer-events: auto; }
 }
 .nc-handle:hover { color: var(--fg-bold); }
 .nc-plus { font-size: var(--text-body); line-height: 1; font-weight: var(--weight-regular); color: var(--accent); }
@@ -518,6 +520,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   transform: scale(0.97) translateY(-4px); transform-origin: top center;
   transition: opacity var(--duration-enter) var(--ease-out), transform var(--duration-enter) var(--ease-out), visibility var(--duration-zero) linear var(--duration-enter); }
 #ask.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); transition-delay: var(--duration-zero); }
+#ask.over-lightbox { z-index: calc(var(--layer-lightbox) + 1); }
 /* Accent on the hairline only — the 3px glow around the whole surface was the harsh
    part. Pitched to sit at the weight of the lens hover wash: --hl itself is right for
    a filled pill but vanishes as a 1px line, so the same presence needs more of the
@@ -530,12 +533,13 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .ask-input textarea { flex: 1; border: none; outline: none; resize: none; background: transparent; color: var(--fg);
   font-family: var(--font-ui); font-size: var(--text-body); line-height: 1.5; padding: 3px 0; min-height: 20px; max-height: 110px; }
 .ask-input textarea::placeholder { color: var(--fg-faint); }
-/* The four labels are wildly different lengths ("ELI5" vs "Go Deeper"), so equal
+/* The four labels are different lengths ("ELI5" vs "Go deeper"), so equal
    flex columns produce unequal gaps between the words — the short label floats in
    a pool of space while the long one nearly touches its neighbour. Size each pill
    to its own text with identical padding and let space-between hand out the slack:
    every word-to-word distance is then the same, and the row still runs edge to edge. */
 .ask-actions { display: flex; flex-wrap: wrap; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
+.preset-actions { display: contents; }
 .commit-actions { position: relative; display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; }
 .commit-actions::before { content: ""; position: absolute; z-index: var(--layer-local-base); top: 6px; bottom: 6px; left: 50%; width: 1px; transform: translateX(-0.5px); background: var(--border); pointer-events: none; }
 .lens, .ask-commit, .note-pop-btn { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-medium);
@@ -564,10 +568,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    .followup-composer) carries has-draft. Buttons hide individually alongside
    their container so each button's own computed display tells the truth. */
 .ask-actions .commit-actions, .ask-actions .ask-commit { display: none; }
-.has-draft .lens { display: none; }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
 .ask-actions.note-only .commit-actions::before { display: none; }
+/* A surface whose presets are all removed rests as a bare input; the row
+   returns with a draft, when the commit pair needs it. */
+#ask:not(.has-draft) .ask-actions.no-presets, .followup-composer:not(.has-draft) .ask-actions.no-presets { display: none; }
 
 /* A fresh note still starts as a lightweight composer. Persisted notes use
    the structured document surface below: read and edit are one DOM tree. */
@@ -650,12 +656,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    persistent document whether it is read-only or carrying a caret. */
 .note-pop-view .md p:not(:last-child) { margin-bottom: calc(var(--leading-doc) * 1em); }
 /* One footer for both states, wearing the composer's own hairline bar (see
-   .ask-actions above), run out to the popover's edge. Read fills it with the
-   two verbs in the composer's pill; edit swaps in the Note / Ask commit pair —
-   same height, same position, nothing appears or disappears around it. */
+   .ask-actions above), run out to the popover's edge. Read offers delete,
+   one-gesture Ask, and placement; edit swaps in the Note / Ask commit pair. */
 .note-pop .note-pop-actions { margin: 0 calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); }
 .note-pop-delete svg { display: block; }
-.note-pop-place { color: var(--note-ink); }
+.note-pop-ask, .note-pop-place { color: var(--note-ink); }
 /* Delete reads as ordinary text until you are on it, like every other
    destructive row in the product. */
 .note-pop-delete:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
@@ -749,10 +754,13 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 @keyframes settings-sheet-scrim-out { from { opacity: 1; } to { opacity: 0; } }
 /* One fixed height for every pane: switching sections must never move the
    frame, so a dense pane scrolls inside the pane body and a sparse one keeps
-   its negative space — that space is the design; never fill it. The height
-   yields only to a short viewport. */
+   its negative space — that space is the design; never fill it. The constant
+   is tuned twice over: the fullest non-scrolling pane (Quick questions)
+   inhabits the frame instead of rattling in it, and the scrolling pane
+   (Model) folds mid-row so the cut edge itself says there is more below.
+   The height yields only to a short viewport. */
 .settings-sheet { display: grid; grid-template-columns: 176px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: min(640px, 100%);
-  height: min(560px, 100dvh - 96px); overflow: hidden; outline: none;
+  height: min(480px, 100dvh - 96px); overflow: hidden; outline: none;
   border: 1px solid color-mix(in srgb, var(--border-focus) 58%, var(--border)); border-radius: var(--radius-popover);
   background: color-mix(in srgb, var(--card-bg) 96%, var(--bg)); box-shadow: var(--shadow-modal);
   font-family: var(--font-ui); color: var(--fg);
@@ -783,7 +791,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   background: none; color: var(--fg-dim); cursor: pointer; transition: var(--transition-color); }
 .settings-sheet-close:hover { color: var(--fg-bold); background: var(--hl); }
 .settings-sheet-close svg { display: block; width: 16px; height: 16px; }
-.settings-pane-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-9) var(--space-11) var(--space-11); }
+/* The gutter is reserved whether or not the pane scrolls: content must not
+   compress when an editor opens or a scrolling pane swaps in — one width,
+   every pane, every state. */
+.settings-pane-body { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: var(--space-9) var(--space-11) var(--space-11); }
 /* Space groups rows; lines only ever separate sections. */
 .settings-sheet-section { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3) 0; }
 .settings-sheet-section + .settings-sheet-section { border-top: 1px solid var(--border); margin-top: var(--space-5); }
@@ -814,8 +825,93 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; }
 .settings-reset[hidden] { display: none; }
 .settings-reset:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* The Quick questions section is the product wearing its own clothes: each
+   preset set renders inside a faithful, full-width replica of its real surface,
+   built from the real .ask-input/.ask-actions parts — same paddings, same wash,
+   same space-between hand-out of pill slack — so nothing here can drift from
+   the product. Only the skin differs by surface: the selection replica wears
+   the popover's glass, the follow-up replica the composer's card. */
+/* Three-tier rhythm so proximity does the grouping: 8px binds a heading to
+   its card, 16px binds the switch to the follow-up group it governs, 28px
+   breaks between groups. The spacing above the follow-up surface lives inside
+   the reveal so the whole distance folds away with it. */
+.asking-settings { gap: 0; }
+.asking-settings .asking-link { min-height: 0; margin-top: var(--space-11); }
+.asking-reveal-body > .asking-surface { margin-top: var(--space-8); }
+.asking-surface { display: flex; flex-direction: column; gap: var(--space-4); }
+.asking-surface h4 { margin: 0; color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.asking-mock { overflow: hidden; }
+/* The replicas keep the surfaces' skins but not their elevation: nothing here
+   floats over content, so the popover's drop shadow stays in the product. */
+.asking-mock-popover { background: color-mix(in srgb, var(--bar-bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--border); border-radius: 12px; }
+.asking-mock-composer { background: var(--card-bg); border: var(--border-default); border-radius: var(--radius-popover); }
+/* Editing lights the frame exactly the way using the real surface does. */
+.asking-mock:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.asking-ghost { flex: 1; min-height: 20px; padding: 3px 0; color: var(--fg-faint); font-family: var(--font-ui); font-size: var(--text-body); line-height: 1.5; }
+.asking-mock .lens.editing { color: var(--fg-bold); background: var(--hl-strong); }
+.asking-mock .ask-actions.no-presets { display: none; }
+/* 0fr -> 1fr animates the expansion to auto height without measuring; the
+   zeroed duration tokens make it instant under prefers-reduced-motion. */
+.asking-editor { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; border-top: 1px solid transparent;
+  transition: grid-template-rows var(--duration-enter) var(--ease-out), opacity var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard),
+    visibility var(--duration-zero) linear var(--duration-enter); }
+.asking-editor.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; border-top-color: var(--border); transition-delay: var(--duration-zero); }
+.asking-editor-body { min-height: 0; overflow: hidden; }
+.asking-editor-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3) var(--space-5); align-items: start; padding: var(--space-6) var(--space-6) var(--space-5); }
+.asking-editor-fields label { padding-top: var(--space-3); color: var(--fg-faint); font-size: var(--text-ui); }
+.asking-editor-fields input, .asking-editor-fields textarea { box-sizing: border-box; width: 100%; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); outline: none; background: color-mix(in srgb, var(--bg) 60%, transparent); color: var(--fg); font: var(--text-ui)/var(--leading-ui) var(--font-ui); resize: vertical; }
+.asking-editor-fields input:focus, .asking-editor-fields textarea:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent); }
+/* Footer hierarchy: the two undo-ish actions sit quiet on the left, and Done
+   — the one affirmative — holds the right edge alone in the accent. Edits are
+   already saved when Done is pressed; it exists to give the edit a legible
+   commit moment, not to perform one. */
+.asking-editor-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-2); }
+/* Remove and Reset are quiet until intent: faint at rest, warm/lit on approach. */
+.asking-preset-remove, .asking-preset-reset { appearance: none; height: var(--control-h-sm); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--fg-faint); font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
+.asking-preset-remove:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.asking-preset-reset[hidden] { display: none; }
+.asking-preset-reset:hover { color: var(--fg-bold); background: var(--hl); }
+.asking-preset-done { appearance: none; height: var(--control-h-sm); margin-left: auto; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--accent); font: var(--weight-semibold) var(--text-ui)/1 var(--font-ui); cursor: pointer; transition: var(--transition-color); }
+.asking-preset-done:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* Removed presets wait just below the surface as ghost pills — dashed, with a
+   quiet plus — one click from rejoining the row. */
+.asking-removed { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); color: var(--fg-faint); font-size: var(--text-ui); }
+.asking-restore { appearance: none; display: inline-flex; align-items: center; gap: 5px; padding: 3.5px 9px; border: 1px dashed var(--border); border-radius: 8px;
+  background: none; color: var(--fg-dim); font: var(--weight-medium) var(--text-sm)/1 var(--font-ui); cursor: pointer;
+  transition: color var(--duration-fast), background var(--duration-fast), border-color var(--duration-fast); }
+.asking-restore::before { content: "+"; color: var(--fg-faint); transition: color var(--duration-fast); }
+.asking-restore:hover { color: var(--fg-bold); border-color: var(--fg-faint); background: var(--hl); }
+.asking-restore:hover::before { color: var(--fg-dim); }
+/* The link is a standard settings row — copy left, control right — and its
+   control is the product's own switch, ported verbatim from the web app's
+   "Remember on this device" row so the two never drift. */
+.asking-link { cursor: pointer; }
+.switch { position: relative; display: inline-flex; flex: 0 0 auto; }
+.switch input { position: absolute; inset: 0; z-index: var(--layer-local-base); width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.switch-track { position: relative; width: 30px; height: 18px; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  transition: background-color var(--duration-fast) var(--ease-standard); }
+.switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--color-white); box-shadow: 0 1px 2px var(--shadow-alpha-28);
+  transition: transform var(--duration-fast) var(--ease-out); }
+.switch input:checked + .switch-track { background: var(--accent); }
+.switch input:checked + .switch-track::after { transform: translateX(12px); }
+.switch input:focus-visible + .switch-track { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+/* Ticking the link folds the follow-up surface away whole — same 0fr/1fr
+   move as the editors, same visibility gate to keep Tab out while folded. */
+.asking-reveal { display: grid; grid-template-rows: 1fr; opacity: 1;
+  transition: grid-template-rows var(--duration-enter) var(--ease-out), opacity var(--duration-fast) var(--ease-standard); }
+.asking-reveal.collapsed { grid-template-rows: 0fr; opacity: 0; visibility: hidden;
+  transition: grid-template-rows var(--duration-enter) var(--ease-out), opacity var(--duration-fast) var(--ease-standard),
+    visibility var(--duration-zero) linear var(--duration-enter); }
+.asking-reveal-body { min-height: 0; overflow: hidden; }
 .settings-nav-item:focus-visible, .settings-sheet-close:focus-visible, .settings-segment:focus-visible,
-.settings-step:focus-visible, .settings-reset:focus-visible, .settings-pane-body:focus-visible {
+.settings-step:focus-visible, .settings-reset:focus-visible, .settings-pane-body:focus-visible,
+.asking-preset-remove:focus-visible, .asking-preset-reset:focus-visible, .asking-preset-done:focus-visible, .asking-restore:focus-visible {
   outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 @media (max-width: 760px) {
   .settings-sheet-scrim { padding: var(--space-6); }

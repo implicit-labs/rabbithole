@@ -19,6 +19,7 @@
     "icons:studio": "node tools/icon-studio/server.mjs",
     "check:icons": "node scripts/generate-ionicons.mjs --check",
     "check:dist": "node scripts/check-dist.mjs",
+    "check:css": "node scripts/check-css-integrity.mjs",
     "check:docs": "node scripts/build-docs.mjs --check",
     "check:design": "node scripts/check-design.mjs",
     "check:design-doc": "node scripts/generate-design-doc.mjs --check",
@@ -84,6 +85,7 @@
     "@types/node": "^26.4.0",
     "esbuild": "0.28.1",
     "fake-indexeddb": "^6.2.5",
+    "lightningcss": "^1.33.0",
     "playwright": "^1.61.1",
     "terser": "^5.51.2",
     "typescript": "5.9.3"

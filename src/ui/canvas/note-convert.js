@@ -109,7 +109,7 @@ export function rollbackNoteConversion(node) {
   r.lifecycle.hooks.rollbackBranch(node, restore);
 }
 
-export function convertNoteToAsk(node, text) {
+export function convertNoteToAsk(node, text, options = {}) {
   const question = (text || "").trim();
   if (!question || !canConvertNote(node)) return false;
   const parentId = node.parent_id == null ? null : node.parent_id;
@@ -161,6 +161,7 @@ export function convertNoteToAsk(node, text) {
   scheduleEdges();
   node._noteConversionRollback = function () {
     restoreConvertedNote(node, previous);
+    if (typeof options.onRollback === "function") options.onRollback(node);
   };
   const payload = {
     type: "branch_request",

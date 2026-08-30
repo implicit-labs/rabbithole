@@ -55,18 +55,14 @@ export function buttonMarkup(options = {}) {
   return "<button" + buttonAttributes(options, false) + ">" + content + "</button>";
 }
 
-// The one composer action row: four lenses at rest, the commit pair once a
-// draft exists. Every composer surface (selection popover, reader composer,
+// The one composer action row: a runtime-generated preset group and the shared
+// commit pair. Every composer surface (selection popover, reader composer,
 // card drawer, standalone note/ask surface, note editor) renders this same
 // commit markup — one Note and one Ask, worded once here so no surface can
 // grow a dialect; surfaces without a parent document omit lenses.
 /** @param {{ id?: string, includeLenses?: boolean }} [options] */
 export function composerActionsMarkup(options = {}) {
-  const lenses = options.includeLenses === false ? "" :
-    buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "explain" }, label: "Explain ", kbdHint: "1" }) +
-    buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "eli5" }, label: "ELI5 ", kbdHint: "2" }) +
-    buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "example" }, label: "Example ", kbdHint: "3" }) +
-    buttonMarkup({ bare: true, className: "lens", dataAttrs: { lens: "deeper" }, label: "Go Deeper ", kbdHint: "4" });
+  const lenses = options.includeLenses === false ? "" : '<div class="preset-actions" data-preset-set></div>';
   return '<div class="ask-actions"' + attribute("id", options.id) + ">" +
     lenses +
     '<div class="commit-actions">' +

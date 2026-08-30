@@ -102,6 +102,9 @@ function runBlockRegistryContract() {
   assert.throws(() => registerBlockType({ type: "missing-text", version: 1, parse: (source) => source, security: "inert" }), /toPlainText\(model\)/);
   assert.throws(() => registerBlockType({ type: "bad-security", version: 1, parse: (source) => source, toPlainText: () => "", security: "trusted" }), /security must be/);
   assert.throws(() => registerBlockMount("not-registered", {}), /unknown block type/);
+  assert.throws(() => registerBlockMount("show", { renderHtml: (model) => model, wireSelection() {} }),
+    /must provide wireSelection, packContext, and paintMark/,
+    "askable mounts register the whole capability contract or none of it");
   console.log("ok blocks: descriptor validation, duplicate rejection, mount binding");
 }
 

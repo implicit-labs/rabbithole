@@ -1,5 +1,5 @@
-import { lensLabel } from "../../core/hole/lens.js";
 import { composerActionsMarkup } from "../../core/html/markup.js";
+import { presetLabelForOrigin } from "../ask-presets.js";
 import { applyComposerState } from "../composer-state.js";
 import { buildDocContent, CANVAS_BASE, nodes, READER_BASE, rootId, sessionPhase } from "../core.js";
 import { isCommandEnter } from "../input-intent.js";
@@ -18,10 +18,9 @@ export function fillBody(node) {
   body.classList.remove("pdf-body");
   body.innerHTML = "";
   if (node.origin && node.origin.kind !== "note" && node.origin.selected_text) {
-    const quotedText = node.origin.question || node.origin.selected_text;
     const q = document.createElement("div");
     q.className = "origin-quote";
-    q.textContent = "“" + quotedText + "”";
+    q.textContent = "“" + node.origin.selected_text + "”";
     appendOriginAttachmentThumbnails(q, node);
     body.appendChild(q);
   } else if (
@@ -32,7 +31,7 @@ export function fillBody(node) {
     const fq = document.createElement("div");
     fq.className = "origin-quote";
     fq.textContent = node.origin.lens
-      ? "Follow-up — " + lensLabel(node.origin.lens)
+      ? "Follow-up — " + presetLabelForOrigin(node.origin) + (node.origin.question ? " — " + node.origin.question : "")
       : node.origin.question || "Pasted image";
     appendOriginAttachmentThumbnails(fq, node);
     body.appendChild(fq);

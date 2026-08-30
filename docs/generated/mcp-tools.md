@@ -16,9 +16,9 @@ Inputs: `session_id`, `request_id`, `title`, `content`, `base_url`, `assets`, `p
 
 ## send_to_rabbithole
 
-Durably add a note to an existing Rabbithole only when the human explicitly asks you to send or save content there.
+Durably publish a completed document to an existing Rabbithole only when the human explicitly asks you to send or save content there.
 
-Inputs: `hole_id`, `operation_id`, `title`, `content`, `parent_node_id`
+Inputs: `hole_id`, `operation_id`, `title`, `content`, `parent_node_id`, `kind`
 
 ## list_rabbitholes
 

@@ -42,6 +42,7 @@ export interface Ask {
   at: { node_id: string | null; anchor: any | null };
   question: string;
   lens: string | null;
+  instruction: string | null;
   attachments: string[];
   clip: string | null;
   author: "human" | "agent";
@@ -95,6 +96,7 @@ export interface BranchRequestEvent extends NodePresentationFields {
   selected_text?: unknown;
   question?: unknown;
   lens?: unknown;
+  instruction?: unknown;
   anchor?: unknown;
   branch_type?: unknown;
   /** Optional durable pasted-image assets attached to this ask, in paste order. */
@@ -110,6 +112,7 @@ export interface NodeCreateEvent {
   markdown?: unknown;
   position?: unknown;
   size?: unknown;
+  /** Null/absent creates a completed answer document; kind="note" creates a note. */
   origin?: unknown;
   docked?: unknown;
 }

@@ -1,5 +1,5 @@
-import { LENSES } from "../../core/hole/lens.js";
 import { composerActionsMarkup } from "../../core/html/markup.js";
+import { presetFor, renderAskPresetActions } from "../ask-presets.js";
 import { applyComposerState, wireComposerActions } from "../composer-state.js";
 import { closed, flashHint, motionSourceFromEvent, sessionPhase, view, viewport } from "../core.js";
 import { revealNode } from "./camera.js";
@@ -56,6 +56,7 @@ export function buildCardComposer(node) {
   const ta = document.createElement("textarea");
   ta.rows = 1;
   const actions = cardButton(composerActionsMarkup());
+  renderAskPresetActions(actions, "followup");
   const handle = document.createElement("button");
   handle.type = "button";
   handle.className = "nc-handle";
@@ -187,12 +188,15 @@ export function settleCardSubmit(node, kid, source) {
   revealNode(kid, source);
 }
 
-// A lens on a card is a whole-document ask on that card — canned question,
-// same contract as the reader composer and the empty-box popover lenses.
 export function submitCardLens(node, lens, source) {
   if (cardComposerBlocked(node, true)) return;
-  const kid = r.lifecycle.hooks.sendFollowup(node, LENSES[lens].q, lens);
-  if (kid) settleCardSubmit(node, kid, source);
+  const preset = presetFor("followup", lens);
+  if (!preset) return;
+  const kid = r.lifecycle.hooks.sendFollowup(node, node.ncText.value.trim(), lens, preset.instruction);
+  if (!kid) return;
+  node.ncText.value = "";
+  autoGrowEl(node.ncText, 90);
+  settleCardSubmit(node, kid, source);
 }
 
 export function submitCardFollowup(node, commit, source) {

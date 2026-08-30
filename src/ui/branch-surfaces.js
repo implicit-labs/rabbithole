@@ -1,6 +1,7 @@
 import { isDockedNote } from "../core/hole/ask.js";
-import { lensLabel, truncate } from "../core/hole/lens.js";
+import { truncate } from "../core/hole/lens.js";
 import { lineageNodesFromMap } from "../core/hole/tree.js";
+import { presetLabelForOrigin } from "./ask-presets.js";
 import { clearEdgeHighlight, createNodeEl, drawEdges, fillBody, renderVisibility } from "./canvas/index.js";
 import {
   canvasBuilt,
@@ -129,7 +130,9 @@ function copyText(text, okMsg) {
 // Markdown reconstructions — the raw source rides in hydration/broadcasts.
 function originLine(n) {
   if (!n.origin) return "";
-  const ask = n.origin.lens ? lensLabel(n.origin.lens) : n.origin.question || "";
+  const ask = n.origin.lens
+    ? presetLabelForOrigin(n.origin) + (n.origin.question ? " — " + n.origin.question : "")
+    : n.origin.question || "";
   if (n.origin.selected_text)
     return "> Asked about: “" + n.origin.selected_text + "”" + (ask ? " — " + ask : "") + "\n\n";
   return ask ? "> Follow-up — " + ask + "\n\n" : "";

@@ -8,20 +8,20 @@
       "description": "Built live client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build. Docked notes (dots, read/edit popover, placement flight) deliberately add this client cost.",
-      "baseline": 687355,
-      "ceiling": 721722.75,
-      "measured_at_commit": "bb59262"
+      "rationale": "Exact file size after a deterministic build. Asking everywhere deliberately adds editable preset settings, shadow-root visual selection and marks, and atomic docked-note conversion to the live client; the WYSIWYG Quick questions section, linked preset sets, and removable presets are part of that trade.",
+      "baseline": 737228,
+      "ceiling": 774089.4,
+      "measured_at_commit": "5633597+asking-settings-wysiwyg"
     },
     {
       "id": "bundle_frozen_client_bytes",
       "description": "Built frozen client bundle size",
       "unit": "bytes",
       "tolerance": 0.05,
-      "rationale": "Exact file size after a deterministic build. Docked-note read affordances deliberately ride the frozen client behind its mutation guards.",
-      "baseline": 660354,
-      "ceiling": 693371.7,
-      "measured_at_commit": "bb59262"
+      "rationale": "Exact file size after a deterministic build. Asking everywhere deliberately adds read-only visual branch chips, fullscreen selection-safe visual mounting, and preset-origin presentation to frozen snapshots without adding a runtime.",
+      "baseline": 703024,
+      "ceiling": 738175.2,
+      "measured_at_commit": "5633597+asking-settings-wysiwyg"
     },
     {
       "id": "web_initial_js_bytes",

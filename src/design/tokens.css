@@ -49,7 +49,11 @@
   /* Elevation */
   --shadow-card: 0 6px 24px rgba(0, 0, 0, .45);
   --shadow-popover: 0 1px 2px rgba(0, 0, 0, .08), 0 16px 40px -16px rgba(0, 0, 0, .4);
-  --shadow-modal: 0 20px 70px rgba(0, 0, 0, .48);
+  /* Dark modal shadows must hug the edge: a wide black bloom has nothing
+     darker to fade into, so on a dark scrim it reads as a smudged second
+     rectangle, not depth. The negative spread tucks the penumbra under the
+     sheet; the border and surface contrast do the rest. */
+  --shadow-modal: 0 16px 40px -12px rgba(0, 0, 0, .55);
 
   /* Anchored surface */
   --surface-popover-bg: color-mix(in srgb, var(--bar-bg) 96%, transparent);
@@ -131,7 +135,7 @@ html[data-theme="dark"] {
   --hl: rgba(143, 170, 240, .16); --hl-strong: rgba(143, 170, 240, .30);
   --warn: #d9a866; --success: #5fbd8d; --sk-base: rgba(255, 255, 255, .06);
   --scrim: rgba(26, 25, 24, .62);
-  --shadow-card: 0 6px 24px rgba(0, 0, 0, .45); --shadow-modal: 0 20px 70px rgba(0, 0, 0, .48);
+  --shadow-card: 0 6px 24px rgba(0, 0, 0, .45); --shadow-modal: 0 16px 40px -12px rgba(0, 0, 0, .55);
 }
 
 @media (max-width: 760px) {

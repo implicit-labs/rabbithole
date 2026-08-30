@@ -192,9 +192,25 @@ async function runAgentPublishFixture() {
   });
   const dormant = await defaultFsStore.loadHole(dormantHoleId);
   assert.equal(dormant.nodes.length, 3, "a retry must not duplicate the standalone note");
-  assert.equal(dormant.nodes.find((node) => node.id === standalone.node_id).markdown, "Keep this for later.");
-  assert.equal(dormant.nodes.find((node) => node.id === standalone.node_id).parent_id, null);
-  assert.equal(dormant.nodes.find((node) => node.id === attached.node_id).parent_id, "root");
+  const standaloneNode = dormant.nodes.find((node) => node.id === standalone.node_id);
+  const attachedNode = dormant.nodes.find((node) => node.id === attached.node_id);
+  assert.equal(standaloneNode.markdown, "Keep this for later.");
+  assert.equal(standaloneNode.parent_id, null);
+  assert.equal(standaloneNode.origin, null, "default publishes are answer documents, not notes");
+  assert.deepEqual(standaloneNode.size, { w: 420, h: 460 }, "standalone answers use standard document sizing");
+  assert.equal(standaloneNode.read, false);
+  assert.equal(attachedNode.parent_id, "root");
+  assert.equal(attachedNode.origin, null);
+
+  const note = await sendToRabbithole({
+    holeId: dormantHoleId,
+    operationId: "explicit-note-1",
+    content: "This is genuinely an annotation.",
+    kind: "note",
+  });
+  const withNote = await defaultFsStore.loadHole(dormantHoleId);
+  assert.deepEqual(withNote.nodes.find((node) => node.id === note.node_id).origin, { kind: "note", author: "agent" },
+    "explicit notes retain note presentation with agent attribution");
   await assert.rejects(
     () => sendToRabbithole({ holeId: dormantHoleId, operationId: "bad-parent", content: "No.", parentNodeId: "missing" }),
     /Parent node missing not found/
@@ -223,7 +239,7 @@ async function runAgentPublishFixture() {
   request.emit("close");
   await live.close("agent_publish_test_complete");
 
-  console.log("ok agent publish: dormant/live notes are durable, idempotent, attached optionally, and listener-free");
+  console.log("ok agent publish: answer documents default, explicit notes are attributed, and both remain durable and listener-free");
 }
 
 async function runTransientSseReconnectFixture() {

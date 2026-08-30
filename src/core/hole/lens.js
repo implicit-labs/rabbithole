@@ -1,21 +1,21 @@
-/** @type {Readonly<Record<PropertyKey, { label: string, q: string }>>} */
+export const ASK_PRESET_KEYS = Object.freeze(["explain", "eli5", "example", "deeper"]);
+
+/*
+ * Default instructions are deliberately minimal: the model already sees the
+ * selection and the document, so a preset only needs to name the move. Anyone
+ * who wants a more opinionated instruction edits the preset in Settings.
+ */
+/** @type {Readonly<Record<PropertyKey, { label: string, instruction: string }>>} */
 export const LENSES = Object.freeze({
-  explain: Object.freeze({
-    label: "Explain",
-    q: "Explain this clearly and precisely: what it means here, why it matters, and the key intuition an expert would want me to take away.",
-  }),
-  eli5: Object.freeze({
-    label: "ELI5",
-    q: "Explain this like I'm five: start with a concrete everyday analogy, then translate the analogy back to the real thing, one level more precise.",
-  }),
-  example: Object.freeze({
-    label: "Example",
-    q: "Show this in action with one concrete worked example: realistic, minimal, step by step. Use runnable code if it's code-shaped, real numbers if it's quantitative.",
-  }),
-  deeper: Object.freeze({
-    label: "Go Deeper",
-    q: "Go one level deeper than this document does: the underlying mechanism, the important edge cases, and what experts know about this that introductory treatments gloss over.",
-  }),
+  explain: Object.freeze({ label: "Explain", instruction: "Explain this further." }),
+  eli5: Object.freeze({ label: "ELI5", instruction: "Explain like I'm five." }),
+  example: Object.freeze({ label: "Example", instruction: "Give a concrete example." }),
+  deeper: Object.freeze({ label: "Go deeper", instruction: "Go one level deeper." }),
+});
+
+export const DEFAULT_ASK_PRESETS = Object.freeze({
+  selection: LENSES,
+  followup: LENSES,
 });
 
 /** @param {unknown} value @param {number} length */

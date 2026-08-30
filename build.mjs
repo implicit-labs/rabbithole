@@ -9,6 +9,7 @@ import { faviconSvg } from "./src/core/html/icons.js";
 import { mapConcurrent } from "./src/core/concurrency.js";
 import { DEFAULT_FETCH_PROXY_URL } from "./policy/origins.js";
 import { webContentSecurityPolicy } from "./policy/csp.js";
+import { checkStylesheets, cssFilesUnder, formatCssIntegrityFailure } from "./scripts/check-css-integrity.mjs";
 
 const require = createRequire(import.meta.url);
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,8 @@ const INITIAL_THEME_STYLE = `:root{color-scheme:dark;background:#1a1918}:root[da
 const KATEX_FONT_SRC =
   /src:\s*url\((fonts\/[^)]+\.woff2)\)\s*format\("woff2"\),\s*url\((fonts\/[^)]+\.woff)\)\s*format\("woff"\),\s*url\((fonts\/[^)]+\.ttf)\)\s*format\("truetype"\);/g;
 
+await requireCssIntegrity(await cssFilesUnder(path.join(rootDir, "src/design")));
+
 await fs.rm(absOutdir, { recursive: true, force: true });
 await fs.mkdir(absOutdir, { recursive: true });
 
@@ -41,6 +44,17 @@ await Promise.all([
 
 if (!parsed.explicit) {
   await buildWebApp(absOutdir);
+}
+
+const builtCssFiles = await cssFilesUnder(absOutdir);
+if (!parsed.explicit) builtCssFiles.push(...await cssFilesUnder(path.join(rootDir, "web/dist")));
+await requireCssIntegrity(builtCssFiles);
+
+async function requireCssIntegrity(files) {
+  const errors = await checkStylesheets(files, { rootDir });
+  if (!errors.length) return;
+  process.stderr.write(formatCssIntegrityFailure(errors));
+  process.exit(1);
 }
 
 async function buildUiBundle(entry, outfile, globalName) {

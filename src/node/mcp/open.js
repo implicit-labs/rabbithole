@@ -176,25 +176,26 @@ export async function listRabbitholes() {
 }
 
 /**
- * Durably add a human-requested note without opening or focusing a browser.
+ * Durably add a human-requested document without opening or focusing a browser.
  * An operation id maps to one stable node id, so an MCP retry is idempotent.
  */
-/** @param {{holeId: string, operationId: string, title?: string, content: string, parentNodeId?: string}} input */
-export async function sendToRabbithole({ holeId, operationId, title, content, parentNodeId }) {
+/** @param {{holeId: string, operationId: string, title?: string, content: string, parentNodeId?: string, kind?: "answer" | "note"}} input */
+export async function sendToRabbithole({ holeId, operationId, title, content, parentNodeId, kind = "answer" }) {
   const nodeId = publishedNoteId(holeId, operationId);
   const liveSession = getSessionByHole(holeId);
   if (liveSession) {
     const existing = liveSession.nodes.get(nodeId);
     if (existing) return publishResult(existing, liveSession, true);
-    const event = buildPublishedNoteEvent({
+    const event = buildPublishedNodeEvent({
       nodeId,
       title,
       content,
       parentNodeId,
       rootId: liveSession.rootId,
       nodes: liveSession.nodes,
+      kind,
     });
-    const node = await liveSession.publishNote(event);
+    const node = await liveSession.publishNode(event);
     return publishResult(node, liveSession, false);
   }
 
@@ -203,13 +204,14 @@ export async function sendToRabbithole({ holeId, operationId, title, content, pa
   const existing = hole.nodes.find((node) => node.id === nodeId);
   if (existing) return { status: "stored", hole_id: holeId, node_id: nodeId, duplicate: true };
   const state = createHoleState(/** @type {any} */ (hole), { cloneExtensions: false });
-  const event = buildPublishedNoteEvent({
+  const event = buildPublishedNodeEvent({
     nodeId,
     title,
     content,
     parentNodeId,
     rootId: hole.root_id,
     nodes: state.nodes,
+    kind,
   });
   const reduced = reduceHoleEvent(state, event, { now: new Date().toISOString(), mutate: true });
   await defaultFsStore.saveHole(holeStateToHole(reduced.state));
@@ -232,17 +234,18 @@ function publishedNoteId(holeId, operationId) {
 }
 
 /** @returns {import("../../core/contracts/engine.js").NodeCreateEvent} */
-function buildPublishedNoteEvent({ nodeId, title, content, parentNodeId, rootId, nodes }) {
+function buildPublishedNodeEvent({ nodeId, title, content, parentNodeId, rootId, nodes, kind }) {
   const parentId = parentNodeId == null ? null : String(parentNodeId);
   if (parentId !== null && !nodes.has(parentId)) throw new Error(`Parent node ${parentId} not found.`);
-  const size = parentId === null ? DEFAULT_STANDALONE_NOTE : DEFAULT_CHILD;
+  const note = kind === "note";
+  const size = note && parentId === null ? DEFAULT_STANDALONE_NOTE : DEFAULT_CHILD;
   return {
     type: "node_create",
     id: nodeId,
     parent_id: parentId,
-    title: String(title || "Note").trim() || "Note",
+    title: String(title || (note ? "Note" : "Answer")).trim() || (note ? "Note" : "Answer"),
     markdown: String(content || "").trim(),
-    origin: { kind: "note" },
+    origin: note ? { kind: "note", author: "agent" } : null,
     position: parentId === null
       ? placeStandalonePublishedNote(nodes, rootId)
       : placeAttachedPublishedNote(nodes, rootId, parentId),

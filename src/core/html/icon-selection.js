@@ -3,7 +3,8 @@
  *
  * This small module is the editable source of truth shared by the application,
  * the generated icon payload, and the local Icon Studio. Product-owned
- * geometry (the bunny brand mark, the rail panel toggle) stays in icons.js.
+ * geometry (the bunny brand mark, the rail panel toggle, the thumbtack pair)
+ * stays in icons.js.
  */
 export const ICON_SELECTIONS = Object.freeze({
   "new": "add-circle-outline",
@@ -39,8 +40,6 @@ export const ICON_SELECTIONS = Object.freeze({
   "download": "download-outline",
   "package": "cube-outline",
   "rename": "create-outline",
-  "pin": "pin-outline",
-  "pin-active": "pin",
   "locate": "locate-outline",
   "check": "checkmark-outline",
   "info": "information-circle-outline",

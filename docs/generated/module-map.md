@@ -147,6 +147,7 @@ This inventory is derived from the source tree.
 ## src/ui
 
 - `src/ui/ask-followups.js`
+- `src/ui/ask-presets.js`
 - `src/ui/authoring/note-editor.js`
 - `src/ui/authoring/standalone-note-submit.js`
 - `src/ui/branch-surfaces.js`

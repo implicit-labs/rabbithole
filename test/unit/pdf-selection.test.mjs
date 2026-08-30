@@ -4,6 +4,13 @@ import { normalizeAnchor } from "../../src/core/hole/anchor.js";
 import { expandPdfBounds, pdfAnchorBounds } from "../../src/core/pdf-shared.js";
 
 const sha256 = "cd".repeat(32);
+assert.deepEqual(normalizeAnchor({ block: { block_id: "diagram-1", selected_text: "  Retry path  " }, offset_start: 99 }), {
+  block: { block_id: "diagram-1", selected_text: "Retry path" },
+}, "block-owned anchors take precedence over the grandfathered text-offset dialect");
+assert.equal(normalizeAnchor({ block: { block_id: "bad id", selected_text: "Retry path" } }), null,
+  "invalid block coordinates are rejected instead of being reinterpreted as text offsets");
+assert.equal(normalizeAnchor({ block: { block_id: "diagram-1", selected_text: "x".repeat(2100) } }).block.selected_text.length, 2000,
+  "oversized visual selections are capped without discarding their block coordinate");
 const normalized = normalizeAnchor({ offset_start: -5, offset_end: 9, pdf: {
   version: 2,
   source_sha256: sha256,

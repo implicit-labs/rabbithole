@@ -383,6 +383,8 @@ export class DirectHostGeneration extends DirectHostPdf {
       selected_text: node.parent_id == null ? "" : (node.origin?.selected_text || ""),
       question: node.origin?.question || "",
       lens: node.origin?.lens || null,
+      instruction: node.origin?.instruction || null,
+      anchor: node.origin?.anchor || null,
     };
   }
 

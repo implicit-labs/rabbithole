@@ -57,7 +57,7 @@ export function transitionMarkGroups(event, entering, stateClass, onTransition) 
 export function applyChildHighlights(dc, node) {
   if (dc && dc.classList.contains("rh-pdf")) return;
   const kids = childrenOf(node.id).filter(function (k) {
-    return k.origin && k.origin.anchor;
+    return k.origin && k.origin.anchor && !k.origin.anchor.block;
   });
   kids.sort(function (a, b) {
     return b.origin.anchor.offset_start - a.origin.anchor.offset_start;
@@ -74,7 +74,7 @@ export function applyChildHighlights(dc, node) {
 }
 
 export function wrapInContainer(dc, anchor, childId, cls) {
-  if (!dc || !anchor || dc.classList.contains("rh-pdf") || anchor.pdf) return;
+  if (!dc || !anchor || dc.classList.contains("rh-pdf") || anchor.pdf || anchor.block) return;
   const rr = rangeFromOffsets(dc, anchor.offset_start, anchor.offset_end);
   if (rr) {
     try {
@@ -99,7 +99,7 @@ export function syncTextOverlayMarks(root) {
       seen[childId] = true;
       const child = nodes[childId],
         anchor = child && child.origin && child.origin.anchor;
-      if (!anchor || anchor.pdf) continue;
+      if (!anchor || anchor.pdf || anchor.block) continue;
       const range = rangeFromOffsets(dc, anchor.offset_start, anchor.offset_end);
       if (!range) continue;
       overlayRange(range, childId, marks[i].className.replace(/\s*mark-overlay\b/, ""));

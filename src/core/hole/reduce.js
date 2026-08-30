@@ -202,28 +202,29 @@ function reduceNodeCreate(state, event, options) {
   const nodeId = String(event.id ?? "").trim();
   if (!nodeId) throw new Error("Node create id is required");
   if (state.nodes.has(nodeId)) throw new Error(`Node ${nodeId} already exists`);
-  if (!event.origin || typeof event.origin !== "object" || Array.isArray(event.origin)
-    || /** @type {{ kind?: unknown }} */ (event.origin).kind !== "note") {
-    throw new Error('Node create origin.kind must be "note"');
-  }
+  const note = !!event.origin && typeof event.origin === "object" && !Array.isArray(event.origin)
+    && /** @type {{ kind?: unknown }} */ (event.origin).kind === "note";
+  if (event.origin != null && !note) throw new Error('Node create origin must be null or kind "note"');
   if (typeof event.markdown !== "string" || !event.markdown.trim()) {
-    throw new Error("Note markdown is required");
+    throw new Error(`${note ? "Note" : "Answer"} markdown is required`);
   }
   const parentId = event.parent_id == null ? null : String(event.parent_id);
   if (parentId !== null && !state.nodes.has(parentId)) throw new Error(`Parent node ${parentId} not found`);
-  const rawOrigin = /** @type {Record<string, any>} */ (event.origin);
-  const origin = parentId !== null && rawOrigin.anchor
-    ? { kind: "note", selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection" }
-    : { kind: "note" };
+  const rawOrigin = /** @type {Record<string, any>} */ (event.origin || {});
+  const author = rawOrigin.author === "agent" ? "agent" : "human";
+  const noteAttribution = author === "agent" ? { author } : {};
+  const origin = !note ? null : parentId !== null && rawOrigin.anchor
+    ? { kind: "note", ...noteAttribution, selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection" }
+    : { kind: "note", ...noteAttribution };
   // Docking is presentation and only means anything on a parent: the note has
   // no canvas geometry until it is placed, and the flag lives in the
   // extensions bag so nothing about the note's identity changes with it.
-  const docked = parentId !== null && event.docked === true;
+  const docked = note && parentId !== null && event.docked === true;
 
   const node = /** @type {HoleNode} */ (projectNode(makeNode({
     id: nodeId,
     parent_id: parentId,
-    title: typeof event.title === "string" ? (event.title.trim() || "Note") : "Note",
+    title: typeof event.title === "string" ? (event.title.trim() || (note ? "Note" : "Answer")) : (note ? "Note" : "Answer"),
     markdown: normalizeBlockIds(event.markdown, { idFactory: options.idFactory }).markdown,
     base_url: null,
     base_url_source: null,
@@ -231,7 +232,7 @@ function reduceNodeCreate(state, event, options) {
     position: normalizePosition(event.position),
     size: normalizeSize(event.size),
     status: "answered",
-    read: true,
+    read: note,
     created_at: options.now ?? new Date().toISOString(),
     view: docked ? { docked: true } : {},
   }), "persist"));

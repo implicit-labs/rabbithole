@@ -40,15 +40,95 @@ const {
   READING_SCALE_MAX,
   READING_SCALE_MIN,
   applyTheme,
+  ASK_PRESETS_KEY,
+  askPreset,
+  askPresetsLinked,
+  setAskPresetsLinked,
+  normalizeAskPresets,
   clampReadingScale,
   onPreferenceChange,
   readingScale,
   resolvedTheme,
   setReadingScale,
+  setAskPreset,
+  setAskPresetRemoved,
+  visibleAskPresetKeys,
+  resetAskPreset,
   setThemePreference,
   themePreference,
   toggleTheme,
 } = await import("../../src/ui/preferences.js");
+
+// ---- asking presets -------------------------------------------------------
+
+const migratedPresets = normalizeAskPresets({
+  lenses: {
+    explain_with_example: { label: "Worked", q: "Use a worked example." },
+    go_deeper: { label: "Mechanism", instruction: "Show the mechanism." },
+  },
+});
+assert.deepEqual(migratedPresets.selection.example, { label: "Worked", instruction: "Use a worked example.", removed: false },
+  "historical lens identifiers and q fields migrate at the storage boundary");
+assert.deepEqual(migratedPresets.followup.deeper, { label: "Mechanism", instruction: "Show the mechanism.", removed: false });
+assert.notEqual(migratedPresets.selection, migratedPresets.followup, "selection and follow-up sets are independent objects");
+
+assert.equal(askPreset("selection", "explain").label, "Explain");
+assert.equal(askPreset("selection", "explain").instruction, "Explain this further.",
+  "default instructions are minimal — the model needs the move, not an essay");
+assert.equal(askPreset("followup", "example").label, "Example");
+setAskPreset("selection", "explain", { label: "Clarify", instruction: "Lead with the key distinction." });
+assert.deepEqual(askPreset("selection", "explain"), { label: "Clarify", instruction: "Lead with the key distinction.", removed: false });
+assert.equal(askPreset("followup", "explain").label, "Explain", "editing selection presets must not affect follow-ups");
+assert.equal(JSON.parse(store.get(ASK_PRESETS_KEY)).version, 1, "asking preferences live in a versioned global key");
+resetAskPreset("selection", "explain");
+assert.equal(askPreset("selection", "explain").label, "Explain");
+
+// ---- linked follow-ups ----------------------------------------------------
+
+assert.equal(askPresetsLinked(), false, "the sets ship separate; linking is opt-in");
+assert.equal(normalizeAskPresets({ linked: true }).linked, true, "the linked flag rides the same versioned key");
+assert.equal(normalizeAskPresets({ linked: "yes" }).linked, false, "anything but true reads as unlinked");
+setAskPreset("selection", "deeper", { label: "Mechanism", instruction: "Show the mechanism." });
+setAskPreset("followup", "deeper", { label: "Own", instruction: "Follow-up flavored." });
+setAskPresetsLinked(true);
+assert.equal(askPresetsLinked(), true);
+assert.deepEqual(askPreset("followup", "deeper"), { label: "Mechanism", instruction: "Show the mechanism.", removed: false },
+  "while linked every follow-up read resolves to the selection preset — buttons, badges, and the wire all follow");
+assert.equal(JSON.parse(store.get(ASK_PRESETS_KEY)).linked, true);
+assert.equal(JSON.parse(store.get(ASK_PRESETS_KEY)).followup.deeper.label, "Own",
+  "the stored follow-up set is untouched while linked");
+setAskPresetsLinked(false);
+assert.deepEqual(askPreset("followup", "deeper"), { label: "Own", instruction: "Follow-up flavored.", removed: false },
+  "unlinking restores the follow-up customizations exactly");
+resetAskPreset("selection", "deeper");
+resetAskPreset("followup", "deeper");
+
+// ---- removable presets ----------------------------------------------------
+
+assert.deepEqual(visibleAskPresetKeys("selection"), ["explain", "eli5", "example", "deeper"],
+  "every slot ships visible");
+assert.equal(normalizeAskPresets(null).selection.explain.removed, false, "removal defaults off");
+assert.equal(normalizeAskPresets({ selection: { eli5: { label: "ELI5", instruction: "x", removed: true } } }).selection.eli5.removed, true,
+  "removal is a flag on the stored slot, not a hole in the set");
+setAskPreset("selection", "eli5", { label: "Kid gloves", instruction: "Very simply." });
+setAskPresetRemoved("selection", "eli5", true);
+assert.deepEqual(visibleAskPresetKeys("selection"), ["explain", "example", "deeper"],
+  "a removed preset leaves the visible row");
+assert.equal(askPreset("selection", "eli5").label, "Kid gloves",
+  "the removed slot keeps its words — old branch badges and restore both need them");
+setAskPresetsLinked(true);
+assert.deepEqual(visibleAskPresetKeys("followup"), ["explain", "example", "deeper"],
+  "while linked, follow-up visibility follows selection removals");
+setAskPresetsLinked(false);
+assert.deepEqual(visibleAskPresetKeys("followup"), ["explain", "eli5", "example", "deeper"],
+  "unlinked follow-ups keep their own full row");
+setAskPresetRemoved("selection", "eli5", false);
+assert.deepEqual(visibleAskPresetKeys("selection"), ["explain", "eli5", "example", "deeper"]);
+assert.equal(askPreset("selection", "eli5").label, "Kid gloves", "restore brings back the customized words, not the default");
+setAskPresetRemoved("selection", "eli5", true);
+resetAskPreset("selection", "eli5");
+assert.equal(askPreset("selection", "eli5").removed, false, "reset also returns a removed slot to the row");
+assert.equal(askPreset("selection", "eli5").label, "ELI5");
 
 // ---- reading size ---------------------------------------------------------
 
@@ -99,7 +179,7 @@ applyTheme();
 assert.equal(toggleTheme(), "light", "toggling out of system writes the opposite of what is painted");
 assert.equal(themePreference(), "light");
 
-assert.deepEqual(new Set(seen), new Set(["reading-scale", "theme"]), "both preferences announce their changes");
+assert.deepEqual(new Set(seen), new Set(["reading-scale", "theme"]), "both active listeners announce their changes");
 stopListening();
 const before = seen.length;
 setReadingScale(1.1);

@@ -25,6 +25,11 @@ function containsContent(entry, target) {
   return entry.content === target || entry.content.contains(target);
 }
 
+function hasTextSelection() {
+  const selection = window.getSelection?.();
+  return !!selection && !selection.isCollapsed && !!selection.toString().trim();
+}
+
 function diagramAspect(content) {
   const viewBox = content.viewBox && content.viewBox.baseVal;
   if (viewBox && viewBox.width > 0 && viewBox.height > 0) return viewBox.width / viewBox.height;
@@ -72,6 +77,7 @@ export function openLightbox(options) {
   const diagram = options.variant === "diagram";
   const overlay = document.createElement("div");
   overlay.className = "rh-lightbox rh-lightbox-variant-" + (diagram ? "diagram" : "image");
+  overlay.classList.toggle("rh-lightbox-selection", options.selectionEnabled === true);
   overlay.hidden = true;
   const dialog = document.createElement("div");
   dialog.className = "rh-lightbox-dialog";
@@ -114,6 +120,7 @@ export function openLightbox(options) {
       recentContentPointer = false;
       setLightboxTransform(nextContent, state);
       sizeDiagramViewport(nextContent, viewport);
+      options.onContentChange?.(nextContent);
       return true;
     },
     close: function () {
@@ -144,6 +151,10 @@ export function openLightbox(options) {
 
   function onPointerdown(e) {
     if (close.contains(e.target)) return;
+    if (options.selectionEnabled === true && state.scale <= 1 && containsContent(entry, e.target)) {
+      recentContentPointer = false;
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     recentContentPointer = containsContent(entry, e.target);
@@ -183,6 +194,7 @@ export function openLightbox(options) {
 
   function onDoubleClick(e) {
     if (!containsContent(entry, e.target) && !recentContentPointer) return;
+    if (options.selectionEnabled === true && hasTextSelection()) return;
     e.preventDefault();
     e.stopPropagation();
     recentContentPointer = false;
@@ -213,6 +225,7 @@ export function openLightbox(options) {
     overlay.removeEventListener("dblclick", onDoubleClick);
     close.removeEventListener("click", onCloseClick);
     if (diagram) window.removeEventListener("resize", onResize);
+    options.onClose?.();
     overlay.remove();
     if (activeLightbox === entry) activeLightbox = null;
   }
@@ -244,6 +257,7 @@ export function openLightbox(options) {
     onClose: cleanup,
   });
   sizeDiagramViewport(content, viewport);
+  options.onContentChange?.(content);
   entry.dialog = dialogHandle;
   return entry;
 }

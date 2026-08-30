@@ -42,6 +42,7 @@ Each description is harvested from the test file's `@protects` declaration.
 - `test/contracts/assets.test.mjs` — assets capability contracts.
 - `test/contracts/compatibility-security.test.mjs` — compatibility security capability contracts.
 - `test/contracts/context-usage-wire.test.mjs` — context usage wire capability contracts.
+- `test/contracts/css-integrity.test.mjs` — CSS source and generated-artifact integrity contracts.
 - `test/contracts/data-boundaries.test.mjs` — data boundaries capability contracts.
 - `test/contracts/docs-tour.test.mjs` — Generated documentation freshness and the offline, zero-network architecture tour.
 - `test/contracts/fetch-proxy-worker.test.mjs` — fetch proxy worker capability contracts.

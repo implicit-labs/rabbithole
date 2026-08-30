@@ -1,8 +1,9 @@
 import { BRANCH_FOLLOWUP, branchTypeOfNode, isDockedNote } from "../core/hole/ask.js";
-import { lensLabel, truncate } from "../core/hole/lens.js";
+import { truncate } from "../core/hole/lens.js";
 import { lineageNodesFromMap } from "../core/hole/tree.js";
 import { iconSvg } from "../core/html/icons.js";
 import { escapeHtml } from "../core/utils.js";
+import { presetLabelForOrigin } from "./ask-presets.js";
 import {
   breadcrumbEl,
   buildDocContent,
@@ -30,15 +31,15 @@ import { applyChildHighlights, transitionMarkGroups } from "./text-marks.js";
 import { mountVisuals } from "./visuals.js";
 
 function anchorStart(node) {
-  return node.origin?.anchor?.offset_start ?? 1e9;
+  return Number.isFinite(node.origin?.anchor?.offset_start) ? node.origin.anchor.offset_start : 1e9;
 }
 
 function isFollowup(node) {
   return branchTypeOfNode(node) === BRANCH_FOLLOWUP;
 }
 
-function lensBadgeHtml(key) {
-  return '<span class="lens-badge">' + escapeHtml(lensLabel(key)) + "</span>";
+function lensBadgeHtml(origin) {
+  return '<span class="lens-badge">' + escapeHtml(presetLabelForOrigin(origin)) + "</span>";
 }
 
 function defaultReaderHooks() {
@@ -259,7 +260,7 @@ export function renderReaderBody() {
     ctx.className = "reader-context";
     if (node.origin.selected_text) {
       const tail = node.origin.lens
-        ? " — " + lensBadgeHtml(node.origin.lens)
+        ? " — " + lensBadgeHtml(node.origin)
         : node.origin.question
           ? " — " + escapeHtml(node.origin.question)
           : "";
@@ -272,7 +273,9 @@ export function renderReaderBody() {
     } else {
       ctx.innerHTML =
         '<span class="rc-label">Follow-up</span>' +
-        (node.origin.lens ? lensBadgeHtml(node.origin.lens) : escapeHtml(node.origin.question || "Pasted image"));
+        (node.origin.lens
+          ? lensBadgeHtml(node.origin) + (node.origin.question ? " " + escapeHtml(node.origin.question) : "")
+          : escapeHtml(node.origin.question || "Pasted image"));
     }
     appendOriginAttachmentThumbnails(ctx, node);
     // The strip is a live link: click it to land on the exact spot in the
@@ -398,7 +401,7 @@ export function renderMarginNotes() {
     const pending = k.status !== "answered";
     const qHtml =
       k.origin && k.origin.lens
-        ? lensBadgeHtml(k.origin.lens)
+        ? lensBadgeHtml(k.origin) + (k.origin.question ? " " + escapeHtml(k.origin.question) : "")
         : escapeHtml(k.origin && k.origin.question ? k.origin.question : k.title || "Untitled");
     const quote = k.origin && k.origin.selected_text ? k.origin.selected_text : "";
     const status = pending ? pendingStatusHtml(k) : "open →";

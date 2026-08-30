@@ -5,6 +5,7 @@ import {
   initAskFollowups,
   rollbackBranch,
   sendFollowup,
+  showAskFromSelection,
   updateComposerState,
 } from "./ask-followups.js";
 import {
@@ -26,7 +27,7 @@ import {
   setMode,
 } from "./canvas/index.js";
 import { disposeChrome, initChrome } from "./chrome-init.js";
-import { disposeCore, initCore, nodes } from "./core.js";
+import { closed, disposeCore, frozen, initCore, nodes } from "./core.js";
 import {
   closeDockedNotePopover,
   createPlacedNote,
@@ -74,6 +75,18 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       post: post,
       getNode: function (id) {
         return nodes[id] || null;
+      },
+      getBlockBranches: function (nodeId, blockId) {
+        return Object.values(nodes).filter(function (node) {
+          return node.parent_id === nodeId && node.origin?.anchor?.block?.block_id === blockId;
+        });
+      },
+      openBranch: function (id) {
+        openNode(id);
+      },
+      askSelection: showAskFromSelection,
+      canAsk: function () {
+        return !frozen && !closed;
       },
     };
     if (typeof capabilities.loadMermaid === "function") visualRuntimeHooks.loadMermaid = capabilities.loadMermaid;

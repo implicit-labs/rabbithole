@@ -1,5 +1,6 @@
-import { lensLabel, truncate } from "../core/hole/lens.js";
+import { truncate } from "../core/hole/lens.js";
 import { escapeHtml } from "../core/utils.js";
+import { presetLabelForOrigin } from "./ask-presets.js";
 import { createStandaloneNoteAtViewportCenter, frameAll, tidy } from "./canvas/index.js";
 import { goToNode, mode, motionSourceFromEvent, nodes, paletteEl, palResults, palText } from "./core.js";
 import { isCommandEnter } from "./input-intent.js";
@@ -222,7 +223,7 @@ function renderPalette(q) {
       row._flag.textContent = "writing…";
     }
     if (n.origin && n.origin.lens) {
-      row._badge.textContent = lensLabel(n.origin.lens);
+      row._badge.textContent = presetLabelForOrigin(n.origin);
       row._badge.hidden = false;
     }
     row._snippet.innerHTML = palSnippet(n, tokens);

@@ -39,7 +39,7 @@ import {
   world,
 } from "./core.js";
 import { createCleanupScope, createModuleLifecycle } from "./kit/scope.js";
-import { teardownNode } from "./node-teardown.js";
+import { detachNode, teardownNode } from "./node-teardown.js";
 import { openPopover } from "./primitives/popover.js";
 import { renderMarginNotes } from "./reader.js";
 import { refreshNodeHtml } from "./renderer.js";
@@ -250,7 +250,7 @@ function presentPlacedNote(node, parent, sourceRect) {
   flyNoteToCard(sourceRect, node);
 }
 
-export function placeDockedNote(node, sourceRect) {
+export function placeDockedNote(node, sourceRect, options = {}) {
   const parent = node && node.parent_id != null ? nodes[node.parent_id] : null;
   if (!parent || frozen || closed || !isDockedNote(node)) return false;
   const pos = placeNoteChild(parent, branchTypeOfNode(node));
@@ -259,13 +259,15 @@ export function placeDockedNote(node, sourceRect) {
   node.view = Object.assign({}, node.view);
   delete node.view.docked;
   presentPlacedNote(node, parent, sourceRect);
-  postBrowserEvent({ type: "node_extensions_patch", node_id: node.id, namespace: "note", value: {} });
-  postBrowserEvent({
-    type: "node_update",
-    node_id: node.id,
-    position: { x: node.position.x, y: node.position.y },
-    size: { w: node.size.w, h: node.size.h },
-  });
+  if (options.persist !== false) {
+    postBrowserEvent({ type: "node_extensions_patch", node_id: node.id, namespace: "note", value: {} });
+    postBrowserEvent({
+      type: "node_update",
+      node_id: node.id,
+      position: { x: node.position.x, y: node.position.y },
+      size: { w: node.size.w, h: node.size.h },
+    });
+  }
   return true;
 }
 
@@ -691,6 +693,8 @@ function renderPopoverState(state) {
   footer.style.display = editingAllowed() ? "" : "none";
   const place = /** @type {HTMLElement} */ (surface.querySelector(".note-pop-place"));
   place.style.display = isDockedNote(session.node) ? "" : "none";
+  const ask = /** @type {HTMLButtonElement} */ (surface.querySelector(".note-pop-ask"));
+  ask.style.display = isDockedNote(session.node) && canAskFromNote(session) ? "" : "none";
 }
 
 /* The edit state is the read state with a caret — same inset, same face — and
@@ -819,6 +823,43 @@ function placePopoverNote(session) {
   placeDockedNote(node, rect);
 }
 
+/* The read-state Ask is deliberately one optimistic transaction. Placement is
+   local-only: the branch request itself persists the pending card geometry.
+   If that request cannot be posted, the conversion restores the note and this
+   callback removes the temporary card so its original margin dot returns. */
+function askFromPopoverNote(session) {
+  const node = session && session.node,
+    rect = affordanceRect(node);
+  if (!node || !isDockedNote(node) || !canAskFromNote(session)) return;
+  const docked = {
+    position: { x: node.position.x, y: node.position.y },
+    view: Object.assign({}, node.view),
+  };
+  const question = String(node.markdown || "").trim();
+  closeNotePopover({ restoreFocus: false, commit: false });
+  if (!question || !placeDockedNote(node, rect, { persist: false })) return;
+  const converted = convertNoteToAsk(node, question, {
+    onRollback: function (restored) {
+      restored.position.x = docked.position.x;
+      restored.position.y = docked.position.y;
+      restored.view = docked.view;
+      detachNode(restored);
+      const parent = nodes[restored.parent_id];
+      renderDockedNotes(parent);
+      drawEdges();
+      if (mode === "reader" && currentNodeId === restored.parent_id) renderMarginNotes();
+    },
+  });
+  if (!converted) {
+    node.position.x = docked.position.x;
+    node.position.y = docked.position.y;
+    node.view = docked.view;
+    detachNode(node);
+    renderDockedNotes(nodes[node.parent_id]);
+    drawEdges();
+  }
+}
+
 function deletePopoverNote(session) {
   const doomed = session && session.node;
   if (!doomed) return;
@@ -834,6 +875,9 @@ function onPopoverClick(event) {
   if (button.classList.contains("note-pop-place")) {
     event.stopPropagation();
     placePopoverNote(session);
+  } else if (button.classList.contains("note-pop-ask")) {
+    event.stopPropagation();
+    askFromPopoverNote(session);
   } else if (button.classList.contains("note-pop-delete")) {
     event.stopPropagation();
     deletePopoverNote(session);

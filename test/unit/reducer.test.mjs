@@ -231,6 +231,31 @@ assertGoldens(nodeResults, "node");
   assert.equal(recommitted.state.nodes.get("standalone-note").status, "pending");
   assert.equal(recommitted.state.nodes.get("standalone-note").markdown, "");
 
+  const publishedAnswer = reduceHoleEvent(standalone.state, {
+    type: "node_create",
+    id: "published-answer",
+    parent_id: "root",
+    title: "Agent result",
+    markdown: "A completed model-authored document.",
+    origin: null,
+    position: { x: 500, y: 10 },
+    size: { w: 420, h: 460 },
+  }, { now: "2026-08-11T00:00:01.500Z" });
+  assert.deepEqual(publishedAnswer.state.nodes.get("published-answer").origin, null,
+    "node_create admits a completed answer document without manufacturing an ask origin");
+  assert.equal(publishedAnswer.state.nodes.get("published-answer").status, "answered");
+  assert.equal(publishedAnswer.state.nodes.get("published-answer").read, false,
+    "agent-published answers arrive unread like ordinary answers");
+
+  const agentNote = reduceHoleEvent(standalone.state, {
+    type: "node_create",
+    id: "agent-note",
+    markdown: "An explicit agent annotation.",
+    origin: { kind: "note", author: "agent" },
+  });
+  assert.deepEqual(agentNote.state.nodes.get("agent-note").origin, { kind: "note", author: "agent" },
+    "agent note attribution survives normalization");
+
   // Docking is presentation and only means anything on a parent: it rides in
   // the extensions bag, leaves the note itself untouched, and clears when the
   // note is later given a place.
@@ -277,11 +302,11 @@ assertGoldens(nodeResults, "node");
     /Parent node missing not found/,
     "node_create rejects a missing parent",
   );
-  for (const origin of [null, {}, { kind: "answer" }]) {
+  for (const origin of [{}, { kind: "answer" }]) {
     assert.throws(
       () => reduceHoleEvent(initial, { type: "node_create", id: `bad-origin-${JSON.stringify(origin)}`, markdown: "Nope", origin }),
-      /origin\.kind must be "note"/,
-      "node_create rejects every non-note origin",
+      /origin must be null or kind "note"/,
+      "node_create rejects every non-note, non-answer origin",
     );
   }
   assert.throws(

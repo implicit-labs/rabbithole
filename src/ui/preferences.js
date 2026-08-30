@@ -8,8 +8,11 @@
  * doc; the two compose (see fontPx in core.js).
  */
 
+import { ASK_PRESET_KEYS, DEFAULT_ASK_PRESETS } from "../core/hole/lens.js";
+
 const THEME_KEY = "rh-theme";
 const READING_SCALE_KEY = "rh-reading-scale";
+export const ASK_PRESETS_KEY = "rh-ask-presets-v1";
 
 export const READING_SCALE_MIN = 0.8;
 export const READING_SCALE_MAX = 1.4;
@@ -19,6 +22,7 @@ const listeners = [];
 let systemThemeMql = null;
 let readingScaleCache = null;
 let swapFrame = 0;
+let askPresetsCache = null;
 
 /*
  * A frozen snapshot is often opened from a file or a data document where
@@ -177,4 +181,171 @@ export function setReadingScale(value) {
   writeStored(READING_SCALE_KEY, String(next));
   notify("reading-scale");
   return next;
+}
+
+// ------------------------------------------------------------ ask presets
+
+const PRESET_KEY_ALIASES = Object.freeze({
+  explain: "explain",
+  eli5: "eli5",
+  example: "example",
+  "explain-example": "example",
+  explain_example: "example",
+  explain_with_example: "example",
+  deeper: "deeper",
+  "go-deeper": "deeper",
+  go_deeper: "deeper",
+});
+
+function clonePresetDefaults() {
+  return {
+    version: 1,
+    linked: false,
+    selection: Object.fromEntries(
+      ASK_PRESET_KEYS.map((key) => [
+        key,
+        {
+          label: DEFAULT_ASK_PRESETS.selection[key].label,
+          instruction: DEFAULT_ASK_PRESETS.selection[key].instruction,
+          removed: false,
+        },
+      ]),
+    ),
+    followup: Object.fromEntries(
+      ASK_PRESET_KEYS.map((key) => [
+        key,
+        {
+          label: DEFAULT_ASK_PRESETS.followup[key].label,
+          instruction: DEFAULT_ASK_PRESETS.followup[key].instruction,
+          removed: false,
+        },
+      ]),
+    ),
+  };
+}
+
+function normalizedPresetKey(value) {
+  return (
+    PRESET_KEY_ALIASES[
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    ] || null
+  );
+}
+
+function normalizePresetSet(value, defaults) {
+  const out = { ...defaults };
+  const entries = Array.isArray(value)
+    ? value.map((entry, index) => [entry?.key ?? entry?.id ?? ASK_PRESET_KEYS[index], entry])
+    : value && typeof value === "object"
+      ? Object.entries(value)
+      : [];
+  for (const [rawKey, rawPreset] of entries) {
+    const key = normalizedPresetKey(rawKey);
+    if (!key || !rawPreset || typeof rawPreset !== "object" || Array.isArray(rawPreset)) continue;
+    const label = String(rawPreset.label ?? "").trim();
+    const instruction = String(rawPreset.instruction ?? rawPreset.q ?? "").trim();
+    if (label && instruction)
+      out[key] = {
+        label: label.slice(0, 80),
+        instruction: instruction.slice(0, 4000),
+        removed: rawPreset.removed === true,
+      };
+  }
+  return out;
+}
+
+/** Migrate and validate storage only here; callers always receive v1 canonical keys. */
+export function normalizeAskPresets(value) {
+  const defaults = clonePresetDefaults();
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const legacySets = raw.presets && typeof raw.presets === "object" ? raw.presets : raw;
+  const shared = legacySets.lenses || legacySets.default || null;
+  return {
+    version: 1,
+    linked: raw.linked === true,
+    selection: normalizePresetSet(legacySets.selection || shared, defaults.selection),
+    followup: normalizePresetSet(legacySets.followup || legacySets.followups || shared, defaults.followup),
+  };
+}
+
+export function askPresets() {
+  if (!askPresetsCache) {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(readStored(ASK_PRESETS_KEY));
+    } catch (error) {}
+    askPresetsCache = normalizeAskPresets(parsed);
+  }
+  return askPresetsCache;
+}
+
+/*
+ * The link resolves here, at the single read point, so every consumer — the
+ * live button rows, badge labels, and the wire instruction — follows the
+ * toggle without knowing it exists. The stored follow-up set is untouched
+ * while linked; unlinking restores it exactly.
+ */
+export function askPreset(set, key) {
+  let setKey = set === "selection" ? "selection" : "followup";
+  if (setKey === "followup" && askPresets().linked) setKey = "selection";
+  const presetKey = normalizedPresetKey(key);
+  return presetKey ? askPresets()[setKey][presetKey] : null;
+}
+
+export function askPresetsLinked() {
+  return askPresets().linked === true;
+}
+
+/** The keys a surface actually shows, in row order — removal follows the link. */
+export function visibleAskPresetKeys(set) {
+  return ASK_PRESET_KEYS.filter((key) => askPreset(set, key)?.removed !== true);
+}
+
+export function setAskPresetsLinked(value) {
+  const next = value === true;
+  const current = askPresets();
+  if (current.linked === next) return next;
+  askPresetsCache = { ...current, linked: next };
+  writeStored(ASK_PRESETS_KEY, JSON.stringify(askPresetsCache));
+  notify("ask-presets");
+  return next;
+}
+
+export function setAskPreset(set, key, value) {
+  const setKey = set === "selection" ? "selection" : "followup";
+  const presetKey = normalizedPresetKey(key);
+  if (!presetKey) return null;
+  const current = askPresets();
+  const existing = current[setKey][presetKey];
+  const label = String(value?.label ?? existing.label)
+    .trim()
+    .slice(0, 80);
+  const instruction = String(value?.instruction ?? existing.instruction)
+    .trim()
+    .slice(0, 4000);
+  const removed = typeof value?.removed === "boolean" ? value.removed : existing.removed === true;
+  if (!label || !instruction) return existing;
+  askPresetsCache = {
+    version: 1,
+    linked: current.linked === true,
+    selection: { ...current.selection },
+    followup: { ...current.followup },
+    [setKey]: { ...current[setKey], [presetKey]: { label, instruction, removed } },
+  };
+  writeStored(ASK_PRESETS_KEY, JSON.stringify(askPresetsCache));
+  notify("ask-presets");
+  return askPresetsCache[setKey][presetKey];
+}
+
+export function setAskPresetRemoved(set, key, value) {
+  return setAskPreset(set, key, { removed: value === true });
+}
+
+export function resetAskPreset(set, key) {
+  const setKey = set === "selection" ? "selection" : "followup";
+  const presetKey = normalizedPresetKey(key);
+  if (!presetKey) return null;
+  return setAskPreset(setKey, presetKey, { ...DEFAULT_ASK_PRESETS[setKey][presetKey], removed: false });
 }

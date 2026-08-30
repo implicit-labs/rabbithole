@@ -118,14 +118,14 @@ async function modernJourney() {
   }
 }
 
-/* Hosts compose sections: the MCP page and a frozen snapshot register none, so
-   both get the shared Appearance section and nothing else. */
+/* Hosts compose sections: the MCP page and a frozen snapshot register no
+   provider UI, so both get the two shared preference sections. */
 async function assertAppearanceOnlySettings(page, label) {
   assert.equal(await page.getAttribute("#t-settings", "aria-haspopup"), "dialog", `${label}: the gear should announce a dialog`);
   await page.click("#t-settings");
   await page.waitForSelector("#settings-sheet");
-  assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance"],
-    `${label}: a host that registers nothing should get Appearance and only Appearance`);
+  assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance", "Quick questions"],
+    `${label}: a host that registers nothing should still get shared Appearance and Quick questions preferences`);
   /* The fixed height matters most here: with a single two-row section the
      sheet must still open at the same frame every host shows — the space
      below the rows is the design, never a squat strip. */

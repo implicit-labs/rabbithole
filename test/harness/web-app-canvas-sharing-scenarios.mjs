@@ -619,7 +619,7 @@ async function verifyAnchoredNotes() {
     await page.fill("#ask-text", "Enter-created marginalia");
     assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
       hasDraft: surface.classList.contains("has-draft"),
-      lensesHidden: Array.from(surface.querySelectorAll(".lens")).every((button) => getComputedStyle(button).display === "none"),
+      lensesVisible: Array.from(surface.querySelectorAll(".lens")).every((button) => getComputedStyle(button).display !== "none"),
       commits: Array.from(surface.querySelectorAll(".ask-commit")).map((button) => ({
         label: button.childNodes[0].textContent.trim(),
         hint: button.querySelector("kbd")?.textContent,
@@ -628,13 +628,13 @@ async function verifyAnchoredNotes() {
       askHighlight: CSS.highlights?.has("rh-ask") || false,
     })), {
       hasDraft: true,
-      lensesHidden: true,
+      lensesVisible: true,
       commits: [
         { label: "Note", hint: "↵", visible: true },
         { label: "Ask", hint: "⌘↵", visible: true },
       ],
       askHighlight: true,
-    }, "typing should morph the lens row into labeled commit actions while the selection wash stays put");
+    }, "typing should add labeled commit actions while presets remain available to style the draft");
     await page.keyboard.down("Control");
     await page.keyboard.up("Control");
     assert.equal(await page.evaluate(() => CSS.highlights?.has("rh-ask") || false), true,
@@ -675,7 +675,7 @@ async function verifyAnchoredNotes() {
     await page.fill("#ask-text", "temporary draft");
     await page.fill("#ask-text", "");
     assert.deepEqual(await composerRowState(page, "#ask"), { lensesVisible: true, commitsHidden: true },
-      "emptying the textarea should restore the lenses");
+      "emptying the textarea should hide commits while keeping the presets");
     assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
       hasDraft: surface.classList.contains("has-draft"),
       askHighlight: CSS.highlights?.has("rh-ask") || false,
@@ -854,10 +854,11 @@ async function verifyDockedNotes() {
     })), { role: "dialog", text: "The first docked note", focusInside: true,
       actions: [
         { label: "", chip: null, icon: true, ariaLabel: "Delete note", shortcuts: "Backspace Delete" },
+        { label: "Ask", chip: null, icon: false, ariaLabel: null, shortcuts: null },
         { label: "Place on canvas", chip: "⌘↵", icon: false, ariaLabel: null, shortcuts: "Meta+Enter Control+Enter" },
       ], viewStyle: { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", padding: ["8px", "10px", "8px", "10px"] },
       editors: 0 },
-    "read state: icon-only delete on the left, Place on canvas with its chip on the right");
+    "read state: icon-only delete on the left, one-gesture Ask, and Place on canvas on the right");
     const chipParity = await popover.evaluate((surface) => {
       const signature = (chip) => {
         const style = getComputedStyle(chip);
@@ -1111,23 +1112,20 @@ async function verifyDockedNotes() {
     })), { dots: 0, whole: 0, noteCards: 3 },
     "a reload keeps follow-up notes as windows and rebuilds any remaining docked annotations");
 
-    // Asking from a docked note is one motion: the note gains a place and then
-    // becomes the question, so the answer has something to hang from.
+    // Asking from the read-state dot popover is one gesture: the note gains a
+    // place and becomes the question, so the answer has something to hang from.
     const askId = await dockNote("third anchor", "Should this become a question?");
-    await page.locator(`.note-dot[data-note="${askId}"]`).dblclick();
-    await popover.locator(".note-editor").waitFor();
-    await popover.locator(".note-editor").fill("Why does the third anchor matter?");
-    await popover.locator(".note-editor").press("Control+Enter");
+    await page.locator(`.note-dot[data-note="${askId}"]`).click();
+    await popover.locator(".note-pop-ask").click();
     await page.waitForSelector(`.card[data-id="${askId}"]`);
     await page.locator(`.card[data-id="${askId}"]`, { hasText: "Fallback streamed document." }).waitFor();
     assert.equal(await page.locator(`.note-dot[data-note="${askId}"]`).count(), 0, "a note that became an ask leaves the margin");
     const asked = await waitForStoredHole(page, (hole) => {
       const node = hole.nodes.find((entry) => entry.id === askId);
-      // Placement and conversion are two posts; the store settles when both have landed.
       return node?.origin?.question && node.position.x > 0 && !node.extensions?.note?.docked;
     }, "the converted ask to persist").then((hole) => hole.nodes.find((node) => node.id === askId));
     assert.deepEqual({ question: asked.origin.question, selected: asked.origin.selected_text, docked: asked.extensions?.note?.docked ?? false,
-      placed: asked.position.x > 0 }, { question: "Why does the third anchor matter?", selected: "third anchor", docked: false, placed: true },
+      placed: asked.position.x > 0 }, { question: "Should this become a question?", selected: "third anchor", docked: false, placed: true },
     "the ask keeps the note's anchor, loses the dock, and keeps the place it was just given");
     const treatments = await page.evaluate(({ noteId, askId }) => {
       const html = document.documentElement;
@@ -3474,7 +3472,7 @@ async function verifyCanvasBranching() {
       offCenterX: Math.abs((rect.left + rect.right) / 2 - innerWidth / 2),
       offCenterY: Math.abs((rect.top + rect.bottom) / 2 - innerHeight / 2),
       height: rect.height,
-      expectedHeight: Math.min(560, innerHeight - 96),
+      expectedHeight: Math.min(480, innerHeight - 96),
       radius: styles.borderTopLeftRadius,
       shadow: styles.boxShadow,
       role: sheet.getAttribute("role"),
@@ -3500,7 +3498,7 @@ async function verifyCanvasBranching() {
   assert.equal(sheetStandard.title, "Settings");
   assert.match(sheetStandard.scrimBackdrop, /blur/, "the scrim blurs the canvas behind it");
   assert.match(sheetStandard.scrimBackground, /^rgba\(/, "the scrim stays translucent so appearance changes read through");
-  assert.deepEqual(sheetStandard.nav, ["Appearance", "Model"], "the web host registers Model beside the shared Appearance section");
+  assert.deepEqual(sheetStandard.nav, ["Appearance", "Quick questions", "Model"], "the web host registers Model beside the shared Appearance and Quick questions sections");
   assert.deepEqual(sheetStandard.identity, ["Rabbithole", "Web"], "the sidebar footer names the product and the host");
   assert.equal(sheetStandard.paneTitle, "Appearance", "the gear lands on Appearance");
   assert.equal(await page.getAttribute("#t-settings", "aria-haspopup"), "dialog");
@@ -3536,6 +3534,119 @@ async function verifyCanvasBranching() {
   await page.emulateMedia({ colorScheme: null });
   await page.click("#t-settings");
   await page.waitForSelector("#settings-sheet");
+  await page.click('[data-settings-section="asking"]');
+  assert.equal(await page.locator("#settings-pane-title").innerText(), "Quick questions");
+  // The section is the product wearing its own clothes: full-width replicas of
+  // the real surfaces, assembled from the real .ask-input/.ask-actions parts.
+  const pillLabels = (set) => page.locator(`[data-asking-surface][data-set="${set}"] [data-preset-button]`)
+    .evaluateAll((buttons) => buttons.map((button) => button.firstChild.nodeValue.trim()));
+  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"],
+    "the selection replica shows the four preset pills with their minimal default labels");
+  assert.deepEqual(await pillLabels("followup"), ["Explain", "ELI5", "Example", "Go deeper"]);
+  assert.equal(await page.locator(".asking-editor.open").count(), 0, "no editor is open until a pill is clicked");
+  const fidelity = await page.evaluate(() => {
+    const mock = document.querySelector('[data-asking-surface][data-set="selection"] .asking-mock');
+    const row = mock.querySelector(".ask-actions");
+    const rowStyle = getComputedStyle(row);
+    return {
+      width: Math.round(mock.getBoundingClientRect().width),
+      sectionWidth: Math.round(document.querySelector(".asking-settings").getBoundingClientRect().width),
+      justify: rowStyle.justifyContent,
+      rowPadding: rowStyle.padding,
+      radius: getComputedStyle(mock).borderRadius,
+      glass: getComputedStyle(mock).backdropFilter,
+      shadow: getComputedStyle(mock).boxShadow,
+      linkRole: document.querySelector("[data-asking-link]").getAttribute("role"),
+    };
+  });
+  assert.equal(fidelity.width, fidelity.sectionWidth, "the replica runs the full section width");
+  assert.equal(fidelity.justify, "space-between", "pill slack is handed out exactly like the real ask row");
+  assert.equal(fidelity.rowPadding, "5px", "the replica row keeps the real ask row's padding");
+  assert.equal(fidelity.radius, "12px", "the selection replica wears the popover's radius");
+  assert.match(fidelity.glass, /blur/, "the selection replica wears the popover's glass");
+  assert.equal(fidelity.shadow, "none", "the replica keeps the popover's skin but not its elevation — nothing floats here");
+  assert.equal(fidelity.linkRole, "switch", "the link control is the product's own switch, not a bare checkbox");
+
+  // Click-to-edit: the pill expands its editor in place and hands over focus.
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
+  await page.waitForSelector('[data-asking-surface][data-set="selection"] .asking-editor.open');
+  assert.equal(await page.evaluate(() => document.activeElement.id), "asking-selection-explain-label",
+    "opening an editor moves focus into the label field");
+  assert.equal(await page.inputValue("#asking-selection-explain-label"), "Explain");
+  assert.equal(await page.inputValue("#asking-selection-explain-instruction"), "Explain this further.",
+    "default instructions stay minimal — the preset names the move, nothing more");
+  assert.equal(await page.getAttribute('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]', "aria-expanded"), "true");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').isVisible(), false,
+    "Reset appears only once the slot differs from its default");
+  await page.fill("#asking-selection-explain-label", "Clarify");
+  await page.fill("#asking-selection-explain-instruction", "Lead with the key distinction.");
+  assert.deepEqual(await pillLabels("selection"), ["Clarify", "ELI5", "Example", "Go deeper"],
+    "the pill is a live preview — a label edit lands on it as it is typed");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').isVisible(), true);
+  assert.deepEqual(await page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem("rh-ask-presets-v1"));
+    return { version: saved.version, linked: saved.linked, selection: saved.selection.explain, followup: saved.followup.explain };
+  }), {
+    version: 1,
+    linked: false,
+    selection: { label: "Clarify", instruction: "Lead with the key distinction.", removed: false },
+    followup: { label: "Explain", instruction: "Explain this further.", removed: false },
+  }, "the two preset sets stay independent in the versioned preference key");
+
+  // One editor at a time, and Escape gives back one level before the sheet.
+  await page.click('[data-asking-surface][data-set="followup"] [data-preset-button="explain"]');
+  await page.waitForSelector('[data-asking-surface][data-set="followup"] .asking-editor.open');
+  assert.equal(await page.locator(".asking-editor.open").count(), 1, "opening a second editor closes the first");
+  await page.fill("#asking-followup-explain-label", "Recap");
+  assert.deepEqual(await pillLabels("followup"), ["Recap", "ELI5", "Example", "Go deeper"]);
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".asking-editor.open").count(), 0);
+  assert.equal(await page.locator("#settings-sheet").count(), 1, "Escape collapses the editor; the sheet stays");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.presetButton), "explain",
+    "Escape hands focus back to the pill it came from");
+
+  // The link toggle folds the two sets into one without destroying either: the
+  // follow-up surface disappears instead of repeating the row it now shares.
+  await page.check("input[data-asking-link]");
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-ask-presets-v1")).linked), true,
+    "the link lives in the same versioned preference key");
+  await page.waitForFunction(() => getComputedStyle(document.querySelector("[data-asking-reveal]")).visibility === "hidden");
+  assert.equal(await page.locator('[data-asking-surface][data-set="followup"] [data-preset-button="explain"]').isVisible(), false,
+    "one set everywhere: the follow-up surface folds away rather than mirroring");
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
+  await page.fill("#asking-selection-explain-label", "Compare");
+  await page.uncheck("input[data-asking-link]");
+  assert.equal(await page.locator(".asking-editor.open").count(), 0, "a click outside the editor collapses it");
+  await page.waitForFunction(() => getComputedStyle(document.querySelector("[data-asking-reveal]")).visibility === "visible");
+  assert.deepEqual(await pillLabels("followup"), ["Recap", "ELI5", "Example", "Go deeper"],
+    "unticking brings the follow-up set back exactly as it looked before the tick");
+
+  // Per-slot reset, from inside the open editor.
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-reset]');
+  assert.equal(await page.inputValue("#asking-selection-explain-label"), "Explain", "Reset restores only that slot to its minimal default");
+  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"]);
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').isVisible(), false);
+  await page.keyboard.press("Escape");
+
+  // Remove and restore: Remove takes the pill off the row, hints renumber so
+  // every number stays truthful, and a ghost chip below waits to bring it back.
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="eli5"]');
+  await page.waitForSelector('[data-asking-surface][data-set="selection"] .asking-editor.open');
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-remove]');
+  assert.deepEqual(await pillLabels("selection"), ["Explain", "Example", "Go deeper"], "Remove takes the pill off the row");
+  assert.deepEqual(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-button] kbd').allTextContents(), ["1", "2", "3"],
+    "the remaining number hints close ranks");
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-ask-presets-v1")).selection.eli5.removed), true,
+    "removal is a flag on the same slot — the words survive for old branches and restore");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.presetRestore), "eli5",
+    "focus lands on the way back in");
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-restore="eli5"]');
+  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"], "the ghost chip restores the pill in place");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-asking-removed]').isVisible(), false,
+    "the removed row earns its place only while something is removed");
+  assert.equal(await page.locator("#settings-sheet").evaluate((sheet) => Math.round(sheet.getBoundingClientRect().height)), Math.round(sheetStandard.height),
+    "Quick questions renders inside the shared fixed sheet silhouette");
   await page.click('[data-settings-section="model"]');
   assert.equal(await page.locator("#settings-pane-title").innerText(), "Model");
   await page.waitForSelector("#settings-panel");

@@ -102,10 +102,11 @@ export const toolDefinitions = [
       "with answer_branch. " +
       "A branch_request with EMPTY selected_text is a follow-up question about the " +
       "parent document as a whole (a chat reply beneath it) — answer conversationally in that document's " +
-      "context. A branch_request may carry a 'lens' (explain | eli5 | example | deeper) — the question " +
-      "text spells out the style the human tapped; honor it. One marked saved=true was asked while no " +
+      "context. A branch_request may carry a 'lens' preset key (explain | eli5 | example | deeper) and a separate 'instruction'; " +
+      "honor the instruction while answering the human's question. An empty question means the selection or whole parent document is implicit. One marked saved=true was asked while no " +
       "agent was listening — answer it like any other. When attachments are present, read every attachments[].image_path; these are images pasted into the question. When region.image_path is present, it is either " +
       "this selection's clip or the immediate parent's clip; read that image before answering and trust it over extracted text for math, tables, and figures. " +
+      "When anchor.block is present, the selection came from that rendered visual block; use the matching fenced source in the parent document as context. " +
       "A convert_request asks you to transcribe the listed page image_path files under its inline rules; stream the document through answer_branch with that request_id. " +
       "On a resumed hole the first branch_request carries " +
       "a 'rehydration' field with the whole tree (and any saved_asks); read it to reload your context. " +
@@ -194,26 +195,31 @@ export const toolDefinitions = [
   {
     name: "send_to_rabbithole",
     description:
-      "Durably add a note to an existing Rabbithole only when the human explicitly asks you to send or save content there. " +
-      "This never opens or focuses a browser and never creates an answer to a question. Omit parent_node_id for a standalone canvas note, " +
-      "or provide a known node id to place the note beneath that node. Supply a stable operation_id and reuse it for retries so the note is created exactly once. " +
-      "The note appears immediately when that Rabbithole has a connected canvas in this MCP session; otherwise it is stored for the next open.",
+      "Durably publish a completed document to an existing Rabbithole only when the human explicitly asks you to send or save content there. " +
+      "This never opens or focuses a browser and never answers a pending branch request. The default kind is answer: model-authored content appears as a normal completed document. " +
+      "Use kind='note' only when you genuinely mean to annotate the canvas; the note carries agent attribution. Omit parent_node_id for a standalone canvas document, " +
+      "or provide a known node id to place it beneath that node. Supply a stable operation_id and reuse it for retries so the document is created exactly once. " +
+      "It appears immediately when that Rabbithole has a connected canvas in this MCP session; otherwise it is stored for the next open.",
     input: {
       hole_id: z.string().max(200).describe("Saved Rabbithole id from list_rabbitholes or prior context"),
       operation_id: z.string().max(200).describe("Caller-chosen stable id for this one publish operation; reuse unchanged on retry"),
-      title: z.string().max(2000).describe("Short note title").optional(),
-      content: z.string().max(10485760).describe("Markdown note content"),
+      title: z.string().max(2000).describe("Short document title").optional(),
+      content: z.string().max(10485760).describe("Markdown document content"),
       parent_node_id: z.string().max(200)
-        .describe("Optional existing node id to attach the note beneath; omit for a standalone canvas note")
+        .describe("Optional existing node id to attach the document beneath; omit for a standalone canvas document")
+        .optional(),
+      kind: z.enum(["answer", "note"])
+        .describe("Document presentation. Defaults to answer; use note only for an explicit annotation")
         .optional(),
     },
     validateInput: validatePublish,
-    run: ({ hole_id, operation_id, title, content, parent_node_id }) => sendToRabbithole({
+    run: ({ hole_id, operation_id, title, content, parent_node_id, kind }) => sendToRabbithole({
       holeId: hole_id,
       operationId: operation_id,
       title,
       content,
       parentNodeId: parent_node_id,
+      kind,
     }),
   },
   {

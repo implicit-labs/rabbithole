@@ -12,6 +12,7 @@
 
 import { iconSvg } from "../core/html/icons.js";
 import { escapeHtml } from "../core/utils.js";
+import { askingSettingsSection } from "./ask-presets.js";
 import {
   applyTheme,
   clampReadingScale,
@@ -90,6 +91,12 @@ export function initSettingsSheet(options) {
     })
   )
     registerSettingsSection(appearanceSection());
+  if (
+    !sections.some(function (entry) {
+      return entry.id === "asking";
+    })
+  )
+    registerSettingsSection(askingSettingsSection());
   const gear = document.getElementById("t-settings");
   if (!gear || gear === boundTrigger) return;
   unbindTrigger();

@@ -34,6 +34,22 @@ const RAIL_PANEL = {
     '<path fill="none" stroke-linecap="round" stroke-width="48" d="M192 64v384"/>',
 };
 
+/* A flat-headed thumbtack reads as window chrome at 16px, where the round
+   Ionicons pin reads like a map marker. Both states share one silhouette on
+   the repository's 512-grid/48-stroke system: outline is the available
+   action, fill is the pinned state. */
+const PIN_OUTLINE = {
+  attrs: 'viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"',
+  body: '<path fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="48" d="M160 56h192v144l56 96H104l56-96V56z"/>' +
+    '<path fill="none" stroke-linecap="round" stroke-width="48" d="M256 296v160"/>',
+};
+
+const PIN_FILLED = {
+  attrs: 'viewBox="0 0 512 512" fill="currentColor" stroke="currentColor"',
+  body: '<path d="M136 32h240v162l74 126H62l74-126V32z"/>' +
+    '<path fill="none" stroke-linecap="round" stroke-width="48" d="M256 296v160"/>',
+};
+
 /* The three folds a card offers, drawn as one mini-tree — a parent over two
    children — where a filled node is a folded node. The scope is the fill, so
    the three rows are told apart at a glance and never by their labels alone.
@@ -102,8 +118,8 @@ const ICON_DEFINITIONS = Object.freeze({
   download: ionicon(ICON_SELECTIONS.download, 16),
   package: ionicon(ICON_SELECTIONS.package, 16),
   rename: ionicon(ICON_SELECTIONS.rename, 16),
-  pin: ionicon(ICON_SELECTIONS.pin, 16),
-  "pin-active": ionicon(ICON_SELECTIONS["pin-active"], 16),
+  pin: { size: 16, ...PIN_OUTLINE },
+  "pin-active": { size: 16, ...PIN_FILLED },
   locate: ionicon(ICON_SELECTIONS.locate, 16),
   check: ionicon(ICON_SELECTIONS.check, 16),
   info: ionicon(ICON_SELECTIONS.info, 13),

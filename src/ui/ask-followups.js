@@ -1,6 +1,6 @@
 import { systemClock } from "../core/clock.js";
 import { BRANCH_FOLLOWUP, BRANCH_SELECTION } from "../core/hole/ask.js";
-import { LENSES, lensLabel, truncate } from "../core/hole/lens.js";
+import { truncate } from "../core/hole/lens.js";
 import { makeNode } from "../core/hole/node.js";
 import {
   DEFAULT_CHILD,
@@ -8,6 +8,7 @@ import {
   placeChild as sharedPlaceChild,
   subtreeBounds as sharedSubtreeBounds,
 } from "../core/layout.js";
+import { presetFor, refreshAskPresetActions, renderAskPresetActions } from "./ask-presets.js";
 import {
   autoGrowEl,
   createNodeEl,
@@ -44,10 +45,13 @@ import { createDockedNote, createPlacedNote, placedChildrenOf } from "./docked-n
 import { closestEl } from "./dom.js";
 import { easeOutMotion } from "./easing.js";
 import { cancelFrame, createModuleLifecycle, nextFrame } from "./kit/scope.js";
+import { closeLightbox } from "./lightbox.js";
 import { teardownNode } from "./node-teardown.js";
 import { openAnchoredSurface } from "./overlay/anchor.js";
+import { onPreferenceChange } from "./preferences.js";
 import { renderMarginNotes } from "./reader.js";
 import { charOffset, mountPdfRectMark, wrapInContainer } from "./text-marks.js";
+import { refreshVisualMarks } from "./visuals.js";
 
 const askLifecycle = createModuleLifecycle({
   defaults: function () {
@@ -68,6 +72,13 @@ export function initAskFollowups() {
   function composerSource(e) {
     return e && e.type === "keydown" ? "keyboard" : motionSourceFromEvent(e);
   }
+  renderAskPresetActions(document.getElementById("ask-actions"), "selection");
+  renderAskPresetActions(composerActions, "followup");
+  askScope.addCleanup(
+    onPreferenceChange(function (kind) {
+      if (kind === "ask-presets") refreshAskPresetActions();
+    }),
+  );
   askScope.listen(document, "mouseup", function (e) {
     if (inAsk(e)) return;
     if (usesMobileAskSurface()) queueMobileAsk(80);
@@ -252,6 +263,14 @@ function rangeInsideDocument(range, dc, selectedText) {
   return clipped.toString().trim() === selectedText.trim() ? clipped : null;
 }
 let selectionDraft = null;
+function composedClosest(node, selector) {
+  let current = node && node.nodeType === 1 ? node : node?.parentElement;
+  while (current) {
+    if (current.matches?.(selector)) return current;
+    current = current.parentElement || current.getRootNode?.().host || null;
+  }
+  return null;
+}
 export function showAskFromSelection(options) {
   const parentId = options && options.parentId;
   const parent = parentId && nodes[parentId];
@@ -268,6 +287,7 @@ export function showAskFromSelection(options) {
   // Virtual anchors (a selection range) carry their element as contextElement.
   const anchorNode =
     anchorEl && anchorEl.closest ? anchorEl : anchorEl && anchorEl.contextElement ? anchorEl.contextElement : null;
+  const overLightbox = !!composedClosest(anchorNode, ".rh-lightbox");
   selectionDraft = {
     parentId: parentId,
     container: anchorNode && anchorNode.closest ? anchorNode.closest(".doc-content") : null,
@@ -275,8 +295,11 @@ export function showAskFromSelection(options) {
     startOff: options.mdStart,
     endOff: options.mdEnd,
     pdfAnchor: options.pdfAnchor || null,
+    blockAnchor: options.blockAnchor || null,
+    overLightbox,
     range: options.range || null,
   };
+  ask.classList.toggle("over-lightbox", overLightbox);
   askText.value = "";
   updateSelectionDraftSurface();
   if (selectionDraft.range) paintSelectionHighlight(selectionDraft.range);
@@ -359,7 +382,7 @@ export function hideAsk() {
     cleanup();
   }
   askTabOwner = null;
-  ask.classList.remove("visible", "has-draft");
+  ask.classList.remove("visible", "has-draft", "over-lightbox");
   selectionDraft = null;
   clearSelectionHighlight();
 }
@@ -423,6 +446,15 @@ export function updateSelectionComposerState() {
       live: "Ask or note…",
     },
   );
+  const noteCommit = /** @type {HTMLButtonElement | null} */ (actions.querySelector('[data-commit="note"]'));
+  if (noteCommit) noteCommit.title = "Save note (Enter)";
+  if (selectionDraft.blockAnchor) {
+    if (noteCommit) {
+      noteCommit.disabled = true;
+      noteCommit.dataset.intentBlocked = "true";
+      noteCommit.title = "Visual selections can be asked about";
+    }
+  }
 }
 
 function retirePdfConversionAction(parent) {
@@ -444,18 +476,22 @@ function submitAsk(lensKey, source) {
     return;
   }
   if (parent.status === "pending" || parent.source?.converting) return;
-  const lens = lensKey && LENSES[lensKey] ? lensKey : null;
-  const question = lens ? LENSES[lens].q : askText.value.trim();
+  const preset = lensKey ? presetFor("selection", lensKey) : null;
+  const lens = preset ? lensKey : null;
+  const question = askText.value.trim();
+  const instruction = preset?.instruction || null;
   const requestId = uuid(),
     childId = uuid();
   const pos = placeChild(parent, BRANCH_SELECTION);
-  const anchor = { offset_start: selectionDraft.startOff, offset_end: selectionDraft.endOff };
+  const anchor = selectionDraft.blockAnchor
+    ? { block: selectionDraft.blockAnchor }
+    : { offset_start: selectionDraft.startOff, offset_end: selectionDraft.endOff };
   if (selectionDraft.pdfAnchor) anchor.pdf = selectionDraft.pdfAnchor;
   const node = Object.assign(
     makeNode({
       id: childId,
       parent_id: parent.id,
-      title: lens ? lensLabel(lens) : question ? truncate(question, 48) : "…",
+      title: preset ? preset.label : question ? truncate(question, 48) : "…",
       html: "",
       markdown: "",
       base_url: parent.base_url || null,
@@ -465,6 +501,7 @@ function submitAsk(lensKey, source) {
         selected_text: selectionDraft.selectedText,
         question: question,
         lens: lens,
+        ...(instruction ? { instruction: instruction } : {}),
         anchor: anchor,
         branch_type: BRANCH_SELECTION,
       },
@@ -511,11 +548,14 @@ function submitAsk(lensKey, source) {
       scheduleEdges();
     }
     revealNode(node, source);
+    if (anchor.block) refreshVisualMarks(parent.id, anchor.block.block_id);
   }
 
   const sel = window.getSelection();
   if (sel) sel.removeAllRanges();
+  const closeVisualPreview = selectionDraft.overLightbox;
   hideAsk();
+  if (closeVisualPreview) closeLightbox();
   const request = postBrowserEvent({
     type: "branch_request",
     request_id: requestId,
@@ -524,6 +564,7 @@ function submitAsk(lensKey, source) {
     selected_text: node.origin.selected_text,
     question: question,
     lens: lens,
+    ...(instruction ? { instruction: instruction } : {}),
     anchor: anchor,
     branch_type: BRANCH_SELECTION,
     position: { x: node.position.x, y: node.position.y },
@@ -550,6 +591,7 @@ function submitAsk(lensKey, source) {
 // give it geometry immediately.
 function submitNote(source, placed) {
   if (!selectionDraft || closed) return;
+  if (selectionDraft.blockAnchor) return;
   const markdown = askText.value.trim();
   if (!markdown) return;
   const draft = selectionDraft,
@@ -606,7 +648,7 @@ function autoGrowComposer() {
 
 // Shared follow-up submission: from the reader composer or a card's docked
 // one. Every direct child uses the same Reader branch rail.
-export function sendFollowup(parent, question, lens) {
+export function sendFollowup(parent, question, lens, instruction = null) {
   if (parent?.source?.converting) return null;
   const requestId = uuid(),
     childId = uuid();
@@ -615,13 +657,20 @@ export function sendFollowup(parent, question, lens) {
     makeNode({
       id: childId,
       parent_id: parent.id,
-      title: lens ? lensLabel(lens) : truncate(question, 48),
+      title: lens ? presetFor("followup", lens)?.label || String(lens) : truncate(question, 48),
       html: "",
       markdown: "",
       base_url: parent.base_url || null,
       base_url_source: parent.base_url ? "inherited" : null,
       read: false,
-      origin: { selected_text: "", question: question, lens: lens, anchor: null, branch_type: BRANCH_FOLLOWUP },
+      origin: {
+        selected_text: "",
+        question: question,
+        lens: lens,
+        ...(instruction ? { instruction: instruction } : {}),
+        anchor: null,
+        branch_type: BRANCH_FOLLOWUP,
+      },
       position: { x: pos.x, y: pos.y },
       size: { w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h },
       collapsed: false,
@@ -645,6 +694,7 @@ export function sendFollowup(parent, question, lens) {
     selected_text: "",
     question: question,
     lens: lens,
+    ...(instruction ? { instruction: instruction } : {}),
     anchor: null,
     branch_type: BRANCH_FOLLOWUP,
     position: { x: node.position.x, y: node.position.y },
@@ -737,11 +787,14 @@ function submitReaderFollowup(commit, source) {
   updateComposerState();
   scrollReaderRail(source);
 }
-// A lens on the reader composer is a whole-document ask — the canned lens
-// question, same as tapping a lens with nothing selected in the popover.
 function submitReaderLens(lens, source) {
   const parent = readerComposerParent(true);
-  if (!parent || !sendFollowup(parent, LENSES[lens].q, lens)) return;
+  const preset = presetFor("followup", lens);
+  const question = composerText.value.trim();
+  if (!parent || !preset || !sendFollowup(parent, question, lens, preset.instruction)) return;
+  composerText.value = "";
+  autoGrowComposer();
+  updateComposerState();
   scrollReaderRail(source);
 }
 function scrollReaderRail(source) {
@@ -755,8 +808,11 @@ function scrollReaderRail(source) {
 export function rollbackBranch(node, restore) {
   const live = nodes[node.id];
   if (!live || live.status === "answered") return;
+  const blockId = live.origin?.anchor?.block?.block_id || "";
+  const parentId = live.parent_id;
   if (restore) restore(live);
   else teardownNode(node.id);
+  if (blockId && parentId) refreshVisualMarks(parentId, blockId);
   if (canvasBuilt) drawEdges();
   if (mode === "reader" && currentNodeId === node.parent_id) renderMarginNotes();
   flashHint("Couldn't reach the agent — that ask was undone.");

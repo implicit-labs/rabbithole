@@ -85,6 +85,7 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
   const selectedText = standalone ? "" : String(payload.selected_text ?? "").trim();
   const question = String(payload.question ?? "").trim();
   const lens = normalizeLens(payload.lens);
+  const instruction = lens && typeof payload.instruction === "string" ? payload.instruction.trim().slice(0, 4000) : null;
   const anchor = standalone ? null : normalizeAnchor(payload.anchor);
   const branchType = standalone ? BRANCH_FOLLOWUP : normalizeBranchType(payload.branch_type, selectedText);
   const inheritedBase = inheritedNodeBaseUrl(parent);
@@ -103,6 +104,7 @@ export function createPendingBranchNode(payload, parent, { now = new Date().toIS
       selected_text: selectedText,
       question,
       lens,
+      ...(instruction ? { instruction } : {}),
       anchor,
       branch_type: branchType,
       ...(attachmentAssets.length ? { attachment_assets: attachmentAssets } : {}),

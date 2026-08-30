@@ -26,6 +26,7 @@ async function verifyEnterCompositionAndNewlines() {
     ["TITLE: Selection Enter\n", "Selection Enter completed."],
     ["TITLE: Reader Enter\n", "Reader Enter completed."],
     ["TITLE: Reader Lens\n", "Reader lens completed."],
+    ["TITLE: Styled Card Ask\n", "Styled card ask completed."],
     ["TITLE: Card Enter\n", "Card Enter completed."],
     ["TITLE: Card Lens\n", "Card lens completed."],
     ["TITLE: Standalone Enter\n", "Standalone composer ask completed."],
@@ -37,7 +38,7 @@ async function verifyEnterCompositionAndNewlines() {
     await verifyReaderComposer(documentPage.page, () => documentPage.providerCalls);
     await verifyCardComposer(documentPage.page, () => documentPage.providerCalls);
     await verifyStandaloneComposer(documentPage.page, () => documentPage.providerCalls);
-    assert.equal(documentPage.providerCalls, 6, "each in-document ask submit should call the provider exactly once");
+    assert.equal(documentPage.providerCalls, 7, "each in-document ask submit should call the provider exactly once");
   } finally {
     await documentPage.context.close();
   }
@@ -82,6 +83,17 @@ async function verifyPendingRootStandaloneComposer() {
     await page.locator('.card[data-id="root"] .doc-content', { hasText: "still streaming" }).waitFor();
     await selectText(page, "partial answer");
     await page.waitForSelector("#ask.visible");
+    assert.equal(await page.locator("#ask .lens").evaluateAll((buttons) => buttons.every((button) => button.disabled)), true,
+      "a streaming parent disables selection presets");
+    await page.click("#t-settings");
+    await page.click('[data-settings-section="asking"]');
+    await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
+    await page.fill("#asking-selection-explain-label", "Clarify pending");
+    assert.equal(await page.locator("#ask .lens").evaluateAll((buttons) => buttons.every((button) => button.disabled)), true,
+      "refreshing preset labels must preserve a pending surface's disabled state");
+    await page.click(".settings-sheet-close");
+    await selectText(page, "partial answer");
+    await page.waitForSelector("#ask.visible");
     assert.equal(await page.locator("#ask-text").isEnabled(), true,
       "a selection popover on a streaming answer must remain writable");
     await page.fill("#ask-text", "Note on the partial answer");
@@ -115,8 +127,8 @@ async function verifyPendingRootStandaloneComposer() {
       "later stream chunks must preserve the saved note anchor");
 
     await page.locator('.card[data-id="selected-attachment"] .origin-quote .origin-attachment-strip img').waitFor();
-    assert.equal(await page.locator('.card[data-id="selected-attachment"] .origin-quote').innerText(), "“What is shown?”",
-      "a selection ask must quote its raw query while retaining attachment thumbnails");
+    assert.equal(await page.locator('.card[data-id="selected-attachment"] .origin-quote').innerText(), "“quoted source”",
+      "a selection ask must quote its selected source while retaining attachment thumbnails");
 
     const sourceCard = page.locator('.card[data-id="selected-attachment"]');
     await sourceCard.locator(".nc-handle").evaluate((button) => button.click());
@@ -275,8 +287,8 @@ async function verifyReaderComposer(page, calls) {
   await page.locator("body", { hasText: "Reader Enter completed." }).waitFor();
   assert.equal(calls(), 2, "Cmd/Ctrl+Enter should submit the reader ask once");
 
-  // Lenses live on follow-up composers too: an empty-box lens tap is a
-  // whole-document ask with the canned lens question.
+  // Presets live on follow-up composers too: an empty-box tap supplies an
+  // instruction while leaving the document as the implicit subject.
   await page.click('#composer-actions .lens[data-lens="explain"]');
   await page.locator("body", { hasText: "Reader lens completed." }).waitFor();
   assert.equal(calls(), 3, "an empty-box reader lens tap should submit one whole-document lens ask");
@@ -308,10 +320,16 @@ async function verifyCardComposer(page, calls) {
   await page.fill(selector, "   ");
   await page.press(selector, "1");
   assert.equal(await page.inputValue(selector), "   1", "a lens key must type normally unless the editor is exactly empty");
-  await page.fill(selector, "   ");
+  await page.fill(selector, "Why does this identity matter?");
   await page.locator('.card.root .nc-inner .lens[data-lens="explain"]').evaluate((button) => button.click());
-  assert.equal(calls(), 3, "a lens click must be inert when the editor contains whitespace");
-  await page.fill(selector, "");
+  await page.locator(".card:not(.root)", { hasText: "Styled card ask completed." }).waitFor();
+  assert.equal(calls(), 4, "a preset click with a draft should style and submit that question once");
+  await page.waitForFunction(async () => {
+    const hole = await window.__rabbitholeTest.readStoredHole();
+    return hole.nodes.some((node) => node.origin?.lens === "explain"
+      && node.origin?.question === "Why does this identity matter?"
+      && typeof node.origin?.instruction === "string" && node.origin.instruction.length > 0);
+  });
 
   // Regression: a classList.toggle with an undefined force argument flips the
   // dim class on every input event — check two consecutive keystrokes so the
@@ -338,18 +356,18 @@ async function verifyCardComposer(page, calls) {
   assert.deepEqual(await storedNote(page, cardNoteId), { origin: { kind: "note" }, markdown: "line one\nline two", docked: false, size: { w: 420, h: 460 } },
     "card Enter should persist a visible child note window");
   assert.equal(await page.locator(`.card[data-id="${cardNoteId}"]`).count(), 1, "the persisted follow-up note should remain visible on the canvas");
-  assert.equal(calls(), 3, "plain Enter should save a card note without calling the provider");
+  assert.equal(calls(), 4, "plain Enter should save a card note without calling the provider");
 
   await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
   await page.fill(selector, "Card command ask");
   await page.keyboard.press("Control+Enter");
   await page.locator(".card:not(.root)", { hasText: "Card Enter completed." }).waitFor();
-  assert.equal(calls(), 4, "Cmd/Ctrl+Enter should submit the card ask once");
+  assert.equal(calls(), 5, "Cmd/Ctrl+Enter should submit the card ask once");
 
   await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
   await page.locator('.card.root .nc-inner .lens[data-lens="eli5"]').evaluate((button) => button.click());
   await page.locator(".card:not(.root)", { hasText: "Card lens completed." }).waitFor();
-  assert.equal(calls(), 5, "an empty-box card lens tap should submit one whole-document lens ask");
+  assert.equal(calls(), 6, "an empty-box card lens tap should submit one whole-document preset ask");
 }
 
 async function verifyStandaloneComposer(page, calls) {
@@ -390,14 +408,14 @@ async function verifyStandaloneComposer(page, calls) {
   assert.equal((await dispatchComposingEnter(page, selector)).defaultPrevented, false);
   assert.equal((await dispatchModifiedEnter(page, selector, { altKey: true })).defaultPrevented, false,
     "Alt+Enter must remain text input on the standalone surface, matching the card composer");
-  assert.equal(calls(), 5, "IME and Alt+Enter must not submit the standalone composer");
+  assert.equal(calls(), 6, "IME and Alt+Enter must not submit the standalone composer");
 
   await page.fill(selector, "");
   const blankCount = await page.locator(".card").count();
   await page.press(selector, "Enter");
   await page.press(selector, "Control+Enter");
   assert.equal(await page.locator(".card").count(), blankCount, "blank standalone Enter variants must be inert");
-  assert.equal(calls(), 5, "blank standalone Enter variants must not call the provider");
+  assert.equal(calls(), 6, "blank standalone Enter variants must not call the provider");
 
   await page.fill(selector, "line one");
   await page.focus(selector);
@@ -407,11 +425,11 @@ async function verifyStandaloneComposer(page, calls) {
     "Shift+Enter should insert a newline in the standalone composer");
   assert.equal(await page.locator(".card.note-draft").count(), 1,
     "Shift+Enter must leave the standalone draft uncommitted");
-  assert.equal(calls(), 5, "Shift+Enter must not call the provider or commit the standalone draft");
+  assert.equal(calls(), 6, "Shift+Enter must not call the provider or commit the standalone draft");
   await page.keyboard.press("Enter");
   await page.locator(".card-note", { hasText: "line one" }).last().waitFor();
   await page.waitForFunction(() => !document.querySelector(".card.note-draft"));
-  assert.equal(calls(), 5, "plain Enter should save a standalone note without calling the provider");
+  assert.equal(calls(), 6, "plain Enter should save a standalone note without calling the provider");
 
   point = await findCanvasBackground(page);
   await page.mouse.dblclick(point.x, point.y);
@@ -458,7 +476,7 @@ async function verifyStandaloneComposer(page, calls) {
       && node.size.w === size.w && node.size.h === size.h;
   }, { id: draft.id, position: draft.position, size: draft.size });
   await askCard.filter({ hasText: "Standalone composer ask completed." }).waitFor();
-  assert.equal(calls(), 6, "Cmd/Ctrl+Enter should submit the standalone Ask once");
+  assert.equal(calls(), 7, "Cmd/Ctrl+Enter should submit the standalone Ask once");
   assert.deepEqual(await askCard.evaluate((card) => ({
     sameCard: card.__enterStandaloneIdentity === true,
     edgeCount: document.querySelectorAll("#edges path").length,

@@ -177,8 +177,8 @@ export class SessionBroadcast extends SessionListener {
     return this.engine.flushSave();
   }
 
-  /** Add an explicit agent-published note without consuming or creating an agent listener. */
-  async publishNote(event) {
+  /** Add an explicit agent-published document without consuming or creating an agent listener. */
+  async publishNode(event) {
     this.touch();
     const effects = this.dispatchHoleEvent(event, { now: new Date().toISOString() });
     const node = effects.createdNode;
