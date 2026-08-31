@@ -12,6 +12,7 @@ const hermeticStoreDir = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-tes
 const testDir = path.join(rootDir, "test");
 const tier = process.argv[2] || "all";
 const tiers = ["unit", "contracts", "integration", "e2e", "performance", "packaging"];
+const ISOLATION_LIVE_TESTS = ["claude-isolation.test.mjs", "codex-isolation.test.mjs"];
 const checks = {
   icons: [process.execPath, [path.join(rootDir, "scripts/generate-ionicons.mjs"), "--check"]],
   css: [process.execPath, [path.join(rootDir, "scripts/check-css-integrity.mjs")]],
@@ -30,7 +31,7 @@ if (tier === "all") {
   jobs.push(...Object.entries(checks).map(([name, command]) => ({ name: `check:${name}`, command })));
   for (const name of tiers) jobs.push(...await testJobs(name));
 } else if (tier === "isolation-live") {
-  jobs.push(...["claude-isolation.test.mjs", "codex-isolation.test.mjs"].map((name) => testJob(path.join(testDir, "integration", name))));
+  jobs.push(...ISOLATION_LIVE_TESTS.map((name) => testJob(path.join(testDir, "integration", name))));
 } else if (tiers.includes(tier)) {
   if (tier === "unit") jobs.push(
     { name: "check:icons", command: checks.icons },
@@ -65,7 +66,7 @@ async function testJobs(name) {
   const directory = path.join(testDir, name);
   const entries = await fs.readdir(directory, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".test.mjs"))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".test.mjs") && (name !== "integration" || !ISOLATION_LIVE_TESTS.includes(entry.name)))
     .map((entry) => testJob(path.join(directory, entry.name)))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
