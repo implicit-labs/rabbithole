@@ -8,10 +8,34 @@ import { assertHostCommandHandlers, MCP_HOST_COMMANDS } from "../../../core/voca
 import { buildJsonError } from "../../shared/http.js";
 import { error as logError } from "../../shared/logger.js";
 import { resolveAsset } from "../store/fs-store.js";
+import { mergePreferences } from "../store/prefs-store.js";
 import { cropPdfRegionToFile } from "../pdf/crop.js";
 import { handleSessionRequest } from "../http/routes.js";
 import { SessionAnswer } from "./answer.js";
 import { rawOrigin, rawPdfExtension } from "./session-values.js";
+
+const MAX_PREFERENCE_VALUE_BYTES = 64 * 1024;
+const MAX_PREFERENCE_PATCH_BYTES = 256 * 1024;
+
+function validatePreferencePatch(values) {
+  if (
+    !values ||
+    typeof values !== "object" ||
+    Array.isArray(values) ||
+    (Object.getPrototypeOf(values) !== Object.prototype && Object.getPrototypeOf(values) !== null)
+  )
+    throw buildJsonError("preferences_patch values must be a plain object", 400);
+  for (const [key, value] of Object.entries(values)) {
+    if (!/^rh-[a-z0-9-]+$/.test(key)) throw buildJsonError("preferences_patch has an invalid preference key: " + key, 400);
+    if (typeof value !== "string" && value !== null)
+      throw buildJsonError("preferences_patch value for " + key + " must be a string or null", 400);
+    if (typeof value === "string" && Buffer.byteLength(value, "utf8") > MAX_PREFERENCE_VALUE_BYTES)
+      throw buildJsonError("preferences_patch value for " + key + " exceeds 64 KB", 400);
+  }
+  if (Buffer.byteLength(JSON.stringify(values), "utf8") > MAX_PREFERENCE_PATCH_BYTES)
+    throw buildJsonError("preferences_patch exceeds 256 KB", 400);
+  return values;
+}
 
 /** Browser command routing and request-specific crop resolution. */
 export class RabbitholeSession extends SessionAnswer {
@@ -192,6 +216,15 @@ export class RabbitholeSession extends SessionAnswer {
         const result = this.applyPersistedBrowserEvent(event);
         this.broadcast({ type: "node_extensions_patch", node_id: event.node_id, namespace: event.namespace, value: event.value });
         return result;
+      },
+      preferences_patch: async (event) => {
+        const values = validatePreferencePatch(event.values);
+        await mergePreferences(values);
+        // Only this process's session clients are synchronized. Other MCP
+        // sessions converge through preferences.json on their next page load;
+        // deliberately do not turn this into cross-process file watching.
+        this.broadcast({ type: "preferences", values: values });
+        return { ok: true };
       },
       convert_pdf: (event) => this.handleConvertPdf(event),
       convert_cancel: (event) => { this.restoreNodeConversion(String(event.node_id || "")); return { ok: true }; },

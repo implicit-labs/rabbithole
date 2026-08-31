@@ -1,16 +1,25 @@
 /** @protects generation lifecycle capability contracts. */
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Run } from "../../src/core/hole/run.js";
 import { createHoleState, reduceHoleEvent } from "../../src/core/hole/reduce.js";
 import { ProviderError, normalizeProviderError } from "../../src/web/provider/errors.js";
 import { adaptBranchGeneration, adaptTextGeneration } from "../../src/web/provider/generation-events.js";
 import { OpenAICompatibleProvider, parseOpenAISseEvent, streamOpenAICompatible } from "../../src/web/provider/openai-compatible.js";
 import { TitleSentinelParser } from "../../src/web/provider/title-sentinel.js";
-import { GenerationIngress } from "../../src/node/transport/generation-ingress.js";
-import { RabbitholeSession } from "../../src/node/transport/session.js";
 import { DirectRabbitholeHost, createHoleFromMarkdown, createPendingHoleFromQuestion, generationDocEvents } from "../../src/web/transport/direct-host.js";
 
+const previousDir = process.env.RABBITHOLE_DIR;
+const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-generation-lifecycle-"));
+process.env.RABBITHOLE_DIR = dir;
+const [{ GenerationIngress }, { RabbitholeSession }] = await Promise.all([
+  import("../../src/node/transport/generation-ingress.js"),
+  import("../../src/node/transport/session.js"),
+]);
+
+try {
 async function collect(iterable) {
   const out = [];
   for await (const value of iterable) out.push(value);
@@ -494,3 +503,8 @@ assert.deepEqual(extensionSaves[0].nodes[0].extensions.canvas.pin, {
   x: 24, y: 36, width: 420, height: 280,
 });
 console.log("ok generation lifecycle: extension-backed presentation state is durable before immediate navigation");
+} finally {
+  if (previousDir === undefined) delete process.env.RABBITHOLE_DIR;
+  else process.env.RABBITHOLE_DIR = previousDir;
+  await fs.rm(dir, { recursive: true, force: true });
+}

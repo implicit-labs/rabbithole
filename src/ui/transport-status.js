@@ -42,6 +42,7 @@ import {
   viewAdjusted,
 } from "./core.js";
 import { cancelFrame, nextFrame } from "./kit/scope.js";
+import { applyPreferencePatch } from "./preferences.js";
 import { renderBreadcrumb, renderMarginNotes, renderReaderBody } from "./reader.js";
 import { refreshNodeHtml } from "./renderer.js";
 import { applyServerEvent } from "./store/apply-server-event.js";
@@ -425,6 +426,10 @@ function renderStreamSurfaces(node, firstChunk) {
 }
 
 function handleServer(msg) {
+  if (msg.type === "preferences") {
+    applyPreferencePatch(msg.values);
+    return;
+  }
   const result = applyServerEvent({ nodes: nodes, register: registerNode }, msg, {
     createPending: function (message) {
       const pos = message.position || {};
@@ -519,7 +524,7 @@ function handleServer(msg) {
       refreshOpenStandaloneComposers();
     } else if (result.type === "node_extensions_patch") {
       if (result.namespace === "canvas") syncNodeCanvasPresentation(node);
-      else {
+      else if (result.namespace !== "attention") {
         if (node.bodyEl) fillBody(node);
         if (mode === "reader" && currentNodeId === node.id) renderReaderBody();
         updateCardComposer(node);

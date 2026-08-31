@@ -1,9 +1,17 @@
 /** @protects context usage wire capability contracts. */
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { CANVAS_SHELL } from "../../src/core/html/shell.js";
 import { CANVAS_STYLES } from "../support/design-css.mjs";
-import { RabbitholeSession } from "../../src/node/transport/session.js";
 
+const previousDir = process.env.RABBITHOLE_DIR;
+const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-context-usage-wire-"));
+process.env.RABBITHOLE_DIR = dir;
+const { RabbitholeSession } = await import("../../src/node/transport/session.js");
+
+try {
 const session = new RabbitholeSession({
   holeId: "context-wire-hole",
   title: "Context wire",
@@ -44,3 +52,8 @@ assert(CANVAS_SHELL.includes('id="context-usage" hidden'), "the indicator should
 assert(CANVAS_STYLES.includes("body.frozen #context-usage"), "frozen snapshots should force the indicator hidden");
 
 console.log("ok context usage wire: transient hydration, sanitized counters, coalesced replay, hidden shell");
+} finally {
+  if (previousDir === undefined) delete process.env.RABBITHOLE_DIR;
+  else process.env.RABBITHOLE_DIR = previousDir;
+  await fs.rm(dir, { recursive: true, force: true });
+}

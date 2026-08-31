@@ -1,8 +1,14 @@
 /** @protects enter composition capability contracts. */
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { bootWebApp } from "../support/web-app-harness.mjs";
 
+const previousDir = process.env.RABBITHOLE_DIR;
+const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-enter-composition-e2e-"));
+process.env.RABBITHOLE_DIR = dir;
 const app = await bootWebApp();
 const { browser, baseUrl } = app;
 
@@ -10,7 +16,13 @@ try {
   await verifyEnterCompositionAndNewlines();
   console.log("enter composition verification passed");
 } finally {
-  await app.close();
+  try {
+    await app.close();
+  } finally {
+    if (previousDir === undefined) delete process.env.RABBITHOLE_DIR;
+    else process.env.RABBITHOLE_DIR = previousDir;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function verifyEnterCompositionAndNewlines() {
@@ -88,6 +100,8 @@ async function verifyPendingRootStandaloneComposer() {
     await page.click("#t-settings");
     await page.click('[data-settings-section="asking"]');
     await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
+    assert.equal(await page.locator('[data-asking-surface][data-set="selection"] .asking-editor-fields > input').count(), 1,
+      "the preset Label row is one text input");
     await page.fill("#asking-selection-explain-label", "Clarify pending");
     assert.equal(await page.locator("#ask .lens").evaluateAll((buttons) => buttons.every((button) => button.disabled)), true,
       "refreshing preset labels must preserve a pending surface's disabled state");
@@ -249,7 +263,7 @@ async function verifyReaderComposer(page, calls) {
   await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
   await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
   await assertComposerAtRest(page, "#composer-actions",
-    "an empty reader composer should rest on the four lenses with the commit pair hidden");
+    "an empty reader composer should rest on the three presets with the commit pair hidden");
   await page.fill("#composer-text", "composing reader");
   assert.equal((await dispatchComposingEnter(page, "#composer-text")).defaultPrevented, false);
   assert.equal(calls(), 1, "IME Enter must not submit the reader follow-up composer");
@@ -305,7 +319,7 @@ async function verifyCardComposer(page, calls) {
   await page.locator(".card.root .nc-handle").evaluate((button) => button.click());
   const selector = ".card.root .nc-inner textarea";
   await assertComposerAtRest(page, ".card.root .nc-inner .ask-actions",
-    "an empty card composer should rest on the four lenses with the commit pair hidden");
+    "an empty card composer should rest on the three presets with the commit pair hidden");
   await page.fill(selector, "composing card");
   assert.equal((await dispatchComposingEnter(page, selector)).defaultPrevented, false);
   assert.equal(calls(), 3, "IME Enter must not submit the card follow-up composer");

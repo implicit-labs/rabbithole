@@ -431,7 +431,9 @@ async function listHoles() {
     return [];
   }
 
-  const names = entries.filter((name) => name.endsWith(".json") && !name.endsWith(".summary.json"));
+  const names = entries.filter(
+    (name) => name !== "preferences.json" && name.endsWith(".json") && !name.endsWith(".summary.json"),
+  );
   const holes = await mapConcurrent(names, 32, async (name) => {
     const id = name.slice(0, -5);
     try {

@@ -36,8 +36,11 @@ ${getDompurifyScript()}
 (function(){
 	  "use strict";
 	  var hydration = ${hydrationJson};
+	  var preferences = hydration.preferences || {};
+	  delete hydration.preferences;
 	${liveSnapshotSource}${clientSource}
 	  RabbitholeClient.startRabbithole(hydration, {
+	    preferences: preferences,
 	    snapshotHooks: {
 	${liveSnapshotHoleHook}      getFrozenClientSource: function(){ return window.__RABBITHOLE_FROZEN_CLIENT__ || ""; },
 	      getStylesheetText: function(){

@@ -59,7 +59,7 @@ async function modernJourney() {
     await page.goto(liveUrl);
     await assertRendered(page, "Select this exact phrase", true);
     await assertCodeCopy(page, { scope: ".doc-content:visible", rawCode: JOURNEY_CODE, click: true, label: "live MCP" });
-    await assertAppearanceOnlySettings(page, "live MCP");
+    await assertSharedSettings(page, "live MCP", { canvas: true });
     await selectAndAsk(page, "Select this exact phrase", "Explain the selected phrase");
     const branch = await openPromise;
     assert.equal(branch.status, "branch_request", `modern MCP open result: ${JSON.stringify(branch)}`);
@@ -92,7 +92,7 @@ async function modernJourney() {
       await assertCodeCopy(snapshotPage, { scope: ".doc-content:visible", rawCode: JOURNEY_CODE, hover: false, label: "MCP snapshot" });
       // Appearance is a way of looking, so it survives into a snapshot the same
       // way collapse does — and nothing about providers ever ships with one.
-      await assertAppearanceOnlySettings(snapshotPage, "frozen snapshot");
+      await assertSharedSettings(snapshotPage, "frozen snapshot", { canvas: false });
     } finally {
       await snapshotPage.close();
     }
@@ -118,22 +118,25 @@ async function modernJourney() {
   }
 }
 
-/* Hosts compose sections: the MCP page and a frozen snapshot register no
-   provider UI, so both get the two shared preference sections. */
-async function assertAppearanceOnlySettings(page, label) {
+/* Hosts compose sections: live canvases add Canvas while frozen snapshots keep
+   only the shared looking/asking preferences and never ship live maintenance. */
+async function assertSharedSettings(page, label, capabilities) {
   assert.equal(await page.getAttribute("#t-settings", "aria-haspopup"), "dialog", `${label}: the gear should announce a dialog`);
   await page.click("#t-settings");
   await page.waitForSelector("#settings-sheet");
-  assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), ["Appearance", "Quick questions"],
-    `${label}: a host that registers nothing should still get shared Appearance and Quick questions preferences`);
-  /* The fixed height matters most here: with a single two-row section the
+  const expectedSections = capabilities.canvas
+    ? ["Appearance", "Canvas", "Quick questions"]
+    : ["Appearance", "Quick questions"];
+  assert.deepEqual(await page.locator("[data-settings-section]").allTextContents(), expectedSections,
+    `${label}: settings sections should match the host's live capabilities`);
+  /* The fixed height matters most here: with a short selected section the
      sheet must still open at the same frame every host shows — the space
      below the rows is the design, never a squat strip. */
   const frame = await page.locator("#settings-sheet").evaluate((sheet) => ({
     height: sheet.offsetHeight, // layout height: immune to the entrance scale
-    expected: Math.min(560, innerHeight - 96),
+    expected: Math.min(480, innerHeight - 96),
   }));
-  assert(Math.abs(frame.height - frame.expected) < 1, `${label}: an Appearance-only sheet must keep the fixed frame, got ${frame.height}px wanting ${frame.expected}px`);
+  assert(Math.abs(frame.height - frame.expected) < 1, `${label}: the settings sheet must keep the fixed frame, got ${frame.height}px wanting ${frame.expected}px`);
   assert.deepEqual(await page.locator(".settings-sheet-sub").allTextContents(),
     ["What the canvas follows.", "Scales every card; each can fine-tune."],
     `${label}: both rows carry a one-line sub that describes the effect`);
