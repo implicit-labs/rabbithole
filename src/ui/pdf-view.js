@@ -1,4 +1,4 @@
-import { isNoteNode } from "../core/hole/ask.js";
+import { isNoteNode, isReactionNote } from "../core/hole/ask.js";
 import { iconSvg } from "../core/html/icons.js";
 import { normalizePdfExtension } from "../core/pdf-shared.js";
 import { showAskFromSelection } from "./ask-followups.js";
@@ -401,7 +401,7 @@ export function mountPdfView(container, node, options = {}) {
           container,
           child.origin.anchor,
           child.id,
-          `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}${isNoteNode(child) ? " mark-note" : ""}`,
+          `rh-pdf-mark ${child.status === "answered" ? "mark-ready" : "mark-pending"}${isNoteNode(child) ? " mark-note" : ""}${isReactionNote(child) ? " mark-reaction" : ""}`,
         );
     }
   }

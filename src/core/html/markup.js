@@ -63,8 +63,15 @@ export function buttonMarkup(options = {}) {
 /** @param {{ id?: string, includeLenses?: boolean }} [options] */
 export function composerActionsMarkup(options = {}) {
   const lenses = options.includeLenses === false ? "" : '<div class="preset-actions" data-preset-set></div>';
+  const reactions = options.id === "ask-actions"
+    ? '<span class="thumb-pair">' +
+      '<button type="button" class="thumb" data-react="up" title="Thumbs up" aria-label="Thumbs up">👍 <kbd>↑</kbd></button>' +
+      '<button type="button" class="thumb" data-react="down" title="Thumbs down" aria-label="Thumbs down">👎 <kbd>↓</kbd></button>' +
+      "</span>"
+    : "";
   return '<div class="ask-actions"' + attribute("id", options.id) + ">" +
     lenses +
+    reactions +
     '<div class="commit-actions">' +
     buttonMarkup({ bare: true, className: "ask-commit", dataAttrs: { commit: "note" },
       title: "Save note (Enter)",

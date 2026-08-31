@@ -1,4 +1,4 @@
-import { isNoteNode } from "../core/hole/ask.js";
+import { isNoteNode, isReactionNote } from "../core/hole/ask.js";
 import { childrenOf, nodes } from "./core.js";
 
 const MARK_FRAGMENT_SELECTOR = "mark[data-child], .rh-pdf-mark[data-child]";
@@ -67,7 +67,11 @@ export function applyChildHighlights(dc, node) {
     const r = rangeFromOffsets(dc, a.offset_start, a.offset_end);
     if (!r) return;
     const note = isNoteNode(k);
-    const cls = "hl " + (k.status === "answered" ? "mark-ready" : "mark-pending") + (note ? " mark-note" : "");
+    const cls =
+      "hl " +
+      (k.status === "answered" ? "mark-ready" : "mark-pending") +
+      (note ? " mark-note" : "") +
+      (isReactionNote(k) ? " mark-reaction" : "");
     if (note) overlayRange(r, k.id, cls);
     else wrapRange(r, k.id, cls);
   });
@@ -148,6 +152,10 @@ export function removeMarks(root, childId) {
       m.remove();
       continue;
     }
+    if (m.classList.contains("mark-overlay")) {
+      m.remove();
+      continue;
+    }
     while (m.firstChild) p.insertBefore(m.firstChild, m);
     p.removeChild(m);
     p.normalize();
@@ -209,9 +217,14 @@ function initializeMark(m, childId, cls) {
   else m.className = cls;
   m.dataset.child = childId;
   m.setAttribute("tabindex", "0");
-  m.setAttribute("role", "link");
   const child = nodes[childId];
-  m.setAttribute("aria-label", "Open branch: " + ((child && child.title) || "Untitled"));
+  if (isReactionNote(child)) {
+    m.setAttribute("role", "group");
+    m.setAttribute("aria-label", child.markdown === "👍" ? "Thumbs up reaction" : "Thumbs down reaction");
+  } else {
+    m.setAttribute("role", "link");
+    m.setAttribute("aria-label", "Open branch: " + ((child && child.title) || "Untitled"));
+  }
   return m;
 }
 

@@ -60,6 +60,23 @@ export function makeNode(partial) {
   return /** @type {HoleNode} */ (node);
 }
 
+/** @param {Partial<HoleNode> | Record<string, any> | null | undefined} node */
+export function nodeNeedsReading(node) {
+  return !!(
+    node &&
+    node.status === "answered" &&
+    node.origin?.kind !== "note" &&
+    !node.extensions?.attention?.seen_at
+  );
+}
+
+/** @param {Record<string, any> | null | undefined} extensions */
+export function stripNodeAttention(extensions) {
+  const next = { ...(extensions || {}) };
+  delete next.attention;
+  return next;
+}
+
 /** @param {Partial<HoleNode> | Record<string, any>} node @param {NodeProjectionTarget} target */
 export function projectNode(node, target) {
   if (!ALL.includes(target)) throw new Error(`Unknown node projection target: ${target}`);
@@ -151,7 +168,11 @@ function splitLegacyExtensions(extensions) {
   const source = normalizeObjectOrNull(raw.pdf);
   const canvas = normalizeObject(raw.canvas);
   const note = normalizeObject(raw.note);
-  const view = { ...canvas, ...(note.docked === true ? { docked: true } : {}) };
+  const view = {
+    ...canvas,
+    ...(note.docked === true ? { docked: true } : {}),
+    ...(note.reaction === true ? { reaction: true } : {}),
+  };
   const progress = normalizeObject(raw.learn);
   const residual = { ...raw };
   delete residual.pdf;
@@ -166,13 +187,17 @@ function joinLegacyExtensions(node, target) {
   const extensions = { ...normalizeObject(node.extensions) };
   if (node.source) extensions.pdf = cloneJson(node.source);
   const view = normalizeObject(node.view);
-  const { docked, ...canvas } = view;
+  const { docked, reaction, ...canvas } = view;
   if (Object.keys(canvas).length) extensions.canvas = cloneJson(canvas);
-  if (docked === true) extensions.note = { docked: true };
+  const note = {
+    ...(docked === true ? { docked: true } : {}),
+    ...(reaction === true ? { reaction: true } : {}),
+  };
+  if (Object.keys(note).length) extensions.note = note;
   if (target !== "snapshot" && Object.keys(normalizeObject(node.progress)).length) extensions.learn = cloneJson(node.progress);
   if (target === "snapshot") {
     for (const name of Object.keys(extensions)) {
-      if (!["pdf", "note", "canvas"].includes(name)) delete extensions[name];
+      if (!["pdf", "note", "canvas", "attention"].includes(name)) delete extensions[name];
     }
   }
   return extensions;

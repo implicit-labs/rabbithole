@@ -46,7 +46,7 @@ const server = new McpServer(
       "",
       "A branch_request with empty selected_text is a follow-up chat question about the whole parent",
       "document — answer it conversationally in that document's context. A request may carry a 'lens' preset key",
-      "(explain | eli5 | example | deeper) plus a separate 'instruction' — honor that instruction while answering the human's own question.",
+      "(explain | eli5 | deeper | custom) plus a separate 'instruction' — honor that instruction while answering the human's own question.",
       "When a preset request has an empty question, its implicit subject is the selection or the whole parent document. One with",
       "saved=true was asked while no agent was listening; answer it like any other.",
       "Branch requests are lean — selected_text, the parent node's title, and the lineage of titles.",

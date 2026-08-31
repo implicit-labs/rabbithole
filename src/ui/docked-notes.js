@@ -1,4 +1,4 @@
-import { BRANCH_SELECTION, branchTypeOfNode, isDockedNote } from "../core/hole/ask.js";
+import { BRANCH_SELECTION, branchTypeOfNode, isDockedNote, isReactionNote } from "../core/hole/ask.js";
 import { makeNode } from "../core/hole/node.js";
 import { DEFAULT_CHILD, nodeOrder, placeChild as sharedPlaceChild } from "../core/layout.js";
 import { removeBranch } from "./branch-surfaces.js";
@@ -72,6 +72,7 @@ const dockedLifecycle = createModuleLifecycle({
 // One popover, one open note. Everything the surface needs to answer for
 // itself — which note, which card, which state — lives in this record.
 let popSession = null;
+const reactionHideTimers = new Map();
 
 export function initDockedNotes() {
   disposeDockedNoteResources(false);
@@ -81,6 +82,11 @@ export function initDockedNotes() {
       scope.listen(surface, "click", onSurfaceClick);
       scope.listen(surface, "dblclick", onSurfaceDblClick);
       scope.listen(surface, "keydown", onSurfaceKeydown);
+      scope.listen(surface, "pointerover", onReactionPointerOver);
+      scope.listen(surface, "pointerout", onReactionPointerOut);
+      scope.listen(surface, "pointerup", onReactionPointerUp);
+      scope.listen(surface, "focusin", onReactionFocusIn);
+      scope.listen(surface, "focusout", onReactionFocusOut);
       scope.listen(surface, "mouseover", function (e) {
         syncPartnerHighlight(e, true);
       });
@@ -101,6 +107,7 @@ export function initDockedNotes() {
     scope.listen(surface, "dblclick", onPopoverDblClick);
     scope.listen(surface, "keydown", onPopoverKeydown);
     scope.addCleanup(function () {
+      clearReactionTooltips();
       closeNotePopover({ restoreFocus: false, commit: false });
     });
     return disposeDockedNotes;
@@ -137,8 +144,20 @@ function createNoteChild(parent, markdown, options) {
   if (!parent || !markdown || closed || parent.source?.converting) return null;
   const anchor = options.anchor || null;
   const placed = options.placed === true;
+  const reaction = !placed && options.reaction === true;
+  const reactionInstruction = reaction
+    ? String(options.instruction || "")
+        .trim()
+        .slice(0, 4000)
+    : "";
   const origin = anchor
-    ? { kind: "note", selected_text: options.selectedText || "", anchor: anchor, branch_type: BRANCH_SELECTION }
+    ? {
+        kind: "note",
+        selected_text: options.selectedText || "",
+        anchor: anchor,
+        branch_type: BRANCH_SELECTION,
+        ...(reactionInstruction ? { instruction: reactionInstruction } : {}),
+      }
     : { kind: "note" };
   const node = Object.assign(
     makeNode({
@@ -155,7 +174,7 @@ function createNoteChild(parent, markdown, options) {
       size: { w: DEFAULT_CHILD.w, h: DEFAULT_CHILD.h },
       collapsed: false,
       status: "answered",
-      view: placed ? {} : { docked: true },
+      view: placed ? {} : { docked: true, ...(reaction ? { reaction: true } : {}) },
     }),
     { html: "", _order: nextOrder(), _startTs: 0 },
   );
@@ -184,7 +203,22 @@ function createNoteChild(parent, markdown, options) {
       }
     : { type: "node_create", id: node.id, parent_id: parent.id, markdown: markdown, origin: origin, docked: true };
   postBrowserEvent(payload).then(function (res) {
-    if (!res || !res.ok) rollbackCreatedNote(node);
+    if (!res || !res.ok) {
+      rollbackCreatedNote(node);
+      return;
+    }
+    if (reaction) {
+      postBrowserEvent({
+        type: "node_extensions_patch",
+        node_id: node.id,
+        namespace: "note",
+        value: { docked: true, reaction: true },
+      }).then(function (patchResult) {
+        if (patchResult && patchResult.ok) return;
+        postBrowserEvent({ type: "delete_node", node_id: node.id });
+        rollbackCreatedNote(node);
+      });
+    }
   });
   return node;
 }
@@ -199,15 +233,17 @@ export function createPlacedNote(parent, markdown, options) {
 
 function paintNoteMarks(parent, node, anchor) {
   if (!anchor) return;
+  const reactionClass = isReactionNote(node) ? " mark-reaction" : "";
   const readerDoc = readerMain.querySelector('.doc-content[data-node-id="' + parent.id + '"]');
   const cardDoc = parent.bodyEl ? parent.bodyEl.querySelector(".doc-content") : null;
   if (anchor.pdf) {
-    if (mode === "reader") mountPdfRectMark(readerDoc, anchor, node.id, "rh-pdf-mark mark-ready mark-note");
-    mountPdfRectMark(cardDoc, anchor, node.id, "rh-pdf-mark mark-ready mark-note");
+    if (mode === "reader")
+      mountPdfRectMark(readerDoc, anchor, node.id, "rh-pdf-mark mark-ready mark-note" + reactionClass);
+    mountPdfRectMark(cardDoc, anchor, node.id, "rh-pdf-mark mark-ready mark-note" + reactionClass);
     return;
   }
-  if (mode === "reader") wrapInContainer(readerDoc, anchor, node.id, "hl mark-ready mark-note");
-  wrapInContainer(cardDoc, anchor, node.id, "hl mark-ready mark-note");
+  if (mode === "reader") wrapInContainer(readerDoc, anchor, node.id, "hl mark-ready mark-note" + reactionClass);
+  wrapInContainer(cardDoc, anchor, node.id, "hl mark-ready mark-note" + reactionClass);
 }
 
 function rollbackCreatedNote(node) {
@@ -340,7 +376,9 @@ function noteAnchorOf(node) {
 /* Whole-card notes lead the column; anchored notes follow in document order. */
 function dockedNotesOf(parent) {
   return childrenOf(parent.id)
-    .filter(isDockedNote)
+    .filter(function (node) {
+      return isDockedNote(node) && !isReactionNote(node);
+    })
     .sort(function (a, b) {
       const aAnchor = noteAnchorOf(a),
         bAnchor = noteAnchorOf(b);
@@ -503,6 +541,163 @@ function setMarkHighlight(noteId, on) {
 }
 
 // ---------------------------------------------------------------------------
+// REACTIONS — one wash-local tooltip, positioned on the exact line entered
+// ---------------------------------------------------------------------------
+
+function reactionMarkFromTarget(target) {
+  const mark = target?.closest?.(".mark-reaction[data-child]");
+  return mark && isReactionNote(nodes[mark.dataset.child]) ? mark : null;
+}
+
+function clearReactionHide(mark) {
+  const timer = reactionHideTimers.get(mark);
+  if (timer) clearTimeout(timer);
+  reactionHideTimers.delete(mark);
+}
+
+function reactionTooltip(mark) {
+  return mark?.querySelector?.(":scope > .reaction-tip-wrap") || null;
+}
+
+function removeReactionTooltip(mark) {
+  if (!mark) return;
+  clearReactionHide(mark);
+  reactionTooltip(mark)?.remove();
+}
+
+function clearReactionTooltips() {
+  reactionHideTimers.forEach(function (timer) {
+    clearTimeout(timer);
+  });
+  reactionHideTimers.clear();
+  document.querySelectorAll(".reaction-tip-wrap").forEach(function (tip) {
+    tip.remove();
+  });
+}
+
+function removeSiblingReactionTooltips(mark) {
+  document.querySelectorAll('.mark-reaction[data-child="' + mark.dataset.child + '"]').forEach(function (candidate) {
+    if (candidate !== mark) removeReactionTooltip(candidate);
+  });
+}
+
+function reactionTooltipContent(node) {
+  const tip = document.createElement("span");
+  tip.className = "reaction-tooltip";
+  const glyph = document.createElement("span");
+  glyph.className = "reaction-tooltip-glyph";
+  glyph.textContent = node.markdown;
+  tip.appendChild(glyph);
+  if (!frozen) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "reaction-delete";
+    remove.setAttribute("aria-label", "Remove reaction");
+    remove.textContent = "×";
+    tip.appendChild(remove);
+  }
+  return tip;
+}
+
+function appendHtmlReactionTooltip(mark, node, clientX) {
+  const rect = mark.getBoundingClientRect();
+  const wrap = document.createElement("span");
+  wrap.className = "reaction-tip-wrap";
+  const ratio = rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0.5;
+  wrap.style.left = ratio * 100 + "%";
+  wrap.appendChild(reactionTooltipContent(node));
+  mark.appendChild(wrap);
+}
+
+function appendPdfReactionTooltip(mark, node, clientX, lineTarget) {
+  const svg = mark.ownerSVGElement;
+  const svgRect = svg?.getBoundingClientRect();
+  const box = svg?.viewBox?.baseVal;
+  if (!svg || !svgRect?.width || !svgRect.height || !box?.width || !box.height) return;
+  const scaleX = box.width / svgRect.width,
+    scaleY = box.height / svgRect.height;
+  const lineRect = lineTarget?.getBoundingClientRect?.() || mark.getBoundingClientRect();
+  const width = 76 * scaleX,
+    height = 34 * scaleY,
+    centerX = (clientX - svgRect.left) * scaleX,
+    lineTop = (lineRect.top - svgRect.top) * scaleY;
+  const wrap = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+  wrap.setAttribute("class", "reaction-tip-wrap reaction-tip-svg");
+  wrap.setAttribute("x", String(centerX - width / 2));
+  wrap.setAttribute("y", String(lineTop - height));
+  wrap.setAttribute("width", String(width));
+  wrap.setAttribute("height", String(height));
+  const html = document.createElementNS("http://www.w3.org/1999/xhtml", "span");
+  html.className = "reaction-tip-svg-inner";
+  html.appendChild(reactionTooltipContent(node));
+  wrap.appendChild(html);
+  mark.appendChild(wrap);
+}
+
+function showReactionTooltip(mark, clientX, lineTarget) {
+  const node = mark && nodes[mark.dataset.child];
+  if (!mark || !isReactionNote(node)) return;
+  clearReactionHide(mark);
+  removeSiblingReactionTooltips(mark);
+  removeReactionTooltip(mark);
+  const rect = mark.getBoundingClientRect();
+  const entryX = Number.isFinite(clientX) ? clientX : rect.left + rect.width / 2;
+  if (mark.namespaceURI === "http://www.w3.org/2000/svg") {
+    appendPdfReactionTooltip(mark, node, entryX, lineTarget);
+  } else {
+    appendHtmlReactionTooltip(mark, node, entryX);
+  }
+}
+
+function scheduleReactionTooltipHide(mark) {
+  clearReactionHide(mark);
+  const timer = setTimeout(function () {
+    reactionHideTimers.delete(mark);
+    if (mark.matches?.(":hover") || mark.contains(document.activeElement)) return;
+    removeReactionTooltip(mark);
+  }, 180);
+  reactionHideTimers.set(mark, timer);
+}
+
+function onReactionPointerOver(event) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  const mark = reactionMarkFromTarget(event.target);
+  if (!mark || mark.contains(event.relatedTarget)) return;
+  const line = event.target?.closest?.("polygon") || mark;
+  showReactionTooltip(mark, event.clientX, line);
+}
+
+function onReactionPointerOut(event) {
+  if (event.pointerType && event.pointerType !== "mouse") return;
+  const mark = reactionMarkFromTarget(event.target);
+  if (!mark || mark.contains(event.relatedTarget)) return;
+  scheduleReactionTooltipHide(mark);
+}
+
+function onReactionPointerUp(event) {
+  if (!event.pointerType || event.pointerType === "mouse" || event.target?.closest?.(".reaction-tip-wrap")) return;
+  const mark = reactionMarkFromTarget(event.target);
+  if (!mark) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (reactionTooltip(mark)) removeReactionTooltip(mark);
+  else showReactionTooltip(mark, event.clientX, event.target?.closest?.("polygon") || mark);
+}
+
+function onReactionFocusIn(event) {
+  const mark = reactionMarkFromTarget(event.target);
+  if (!mark) return;
+  clearReactionHide(mark);
+  if (event.target === mark && !reactionTooltip(mark)) showReactionTooltip(mark);
+}
+
+function onReactionFocusOut(event) {
+  const mark = reactionMarkFromTarget(event.target);
+  if (!mark || mark.contains(event.relatedTarget)) return;
+  scheduleReactionTooltipHide(mark);
+}
+
+// ---------------------------------------------------------------------------
 // GESTURES — click reads, double click edits, wherever the note shows itself
 // ---------------------------------------------------------------------------
 
@@ -514,10 +709,27 @@ function dockedNoteFromEvent(event) {
   const mark = target.closest("[data-child]");
   if (!mark) return null;
   const node = nodes[mark.dataset.child];
-  return isDockedNote(node) ? { node: node, trigger: mark, placement: "bottom-start" } : null;
+  return isDockedNote(node) && !isReactionNote(node) ? { node: node, trigger: mark, placement: "bottom-start" } : null;
 }
 
 function onSurfaceClick(event) {
+  const remove = event.target?.closest?.(".reaction-delete");
+  if (remove) {
+    const mark = reactionMarkFromTarget(remove);
+    const node = mark && nodes[mark.dataset.child];
+    if (!mark || !node || frozen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    removeReactionTooltip(mark);
+    removeBranch(node);
+    return;
+  }
+  const reaction = reactionMarkFromTarget(event.target);
+  if (reaction) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const hit = dockedNoteFromEvent(event);
   if (!hit || !hit.node) return;
   if (!window.getSelection().isCollapsed) return; // the human was selecting, not clicking
@@ -527,6 +739,11 @@ function onSurfaceClick(event) {
 }
 
 function onSurfaceDblClick(event) {
+  if (reactionMarkFromTarget(event.target)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const hit = dockedNoteFromEvent(event);
   if (!hit || !hit.node) return;
   event.preventDefault();
@@ -535,6 +752,19 @@ function onSurfaceDblClick(event) {
 }
 
 function onSurfaceKeydown(event) {
+  const reaction = reactionMarkFromTarget(event.target);
+  if (reaction) {
+    if (event.target?.closest?.(".reaction-delete")) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      removeReactionTooltip(reaction);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (reactionTooltip(reaction)) removeReactionTooltip(reaction);
+      else showReactionTooltip(reaction);
+    }
+    return;
+  }
   if (event.key !== "Enter" && event.key !== "F2") return;
   const hit = dockedNoteFromEvent(event);
   if (!hit || !hit.node) return;
@@ -572,6 +802,10 @@ export function revealDockedNote(node, source) {
   if (!isDockedNote(node)) return false;
   const parent = nodes[node.parent_id];
   if (!parent) return false;
+  if (isReactionNote(node)) {
+    if (!affordanceFor(node)) goToNode(parent, source);
+    return true;
+  }
   function show() {
     const affordance = affordanceFor(node);
     if (affordance) openDockedNote(node, affordance, "read");

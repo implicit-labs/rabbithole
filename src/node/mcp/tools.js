@@ -102,7 +102,7 @@ export const toolDefinitions = [
       "with answer_branch. " +
       "A branch_request with EMPTY selected_text is a follow-up question about the " +
       "parent document as a whole (a chat reply beneath it) — answer conversationally in that document's " +
-      "context. A branch_request may carry a 'lens' preset key (explain | eli5 | example | deeper) and a separate 'instruction'; " +
+      "context. A branch_request may carry a 'lens' preset key (explain | eli5 | deeper | custom) and a separate 'instruction'; " +
       "honor the instruction while answering the human's question. An empty question means the selection or whole parent document is implicit. One marked saved=true was asked while no " +
       "agent was listening — answer it like any other. When attachments are present, read every attachments[].image_path; these are images pasted into the question. When region.image_path is present, it is either " +
       "this selection's clip or the immediate parent's clip; read that image before answering and trust it over extracted text for math, tables, and figures. " +

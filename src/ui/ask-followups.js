@@ -48,7 +48,7 @@ import { cancelFrame, createModuleLifecycle, nextFrame } from "./kit/scope.js";
 import { closeLightbox } from "./lightbox.js";
 import { teardownNode } from "./node-teardown.js";
 import { openAnchoredSurface } from "./overlay/anchor.js";
-import { onPreferenceChange } from "./preferences.js";
+import { onPreferenceChange, reactionPrompt } from "./preferences.js";
 import { renderMarginNotes } from "./reader.js";
 import { charOffset, mountPdfRectMark, wrapInContainer } from "./text-marks.js";
 import { refreshVisualMarks } from "./visuals.js";
@@ -105,6 +105,9 @@ export function initAskFollowups() {
     },
     onLens: function (lens, e) {
       submitAsk(lens, composerSource(e));
+    },
+    onReaction: function (reaction) {
+      submitReaction(reaction);
     },
   });
   askScope.listen(askText, "input", function () {
@@ -454,6 +457,11 @@ export function updateSelectionComposerState() {
       noteCommit.title = "Visual selections can be asked about";
     }
   }
+  const noteBlocked = !noteCommit || noteCommit.dataset.intentBlocked === "true";
+  /** @type {NodeListOf<HTMLButtonElement>} */ (actions.querySelectorAll(".thumb")).forEach(function (thumb) {
+    thumb.disabled = noteBlocked;
+    thumb.dataset.intentBlocked = noteBlocked ? "true" : "false";
+  });
 }
 
 function retirePdfConversionAction(parent) {
@@ -612,6 +620,30 @@ function submitNote(source, placed) {
   if (sel) sel.removeAllRanges();
   hideAsk();
   revealNode(node, source);
+}
+
+function submitReaction(reaction) {
+  if (!selectionDraft || closed || selectionDraft.blockAnchor || askText.value !== "") return;
+  const draft = selectionDraft,
+    parent = nodes[draft.parentId];
+  if (!parent) {
+    hideAsk();
+    return;
+  }
+  const glyph = reaction === "up" ? "👍" : reaction === "down" ? "👎" : null;
+  if (!glyph) return;
+  const anchor = { offset_start: draft.startOff, offset_end: draft.endOff };
+  if (draft.pdfAnchor) anchor.pdf = draft.pdfAnchor;
+  const node = createDockedNote(parent, glyph, {
+    anchor: anchor,
+    selectedText: draft.selectedText,
+    reaction: true,
+    instruction: reactionPrompt(reaction)?.instruction,
+  });
+  if (!node) return;
+  const sel = window.getSelection();
+  if (sel) sel.removeAllRanges();
+  hideAsk();
 }
 
 // ---------- follow-up composer ----------

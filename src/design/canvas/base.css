@@ -128,6 +128,8 @@ html[data-theme="dark"] .rh-lightbox-img:not([data-rh-pasted="1"]) { padding: 8p
 .doc-content mark.mark-ready:hover, .doc-content mark.mark-pending:hover, .doc-content mark.mark-hover, .doc-content mark.mark-dom-focus, .doc-content mark.mark-focus { background: var(--hl-strong); border-bottom-color: var(--accent); }
 .doc-content mark.mark-note { background: var(--note-hl); border-bottom-color: color-mix(in srgb, var(--note-ink) 65%, transparent); }
 .doc-content mark.mark-note:hover, .doc-content mark.mark-note.mark-hover, .doc-content mark.mark-note.mark-dom-focus, .doc-content mark.mark-note.mark-focus { background: var(--note-hl-strong); border-bottom-color: var(--note-ink); }
+.doc-content mark.mark-note.mark-reaction { background: var(--note-hl); border-bottom: 0; }
+.doc-content mark.mark-note.mark-reaction:hover, .doc-content mark.mark-note.mark-reaction.mark-hover, .doc-content mark.mark-note.mark-reaction.mark-dom-focus, .doc-content mark.mark-note.mark-reaction.mark-focus { background: var(--note-hl-strong); border-bottom: 0; }
 .doc-content mark.hl:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 /* Landing flash when a jump (FROM strip, ⌘K) brings you to a mark. */
 .doc-content mark.mark-flash::after { opacity: 1; }
@@ -334,8 +336,25 @@ body.mode-flight #viewport { display: block; }
    in the graph. The two surfaces deliberately own separate geometry. */
 #pinned-windows { position: fixed; inset: 0; z-index: var(--layer-pinned); overflow: hidden; pointer-events: none; }
 .pinned-window { position: absolute; pointer-events: auto; transform-origin: 0 0; }
-.card.pinned-window-card { position: relative; box-sizing: border-box; border-color: var(--border-focus);
+/* Pinned identity is material, not border. World cards are opaque paper;
+   every screen-space surface (palette, popovers, banner) is frosted glass —
+   so the lifted card's head adopts the glass and the world blurs through it
+   as the camera moves. The head-bg var carries the glass so the acts fade
+   stays translucent too, and the border stays standard: --border-focus keeps
+   meaning root/current only. */
+.card.pinned-window-card { position: relative; box-sizing: border-box;
+  --card-head-bg: color-mix(in srgb, var(--bar-bg) 80%, transparent);
   box-shadow: var(--shadow-popover); transform-origin: 0 0; }
+.pinned-window-card > .card-head { -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3); }
+/* The filled accent pin leads the title: it is the state and the control in
+   one — the badge names the pinned window at a glance, and clicking it unpins
+   (frozen holes render it as an inert marker instead). */
+.pinned-pin { appearance: none; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 20px; height: 20px; margin: 0 5px 0 -2px; padding: 0; border: 0; border-radius: var(--radius-inline);
+  background: none; color: var(--accent); cursor: pointer; transition: var(--transition-color); }
+.pinned-pin svg { display: block; width: 13px; height: 13px; }
+span.pinned-pin { cursor: default; }
+.pinned-pin:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
 .pinned-window-card .card-body.pdf-body .rh-pdf-scroll { flex: 1 1 auto; min-height: 0; max-height: none; }
 .pinned-window-action { color: var(--fg-dim); }
 .pinned-window.dragging .card-head { cursor: grabbing; }
@@ -361,10 +380,12 @@ body.mode-flight #viewport { display: block; }
   background: color-mix(in srgb, var(--accent) 16%, transparent); pointer-events: none; }
 @media (hover: hover) {
   .pinned-window-action:hover { color: var(--fg-bold); background-color: color-mix(in srgb, currentColor 8%, transparent); }
+  button.pinned-pin:hover { background: var(--hl); }
   .pinned-origin-overlay:hover .pinned-origin-label { border-color: var(--border-focus); }
 }
 @media (hover: none), (pointer: coarse) {
   .pinned-window-action { width: 44px; height: 44px; }
+  .pinned-pin { width: 32px; height: 32px; }
 }
 /* The head stays minimal — just the title — so the card reads like a document.
    Controls sit in a right-edge overlay with secondary text sizing de-emphasized. */
@@ -508,7 +529,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 }
 
 /* ---------- ask popup — a small command palette for the selection ----------
-   A borderless input sits above one action row. The row starts as four lenses,
+   A borderless input sits above one action row. The row starts as preset lenses,
    then swaps to explicit Note/Ask commits once there is text. The selection
    stays lit in the document itself (Custom Highlight), so the popup repeats no
    context. */
@@ -540,6 +561,24 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    every word-to-word distance is then the same, and the row still runs edge to edge. */
 .ask-actions { display: flex; flex-wrap: wrap; gap: 2px; justify-content: space-between; padding: 5px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
 .preset-actions { display: contents; }
+.thumb-pair { flex: 0 0 auto; display: flex; gap: 1px; }
+/* Three presets keep the original flex row byte-for-byte. At four, only the
+   fixed-width selection surface switches to an explicit two-line grid: three
+   built-ins above, custom and the stable trailing reaction pair below. */
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets,
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr) max-content; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .lens:nth-child(1),
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets .lens:nth-child(1) { grid-column: 1; grid-row: 1; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .lens:nth-child(2),
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets .lens:nth-child(2) { grid-column: 3; grid-row: 1; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .lens:nth-child(3),
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets .lens:nth-child(3) { grid-column: 5; grid-row: 1; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .lens:nth-child(4),
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets .lens:nth-child(4) { grid-column: 1 / span 3; grid-row: 2; justify-self: start; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .thumb-pair { grid-column: 5; grid-row: 2; justify-self: end; }
+#ask:not(.mobile-sheet) #ask-actions.has-four-presets .commit-actions,
+.asking-surface[data-set="selection"] .ask-actions.has-four-presets .commit-actions { grid-column: 1 / -1; }
 .commit-actions { position: relative; display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; }
 .commit-actions::before { content: ""; position: absolute; z-index: var(--layer-local-base); top: 6px; bottom: 6px; left: 50%; width: 1px; transform: translateX(-0.5px); background: var(--border); pointer-events: none; }
 .lens, .ask-commit, .note-pop-btn { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-medium);
@@ -547,17 +586,27 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   transition: color var(--duration-fast), background var(--duration-fast); }
 .lens:hover, .ask-commit:hover, .note-pop-btn:hover { color: var(--fg-bold); background: var(--hl); }
 .lens:active, .ask-commit:active, .note-pop-btn:active { background: var(--hl-strong); }
+.thumb { flex: 0 0 auto; display: inline-flex; height: 26px; align-items: center; justify-content: center; gap: 5px; padding: 0 6px;
+  border: 0; border-radius: 8px; background: none; color: var(--fg-dim); cursor: pointer; font-family: var(--font-ui); font-size: var(--text-ui); filter: grayscale(.3);
+  transition: color var(--duration-fast), background var(--duration-fast), filter var(--duration-fast), transform var(--duration-instant) var(--ease-standard); }
+@media (hover: hover) {
+  .thumb:hover { color: var(--fg-bold); background: var(--hl); filter: none; }
+  .thumb:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
+}
+.thumb:active { background: var(--hl-strong); filter: none; transform: scale(.96); }
 .ask-commit:disabled { cursor: default; opacity: 0.5; }
 .ask-commit:disabled:hover, .ask-commit:disabled:active { color: var(--fg-dim); background: none; }
+.thumb:disabled { cursor: default; opacity: .5; }
+.thumb:disabled:hover, .thumb:disabled:active { background: none; color: var(--fg-dim); filter: grayscale(.3); transform: none; }
 /* A 2px ring floating outside a bare pill collides with the popover's own hairline
    in a 5px gutter. Draw the keyboard state inside the pill instead: the hover fill
    plus a tinted edge on the exact same 8px radius — unmistakable, never loud. */
-.lens:focus-visible, .ask-commit:focus-visible, .note-pop-btn:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
+.lens:focus-visible, .ask-commit:focus-visible, .note-pop-btn:focus-visible, .thumb:focus-visible { outline: none; color: var(--fg-bold); background: var(--hl);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
 /* Every chip — 1 2 3 4 ↵ ⌘↵ — is the same fixed block, flex-centered so the
    glyph sits optically dead-center regardless of its own metrics (↵ carries
    its ink low-left; a text box with line-height centering never looks right). */
-.lens kbd, .ask-commit kbd, .note-pop-btn kbd { font-family: var(--font-ui); font-size: var(--text-xxs); font-weight: var(--weight-medium); color: var(--fg-faint);
+.lens kbd, .ask-commit kbd, .note-pop-btn kbd, .thumb kbd { font-family: var(--font-ui); font-size: var(--text-xxs); font-weight: var(--weight-medium); color: var(--fg-faint);
   display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
   min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline); flex-shrink: 0;
   background: color-mix(in srgb, var(--fg) 8%, transparent); }
@@ -568,12 +617,13 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    .followup-composer) carries has-draft. Buttons hide individually alongside
    their container so each button's own computed display tells the truth. */
 .ask-actions .commit-actions, .ask-actions .ask-commit { display: none; }
+.has-draft .lens, .has-draft .thumb-pair { display: none; }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
 .ask-actions.note-only .commit-actions::before { display: none; }
 /* A surface whose presets are all removed rests as a bare input; the row
    returns with a draft, when the commit pair needs it. */
-#ask:not(.has-draft) .ask-actions.no-presets, .followup-composer:not(.has-draft) .ask-actions.no-presets { display: none; }
+.followup-composer:not(.has-draft) .ask-actions.no-presets { display: none; }
 
 /* A fresh note still starts as a lightweight composer. Persisted notes use
    the structured document surface below: read and edit are one DOM tree. */
@@ -644,6 +694,24 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-dot:focus { outline: none; }
 .note-dot:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
+/* Reaction tooltips stay inside the absolute wash fragment: their wrapper is
+   the invisible 5px bridge, so crossing from a line to its controls cannot
+   tear hover. The wrapper and tooltip are absolute paint and never enter prose
+   layout. */
+.reaction-tip-wrap { position: absolute; z-index: var(--layer-local-top); bottom: 100%; display: block; padding-bottom: 5px;
+  transform: translateX(-50%); pointer-events: auto; font: var(--text-ui)/1 var(--font-ui); white-space: nowrap; }
+.reaction-tooltip { display: inline-flex; min-height: 24px; align-items: center; gap: 3px; padding: 0 4px 0 7px;
+  border: var(--border-default); border-radius: var(--radius-control); background: var(--surface-popover-bg); color: var(--fg-bold);
+  box-shadow: var(--surface-popover-shadow); -webkit-backdrop-filter: var(--surface-popover-blur); backdrop-filter: var(--surface-popover-blur); }
+.reaction-tooltip-glyph { display: inline-flex; align-items: center; filter: none; }
+.reaction-delete { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0; border: 0;
+  border-radius: var(--radius-control); background: none; color: var(--fg-dim); cursor: pointer; font: var(--weight-medium) var(--text-lg)/1 var(--font-ui); }
+@media (hover: hover) { .reaction-delete:hover { background: var(--note-hl-strong); color: var(--fg-bold); } }
+.reaction-delete:active { background: var(--note-hl-strong); }
+.reaction-delete:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.reaction-tip-svg { overflow: visible; transform: none; }
+.reaction-tip-svg-inner { display: flex; width: 100%; height: 100%; align-items: flex-end; justify-content: center; }
+
 /* The note's own surface: the product's popover, sized to a paragraph. No
    header and no ×; read prose sits directly on that surface like a comment. */
 .note-pop { width: 304px; min-width: 0; }
@@ -680,7 +748,15 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 #ask.mobile-sheet .lens, #ask.mobile-sheet .ask-commit { min-height: 46px; padding: 10px 8px; font-size: var(--text-body);
   color: var(--fg); background: color-mix(in srgb, var(--fg) 5%, transparent); }
 #ask.mobile-sheet .lens:active, #ask.mobile-sheet .ask-commit:active { background: var(--hl-strong); }
-#ask.mobile-sheet .lens kbd { display: none; }
+/* The thumb pair fills its grid cell as two half-width wells, dressed exactly
+   like the lens cells beside it. Keyboard hints mean nothing to a thumb on
+   glass — hide every chip, thumbs included. */
+#ask.mobile-sheet .thumb-pair { display: flex; gap: 6px; }
+#ask.mobile-sheet #ask-actions.has-four-presets .thumb-pair { grid-column: 2; }
+#ask.mobile-sheet .thumb { flex: 1 1 50%; height: auto; min-height: 46px; padding: 10px 8px; border-radius: 8px;
+  font-size: var(--text-body); background: color-mix(in srgb, var(--fg) 5%, transparent); }
+#ask.mobile-sheet .thumb:active { background: var(--hl-strong); }
+#ask.mobile-sheet .lens kbd, #ask.mobile-sheet .thumb kbd { display: none; }
 
 /* ---------- ⌘K palette — search the whole hole ---------- */
 #palette { position: fixed; inset: 0; z-index: var(--layer-palette); display: none; background: color-mix(in srgb, var(--bg) 35%, transparent); }
@@ -801,9 +877,16 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* 56px rows: tall enough that label + sub read as one settled block with air
    on both sides, uniform whether or not a sub is present. */
 .settings-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-8); min-height: 56px; }
+/* A disabled row dims as one block — copy and control at the same strength, so
+   the value never reads brighter than the label beside it. */
+.settings-sheet-row-disabled .settings-sheet-copy { opacity: .45; }
+.settings-sheet-row-disabled .settings-sheet-control { pointer-events: none; opacity: .45; }
+.settings-sheet-row-disabled .settings-step:disabled { opacity: 1; }
 .settings-sheet-copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .settings-sheet-label { color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-medium); }
-.settings-sheet-sub { color: var(--fg-faint); font-size: var(--text-ui); line-height: var(--leading-ui); }
+/* Capped short of the control so a long sub breaks into balanced lines instead
+   of running a one-word orphan up against the switch. */
+.settings-sheet-sub { max-width: 40ch; color: var(--fg-faint); font-size: var(--text-ui); line-height: var(--leading-ui); text-wrap: pretty; }
 .settings-sheet-control { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .settings-segmented { display: inline-flex; gap: 2px; padding: 2px; border: var(--border-default);
   border-radius: var(--radius-control-lg); background: color-mix(in srgb, var(--bg) 55%, transparent); }
@@ -819,8 +902,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .settings-step:hover:not(:disabled) { color: var(--fg-bold); background: var(--hl); }
 .settings-step:disabled { opacity: .4; cursor: default; }
 .settings-step-value { min-width: 46px; text-align: center; color: var(--fg); font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
-/* Reset earns its place only while there is something to reset. */
-.settings-reset { appearance: none; height: var(--control-h-sm); margin-left: var(--space-3); padding: 0 var(--space-2);
+/* Reset earns its place only while there is something to reset. It leads the
+   stepper in the DOM, so popping in grows the row leftward and the − / value /
+   + cluster stays pinned under the pointer. */
+.settings-reset { appearance: none; height: var(--control-h-sm); margin-right: var(--space-3); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: none; color: var(--accent);
   font: var(--weight-medium) var(--text-ui)/1 var(--font-ui); cursor: pointer; }
 .settings-reset[hidden] { display: none; }
@@ -838,8 +923,8 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .asking-settings { gap: 0; }
 .asking-settings .asking-link { min-height: 0; margin-top: var(--space-11); }
 .asking-reveal-body > .asking-surface { margin-top: var(--space-8); }
-.asking-surface { display: flex; flex-direction: column; gap: var(--space-4); }
-.asking-surface h4 { margin: 0; color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.asking-surface, .asking-reactions { display: flex; flex-direction: column; gap: var(--space-4); }
+.asking-surface h4, .asking-reactions h4 { margin: 0; color: var(--fg-bold); font-size: var(--text-body); font-weight: var(--weight-semibold); }
 .asking-mock { overflow: hidden; }
 /* The replicas keep the surfaces' skins but not their elevation: nothing here
    floats over content, so the popover's drop shadow stays in the product. */
@@ -852,6 +937,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .asking-ghost { flex: 1; min-height: 20px; padding: 3px 0; color: var(--fg-faint); font-family: var(--font-ui); font-size: var(--text-body); line-height: 1.5; }
 .asking-mock .lens.editing { color: var(--fg-bold); background: var(--hl-strong); }
 .asking-mock .ask-actions.no-presets { display: none; }
+.asking-add { color: var(--accent); }
 /* 0fr -> 1fr animates the expansion to auto height without measuring; the
    zeroed duration tokens make it instant under prefers-reduced-motion. */
 .asking-editor { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; border-top: 1px solid transparent;
@@ -909,6 +995,13 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   transition: grid-template-rows var(--duration-enter) var(--ease-out), opacity var(--duration-fast) var(--ease-standard),
     visibility var(--duration-zero) linear var(--duration-enter); }
 .asking-reveal-body { min-height: 0; overflow: hidden; }
+.asking-reactions { margin-top: var(--space-11); }
+.asking-reaction-list { overflow: hidden; border: var(--border-default); border-radius: var(--radius-popover); background: var(--card-bg); }
+.asking-reaction-row { align-items: stretch; min-height: 0; gap: 0; }
+.asking-reaction-row + .asking-reaction-row { border-top: var(--border-default); }
+.asking-reaction-glyph { display: flex; width: 44px; flex: 0 0 44px; align-items: center; justify-content: center; font-size: var(--text-lg); background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
+.asking-reaction-fields { flex: 1 1 auto; padding: var(--space-5) var(--space-6); }
+.asking-reaction-fields .asking-editor-foot { min-height: var(--control-h-sm); }
 .settings-nav-item:focus-visible, .settings-sheet-close:focus-visible, .settings-segment:focus-visible,
 .settings-step:focus-visible, .settings-reset:focus-visible, .settings-pane-body:focus-visible,
 .asking-preset-remove:focus-visible, .asking-preset-reset:focus-visible, .asking-preset-done:focus-visible, .asking-restore:focus-visible {
@@ -1011,6 +1104,8 @@ body:not(.mode-canvas) #branch-undo { bottom: 84px; }
 .doc-content .rh-pdf-mark:hover polygon, .doc-content .rh-pdf-mark.mark-hover polygon, .doc-content .rh-pdf-mark.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-focus polygon { fill: color-mix(in srgb, var(--accent) 30%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
 .doc-content .rh-pdf-mark.mark-note polygon { fill: var(--note-hl); stroke: color-mix(in srgb, var(--note-ink) 48%, transparent); }
 .doc-content .rh-pdf-mark.mark-note:hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-note.mark-focus polygon { fill: var(--note-hl-strong); stroke: var(--note-ink); }
+.doc-content .rh-pdf-mark.mark-note.mark-reaction polygon { fill: var(--note-hl); stroke: none; }
+.doc-content .rh-pdf-mark.mark-note.mark-reaction:hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-reaction.mark-hover polygon, .doc-content .rh-pdf-mark.mark-note.mark-reaction.mark-dom-focus polygon, .doc-content .rh-pdf-mark.mark-note.mark-reaction.mark-focus polygon { fill: var(--note-hl-strong); stroke: none; }
 .rh-pdf-textlayer span::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .rh-pdf-box-mode .rh-pdf-page, .rh-pdf-box-mode .rh-pdf-textlayer { cursor: crosshair; user-select: none; }
 .rh-pdf-box-draft { position: absolute; z-index: var(--layer-local-top); border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: none;

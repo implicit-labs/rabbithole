@@ -264,15 +264,15 @@ assertGoldens(nodeResults, "node");
     id: "docked-note",
     parent_id: "root",
     markdown: "Kept on the card it marks.",
-    origin: { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 } },
+    origin: { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 }, instruction: "Keep this shape." },
     docked: true,
   }, { now: "2026-08-11T00:00:02.000Z" });
   const dockedNote = docked.state.nodes.get("docked-note");
   assert.deepEqual(dockedNote.extensions, { note: { docked: true } }, "node_create docks a note through the extensions bag");
   assert.deepEqual({ position: dockedNote.position, size: dockedNote.size }, { position: { x: 0, y: 0 }, size: null },
     "a docked note is created without canvas geometry");
-  assert.deepEqual(dockedNote.origin, { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 }, branch_type: "selection" },
-    "docking leaves the note's own identity exactly as any other anchored note's");
+  assert.deepEqual(dockedNote.origin, { kind: "note", selected_text: "Root", anchor: { offset_start: 0, offset_end: 4 }, branch_type: "selection", instruction: "Keep this shape." },
+    "docking keeps semantic note instructions without putting presentation in origin");
   const placed = reduceHoleEvent(reduceHoleEvent(docked.state, {
     type: "node_extensions_patch", node_id: "docked-note", namespace: "note", value: {},
   }).state, { type: "node_update", node_id: "docked-note", position: { x: 550, y: 0 }, size: { w: 420, h: 460 } });

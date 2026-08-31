@@ -119,7 +119,7 @@ async function verifySelfContainedMcpPage() {
   await selectVisualText(page, "show1", oversizedShowSelection, { lightbox: true });
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", "Why is this target important?");
-  await page.click('#ask .lens[data-lens="example"]');
+  await page.click('#ask .ask-commit[data-commit="ask"]');
   await page.waitForSelector(".rh-lightbox", { state: "detached" });
   await page.waitForFunction(() => {
     const mount = document.querySelector('.viz-show[data-block-id="show1"]');
@@ -134,8 +134,8 @@ async function verifySelfContainedMcpPage() {
     instruction: typeof entry.origin.instruction === "string" && entry.origin.instruction.length > 0,
   })), [
     { block: { block_id: "flow1", selected_text: "Safe" }, question: "", lens: "explain", instruction: true },
-    { block: { block_id: "show1", selected_text: oversizedShowSelection.slice(0, 2000) }, question: "Why is this target important?", lens: "example", instruction: true },
-  ], "visual asks persist block identity and keep preset instructions separate from human questions");
+    { block: { block_id: "show1", selected_text: oversizedShowSelection.slice(0, 2000) }, question: "Why is this target important?", lens: null, instruction: false },
+  ], "visual asks persist block identity while preset instructions remain separate from typed human questions");
   assert.equal(await page.locator(`.card[data-id="${blockAsks[1].id}"] .origin-quote`).innerText(),
     "“Why is this target important?”",
     "an answer window must quote the human's question instead of the selected source text");

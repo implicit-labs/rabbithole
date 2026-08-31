@@ -1,4 +1,5 @@
-import { ASK_PRESET_KEYS, DEFAULT_ASK_PRESETS } from "../core/hole/lens.js";
+import { DEFAULT_ASK_PRESET_KEYS, DEFAULT_ASK_PRESETS } from "../core/hole/lens.js";
+import { DEFAULT_REACTION_PROMPTS, REACTION_KEYS } from "../core/hole/reaction.js";
 import { buttonMarkup } from "../core/html/markup.js";
 import { escapeHtml } from "../core/utils.js";
 import { createCleanupScope } from "./kit/scope.js";
@@ -7,12 +8,22 @@ import {
   askPreset,
   askPresets,
   askPresetsLinked,
+  createCustomAskPreset,
+  reactionPrompt,
+  reactionPrompts,
   resetAskPreset,
+  resetReactionPrompt,
   setAskPreset,
   setAskPresetRemoved,
   setAskPresetsLinked,
+  setReactionPrompt,
   visibleAskPresetKeys,
 } from "./preferences.js";
+
+// One text node keeps mirrorLabel's live preview a single nodeValue write.
+function presetPillText(preset) {
+  return `${preset.label} `;
+}
 
 /** Fill one composer action group from the user's local preset set. */
 export function renderAskPresetActions(actions, set) {
@@ -26,6 +37,7 @@ export function renderAskPresetActions(actions, set) {
   // With every preset removed the surface rests as a bare input; CSS hides the
   // empty row until a draft brings the commit pair back.
   actions.classList.toggle("no-presets", keys.length === 0);
+  actions.classList.toggle("has-four-presets", keys.length === 4);
   group.innerHTML = keys
     .map((key, index) => {
       const preset = askPreset(setKey, key) || DEFAULT_ASK_PRESETS[setKey][key];
@@ -33,7 +45,7 @@ export function renderAskPresetActions(actions, set) {
         bare: true,
         className: "lens ask-preset",
         dataAttrs: { lens: key },
-        label: preset.label + " ",
+        label: presetPillText(preset),
         title: preset.instruction,
         kbdHint: String(index + 1),
         disabled,
@@ -97,7 +109,7 @@ function mockPresetButton(set, key, index) {
     bare: true,
     className: "lens",
     dataAttrs: { presetButton: key },
-    label: preset.label + " ",
+    label: presetPillText(preset),
     title: preset.instruction,
     kbdHint: String(index + 1),
     ariaExpanded: "false",
@@ -119,6 +131,7 @@ function surfaceMarkup(set) {
 
 function editorMarkup(set, key) {
   const preset = askPreset(set, key);
+  const defaults = DEFAULT_ASK_PRESETS[set][key];
   const prefix = `asking-${set}-${key}`;
   return `<div class="asking-editor-fields">
     <label for="${prefix}-label">Label</label>
@@ -131,16 +144,23 @@ function editorMarkup(set, key) {
         className: "asking-preset-remove",
         dataAttrs: { presetRemove: true },
         label: "Remove",
-        title: `Take “${preset.label}” off this row — bring it back any time`,
+        title:
+          key === "custom"
+            ? `Remove “${preset.label}”`
+            : `Take “${preset.label}” off this row — bring it back any time`,
       })}
-      ${buttonMarkup({
-        bare: true,
-        className: "asking-preset-reset",
-        dataAttrs: { presetReset: true },
-        label: "Reset to default",
-        title: `Back to the built-in “${DEFAULT_ASK_PRESETS[set][key].label}” question`,
-        hidden: samePreset(preset, DEFAULT_ASK_PRESETS[set][key]),
-      })}
+      ${
+        defaults
+          ? buttonMarkup({
+              bare: true,
+              className: "asking-preset-reset",
+              dataAttrs: { presetReset: true },
+              label: "Reset to default",
+              title: `Back to the built-in “${defaults.label}” question`,
+              hidden: samePreset(preset, defaults),
+            })
+          : ""
+      }
       ${buttonMarkup({
         bare: true,
         className: "asking-preset-done",
@@ -150,6 +170,37 @@ function editorMarkup(set, key) {
       })}
     </div>
   </div>`;
+}
+
+const REACTION_COPY = Object.freeze({ up: "Thumbs up", down: "Thumbs down" });
+
+function reactionSettingsMarkup() {
+  return `<section class="asking-reactions" data-asking-reactions>
+    <header><h4>Reactions</h4></header>
+    <div class="asking-reaction-list">
+      ${REACTION_KEYS.map((key) => {
+        const prompt = reactionPrompt(key);
+        const prefix = `asking-reaction-${key}`;
+        return `<div class="settings-sheet-row asking-reaction-row" data-reaction-prompt="${key}">
+          <span class="asking-reaction-glyph" aria-hidden="true">${DEFAULT_REACTION_PROMPTS[key].glyph}</span>
+          <div class="asking-editor-fields asking-reaction-fields">
+            <label for="${prefix}-instruction">Instruction</label>
+            <textarea id="${prefix}-instruction" name="${prefix}-instruction" autocomplete="off" data-reaction-instruction rows="2" maxlength="4000" aria-label="Instruction for ${REACTION_COPY[key].toLowerCase()}">${escapeHtml(prompt.instruction)}</textarea>
+            <div class="asking-editor-foot">
+              ${buttonMarkup({
+                bare: true,
+                className: "asking-preset-reset",
+                dataAttrs: { reactionReset: true },
+                label: "Reset to default",
+                title: `Restore the default ${REACTION_COPY[key].toLowerCase()} instruction`,
+                hidden: prompt.instruction === DEFAULT_REACTION_PROMPTS[key].instruction,
+              })}
+            </div>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  </section>`;
 }
 
 function askingMarkup() {
@@ -170,6 +221,7 @@ function askingMarkup() {
         ${surfaceMarkup("followup")}
       </div>
     </div>
+    ${reactionSettingsMarkup()}
   </div>`;
 }
 
@@ -198,13 +250,24 @@ export function mountAskingSettings(host) {
   function renderActions(set) {
     const surface = surfaces[set];
     const keys = visibleAskPresetKeys(set);
-    surface.row.classList.toggle("no-presets", keys.length === 0);
-    surface.group.innerHTML = keys.map((key, index) => mockPresetButton(set, key, index)).join("");
+    surface.row.classList.remove("no-presets");
+    surface.row.classList.toggle("has-four-presets", keys.length === 4);
+    surface.group.innerHTML =
+      keys.map((key, index) => mockPresetButton(set, key, index)).join("") +
+      (askPreset(set, "custom")
+        ? ""
+        : buttonMarkup({
+            bare: true,
+            className: "lens asking-add",
+            dataAttrs: { presetAdd: true },
+            label: "Add question",
+            title: "Add a fourth quick question",
+          }));
   }
 
   function renderRemoved(set) {
     const surface = surfaces[set];
-    const removed = ASK_PRESET_KEYS.filter((key) => askPreset(set, key)?.removed === true);
+    const removed = DEFAULT_ASK_PRESET_KEYS.filter((key) => askPreset(set, key)?.removed === true);
     surface.removed.hidden = removed.length === 0;
     surface.removed.innerHTML = removed.length
       ? `<span class="asking-removed-label">Removed:</span>` +
@@ -240,8 +303,8 @@ export function mountAskingSettings(host) {
   function syncReset() {
     if (!active) return;
     const reset = surfaces[active.set].body.querySelector("[data-preset-reset]");
-    if (reset)
-      reset.hidden = samePreset(askPreset(active.set, active.key), DEFAULT_ASK_PRESETS[active.set][active.key]);
+    const defaults = DEFAULT_ASK_PRESETS[active.set][active.key];
+    if (reset && defaults) reset.hidden = samePreset(askPreset(active.set, active.key), defaults);
   }
 
   // The pill is the preview: its label and tooltip track the stored value live.
@@ -249,7 +312,7 @@ export function mountAskingSettings(host) {
     const saved = askPreset(set, key);
     const button = buttonOf(set, key);
     if (!button) return;
-    if (button.firstChild) button.firstChild.nodeValue = saved.label + " ";
+    if (button.firstChild) button.firstChild.nodeValue = presetPillText(saved);
     button.title = saved.instruction;
   }
 
@@ -275,9 +338,18 @@ export function mountAskingSettings(host) {
   Object.values(surfaces).forEach((surface) => {
     scope.listen(surface.group, "click", (event) => {
       const button = /** @type {HTMLButtonElement | null} */ (
-        /** @type {Element} */ (event.target).closest?.("[data-preset-button]")
+        /** @type {Element} */ (event.target).closest?.("[data-preset-button], [data-preset-add]")
       );
       if (!button) return;
+      if (button.hasAttribute("data-preset-add")) {
+        createCustomAskPreset(surface.set);
+        renderActions(surface.set);
+        renderRemoved(surface.set);
+        openEditor(surface.set, "custom");
+        const label = /** @type {HTMLInputElement | null} */ (surface.body.querySelector("[data-preset-label]"));
+        label?.select();
+        return;
+      }
       const key = button.dataset.presetButton;
       if (active && active.set === surface.set && active.key === key) closeEditor({ focusButton: true });
       else openEditor(surface.set, key);
@@ -329,7 +401,8 @@ export function mountAskingSettings(host) {
         renderActions(surface.set);
         renderRemoved(surface.set);
         // Continuity for keyboard users: focus lands on the way back in.
-        surface.removed.querySelector(`[data-preset-restore="${key}"]`)?.focus();
+        if (key === "custom") surface.group.querySelector("[data-preset-add]")?.focus();
+        else surface.removed.querySelector(`[data-preset-restore="${key}"]`)?.focus();
       }
     });
     scope.listen(surface.removed, "click", (event) => {
@@ -363,6 +436,27 @@ export function mountAskingSettings(host) {
   renderActions("followup");
   renderRemoved("followup");
 
+  host.querySelectorAll("[data-reaction-prompt]").forEach((row) => {
+    const key = row.dataset.reactionPrompt;
+    const field = /** @type {HTMLTextAreaElement} */ (row.querySelector("[data-reaction-instruction]"));
+    const reset = /** @type {HTMLButtonElement} */ (row.querySelector("[data-reaction-reset]"));
+    const syncReset = () => {
+      reset.hidden = reactionPrompt(key).instruction === DEFAULT_REACTION_PROMPTS[key].instruction;
+    };
+    scope.listen(field, "input", () => {
+      setReactionPrompt(key, { instruction: field.value });
+      syncReset();
+    });
+    scope.listen(field, "focusout", () => {
+      field.value = reactionPrompt(key).instruction;
+    });
+    scope.listen(reset, "click", () => {
+      field.value = resetReactionPrompt(key).instruction;
+      syncReset();
+      field.focus();
+    });
+  });
+
   return () => {
     closeEditor();
     scope.dispose();
@@ -372,5 +466,6 @@ export function mountAskingSettings(host) {
 export function askingSettingsSection() {
   // Touch storage at the section boundary so legacy shapes migrate before UI.
   askPresets();
+  reactionPrompts();
   return { id: "asking", label: "Quick questions", order: 5, mount: mountAskingSettings };
 }

@@ -220,7 +220,7 @@ async function verifyMobileCanvasNavigation(browserEngine, engineName) {
     await page.waitForFunction(() => !document.body.classList.contains("mode-canvas"));
     await page.waitForFunction(() => !document.body.classList.contains("mode-flight"));
     assert.deepEqual(await composerRowState(page, "#composer-actions"), { lensesVisible: true, commitsHidden: true },
-      `${engineName}: an empty mobile reader composer must rest on the four lenses with the commit pair hidden`);
+      `${engineName}: an empty mobile reader composer must rest on the three presets with the commit pair hidden`);
     await page.fill("#composer-text", "Mobile follow-up draft");
     const mobileReader = await page.evaluate(() => {
       const rect = (selector) => {
@@ -609,7 +609,7 @@ async function verifyAnchoredNotes() {
     await selectText(page, "first anchor");
     await page.waitForSelector("#ask.visible");
     assert.deepEqual(await composerRowState(page, "#ask"), { lensesVisible: true, commitsHidden: true },
-      "an empty anchored popover should rest on the four lenses");
+      "an empty anchored popover should rest on its preset lenses and reaction pair");
     assert.deepEqual(await page.locator("#ask").evaluate((surface) => ({
       active: document.activeElement?.id,
       hasDraft: surface.classList.contains("has-draft"),
@@ -628,13 +628,13 @@ async function verifyAnchoredNotes() {
       askHighlight: CSS.highlights?.has("rh-ask") || false,
     })), {
       hasDraft: true,
-      lensesVisible: true,
+      lensesVisible: false,
       commits: [
         { label: "Note", hint: "↵", visible: true },
         { label: "Ask", hint: "⌘↵", visible: true },
       ],
       askHighlight: true,
-    }, "typing should add labeled commit actions while presets remain available to style the draft");
+    }, "typing should swap preset lenses for the labeled commit actions");
     await page.keyboard.down("Control");
     await page.keyboard.up("Control");
     assert.equal(await page.evaluate(() => CSS.highlights?.has("rh-ask") || false), true,
@@ -783,7 +783,7 @@ async function verifyDockedNotes() {
       chips: Array.from(surface.querySelectorAll("kbd")).map((chip) => chip.textContent),
       commitKinds: Array.from(surface.querySelectorAll("[data-commit]")).map((button) => button.dataset.commit),
       advertisesShift: Array.from(surface.querySelectorAll("button")).some((button) => /shift|⇧/i.test(button.title + button.textContent)),
-    })), { chips: ["1", "2", "3", "4", "↵", "⌘↵"], commitKinds: ["note", "ask"], advertisesShift: false },
+    })), { chips: ["1", "2", "3", "↑", "↓", "↵", "⌘↵"], commitKinds: ["note", "ask"], advertisesShift: false },
     "the selection composer must not advertise the direct-placement chord");
     await page.press("#ask-text", "Control+Shift+Enter");
     const directPlaced = page.locator(".card-note", { hasText: "A directly placed selection note" });
@@ -3538,12 +3538,22 @@ async function verifyCanvasBranching() {
   assert.equal(await page.locator("#settings-pane-title").innerText(), "Quick questions");
   // The section is the product wearing its own clothes: full-width replicas of
   // the real surfaces, assembled from the real .ask-input/.ask-actions parts.
-  const pillLabels = (set) => page.locator(`[data-asking-surface][data-set="${set}"] [data-preset-button]`)
-    .evaluateAll((buttons) => buttons.map((button) => button.firstChild.nodeValue.trim()));
-  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"],
-    "the selection replica shows the four preset pills with their minimal default labels");
-  assert.deepEqual(await pillLabels("followup"), ["Explain", "ELI5", "Example", "Go deeper"]);
+  const pillTexts = (set) => page.locator(`[data-asking-surface][data-set="${set}"] [data-preset-button]`)
+    .evaluateAll((buttons) => buttons.map((button) => button.firstChild.nodeValue));
+  const defaultPillTexts = ["Explain ", "ELI5 ", "Go deeper "];
+  assert.deepEqual(await pillTexts("selection"), defaultPillTexts,
+    "the selection replica renders three label pills, each in one text node");
+  assert.deepEqual(await pillTexts("followup"), defaultPillTexts,
+    "the follow-up replica has the same three slots even while its linked surface is collapsed");
   assert.equal(await page.locator(".asking-editor.open").count(), 0, "no editor is open until a pill is clicked");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-add]').innerText(), "Add question",
+    "an absent optional slot exposes one verb-first Add affordance");
+  assert.deepEqual(await page.locator("[data-reaction-prompt] .asking-reaction-glyph").allInnerTexts(), ["👍", "👎"],
+    "reaction glyphs are the two fixed row labels");
+  assert.equal(await page.locator("[data-reaction-prompt] textarea").count(), 2,
+    "each reaction row exposes one multiline instruction field");
+  assert.equal(await page.locator("[data-reaction-prompt] input").count(), 0,
+    "reaction labels have no editable or emoji-specific field");
   const fidelity = await page.evaluate(() => {
     const mock = document.querySelector('[data-asking-surface][data-set="selection"] .asking-mock');
     const row = mock.querySelector(".ask-actions");
@@ -3557,6 +3567,8 @@ async function verifyCanvasBranching() {
       glass: getComputedStyle(mock).backdropFilter,
       shadow: getComputedStyle(mock).boxShadow,
       linkRole: document.querySelector("[data-asking-link]").getAttribute("role"),
+      linkChecked: document.querySelector("[data-asking-link]").checked,
+      followupVisible: getComputedStyle(document.querySelector("[data-asking-reveal]")).visibility,
     };
   });
   assert.equal(fidelity.width, fidelity.sectionWidth, "the replica runs the full section width");
@@ -3566,6 +3578,45 @@ async function verifyCanvasBranching() {
   assert.match(fidelity.glass, /blur/, "the selection replica wears the popover's glass");
   assert.equal(fidelity.shadow, "none", "the replica keeps the popover's skin but not its elevation — nothing floats here");
   assert.equal(fidelity.linkRole, "switch", "the link control is the product's own switch, not a bare checkbox");
+  assert.equal(fidelity.linkChecked, true, "fresh Quick questions settings start linked");
+  assert.equal(fidelity.followupVisible, "hidden", "the linked default collapses the duplicate follow-up surface");
+
+  // The optional slot is created in place, edits through the same two fields,
+  // and removal returns to Add instead of making a restore chip.
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-add]');
+  await page.waitForSelector('[data-asking-surface][data-set="selection"] .asking-editor.open');
+  assert.equal(await page.evaluate(() => document.activeElement.id), "asking-selection-custom-label");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] .asking-editor-fields > input').count(), 1,
+    "the custom editor has Label and Instruction only");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').count(), 0,
+    "an optional slot has no imaginary built-in default");
+  await page.fill("#asking-selection-custom-label", "Counterpoint");
+  await page.fill("#asking-selection-custom-instruction", "Challenge this claim.");
+  assert.deepEqual(await pillTexts("selection"), [...defaultPillTexts, "Counterpoint "],
+    "the custom question becomes the positional fourth pill");
+  assert.deepEqual(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-button] kbd').allTextContents(),
+    ["1", "2", "3", "4"], "four position hints remain truthful");
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-ask-presets-v1")).selection.custom), {
+    label: "Counterpoint", instruction: "Challenge this claim.", removed: false,
+  });
+  await page.click('[data-asking-surface][data-set="selection"] [data-preset-remove]');
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-add]').isVisible(), true,
+    "removing custom brings Add question back");
+  assert.equal(await page.locator('[data-preset-restore="custom"]').count(), 0,
+    "a removed custom slot never becomes a restore chip");
+  assert.equal(await page.evaluate(() => Object.hasOwn(
+    JSON.parse(localStorage.getItem("rh-ask-presets-v1")).selection, "custom")), false,
+  "custom removal persists as an absent slot");
+
+  const upInstruction = page.locator('[data-reaction-prompt="up"] [data-reaction-instruction]');
+  await upInstruction.fill("Keep the concrete opening.");
+  assert.equal(await page.locator('[data-reaction-prompt="up"] [data-reaction-reset]').isVisible(), true,
+    "a reaction reset appears only after its instruction changes");
+  assert.equal(JSON.parse(await page.evaluate(() => localStorage.getItem("rh-reaction-prompts-v1"))).up.instruction,
+    "Keep the concrete opening.");
+  await page.click('[data-reaction-prompt="up"] [data-reaction-reset]');
+  assert.equal(await upInstruction.inputValue(), "This landed well — use a similar approach.");
+  assert.equal(await page.locator('[data-reaction-prompt="up"] [data-reaction-reset]').isVisible(), false);
 
   // Click-to-edit: the pill expands its editor in place and hands over focus.
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
@@ -3580,7 +3631,7 @@ async function verifyCanvasBranching() {
     "Reset appears only once the slot differs from its default");
   await page.fill("#asking-selection-explain-label", "Clarify");
   await page.fill("#asking-selection-explain-instruction", "Lead with the key distinction.");
-  assert.deepEqual(await pillLabels("selection"), ["Clarify", "ELI5", "Example", "Go deeper"],
+  assert.deepEqual(await pillTexts("selection"), ["Clarify ", "ELI5 ", "Go deeper "],
     "the pill is a live preview — a label edit lands on it as it is typed");
   assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').isVisible(), true);
   assert.deepEqual(await page.evaluate(() => {
@@ -3588,17 +3639,22 @@ async function verifyCanvasBranching() {
     return { version: saved.version, linked: saved.linked, selection: saved.selection.explain, followup: saved.followup.explain };
   }), {
     version: 1,
-    linked: false,
+    linked: true,
     selection: { label: "Clarify", instruction: "Lead with the key distinction.", removed: false },
     followup: { label: "Explain", instruction: "Explain this further.", removed: false },
-  }, "the two preset sets stay independent in the versioned preference key");
+  }, "label, instruction, and the linked default persist in the versioned preference key");
 
-  // One editor at a time, and Escape gives back one level before the sheet.
+  // Unlink before editing the independent follow-up set. One editor stays open
+  // at a time, and Escape gives back one level before the sheet.
+  await page.uncheck("input[data-asking-link]");
+  await page.waitForFunction(() => getComputedStyle(document.querySelector("[data-asking-reveal]")).visibility === "visible");
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-ask-presets-v1")).linked), false,
+    "only an explicit switch-off unlinks follow-up presets");
   await page.click('[data-asking-surface][data-set="followup"] [data-preset-button="explain"]');
   await page.waitForSelector('[data-asking-surface][data-set="followup"] .asking-editor.open');
   assert.equal(await page.locator(".asking-editor.open").count(), 1, "opening a second editor closes the first");
   await page.fill("#asking-followup-explain-label", "Recap");
-  assert.deepEqual(await pillLabels("followup"), ["Recap", "ELI5", "Example", "Go deeper"]);
+  assert.deepEqual(await pillTexts("followup"), ["Recap ", "ELI5 ", "Go deeper "]);
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".asking-editor.open").count(), 0);
   assert.equal(await page.locator("#settings-sheet").count(), 1, "Escape collapses the editor; the sheet stays");
@@ -3618,14 +3674,14 @@ async function verifyCanvasBranching() {
   await page.uncheck("input[data-asking-link]");
   assert.equal(await page.locator(".asking-editor.open").count(), 0, "a click outside the editor collapses it");
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[data-asking-reveal]")).visibility === "visible");
-  assert.deepEqual(await pillLabels("followup"), ["Recap", "ELI5", "Example", "Go deeper"],
+  assert.deepEqual(await pillTexts("followup"), ["Recap ", "ELI5 ", "Go deeper "],
     "unticking brings the follow-up set back exactly as it looked before the tick");
 
   // Per-slot reset, from inside the open editor.
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="explain"]');
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-reset]');
   assert.equal(await page.inputValue("#asking-selection-explain-label"), "Explain", "Reset restores only that slot to its minimal default");
-  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"]);
+  assert.deepEqual(await pillTexts("selection"), defaultPillTexts);
   assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-reset]').isVisible(), false);
   await page.keyboard.press("Escape");
 
@@ -3634,17 +3690,19 @@ async function verifyCanvasBranching() {
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-button="eli5"]');
   await page.waitForSelector('[data-asking-surface][data-set="selection"] .asking-editor.open');
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-remove]');
-  assert.deepEqual(await pillLabels("selection"), ["Explain", "Example", "Go deeper"], "Remove takes the pill off the row");
-  assert.deepEqual(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-button] kbd').allTextContents(), ["1", "2", "3"],
+  assert.deepEqual(await pillTexts("selection"), ["Explain ", "Go deeper "], "Remove takes the pill off the row");
+  assert.deepEqual(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-button] kbd').allTextContents(), ["1", "2"],
     "the remaining number hints close ranks");
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("rh-ask-presets-v1")).selection.eli5.removed), true,
     "removal is a flag on the same slot — the words survive for old branches and restore");
   assert.equal(await page.evaluate(() => document.activeElement.dataset.presetRestore), "eli5",
     "focus lands on the way back in");
+  assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-preset-restore="eli5"]').innerText(), "ELI5",
+    "the removed chip keeps the preset label");
   await page.click('[data-asking-surface][data-set="selection"] [data-preset-restore="eli5"]');
-  assert.deepEqual(await pillLabels("selection"), ["Explain", "ELI5", "Example", "Go deeper"], "the ghost chip restores the pill in place");
+  assert.deepEqual(await pillTexts("selection"), defaultPillTexts, "the ghost chip restores the pill in place");
   assert.equal(await page.locator('[data-asking-surface][data-set="selection"] [data-asking-removed]').isVisible(), false,
-    "the removed row earns its place only while something is removed");
+    "the removed row disappears when all three supported slots are restored");
   assert.equal(await page.locator("#settings-sheet").evaluate((sheet) => Math.round(sheet.getBoundingClientRect().height)), Math.round(sheetStandard.height),
     "Quick questions renders inside the shared fixed sheet silhouette");
   await page.click('[data-settings-section="model"]');

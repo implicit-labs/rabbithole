@@ -8,6 +8,7 @@ import {
   normalizePosition,
   normalizeSize,
   projectNode,
+  stripNodeAttention,
 } from "./node.js";
 import { askOfNode, isNoteNode, makeTranscribeAsk } from "./ask.js";
 import { normalizeAnchor } from "./anchor.js";
@@ -89,12 +90,20 @@ function reduceNodeExtensionsPatch(state, event, options) {
     const objectValue = /** @type {Record<string, any>} */ (value && typeof value === "object" && !Array.isArray(value) ? value : {});
     if (namespace === "pdf") next.source = Object.keys(objectValue).length ? objectValue : null;
     else if (namespace === "canvas") {
-      const { docked, ..._canvas } = next.view || {};
-      next.view = { ...objectValue, ...(docked === true ? { docked: true } : {}) };
+      const { docked, reaction, ..._canvas } = next.view || {};
+      next.view = {
+        ...objectValue,
+        ...(docked === true ? { docked: true } : {}),
+        ...(reaction === true ? { reaction: true } : {}),
+      };
     }
     else if (namespace === "note") {
-      const { docked: _docked, ...view } = next.view || {};
-      next.view = objectValue.docked === true ? { ...view, docked: true } : view;
+      const { docked: _docked, reaction: _reaction, ...view } = next.view || {};
+      next.view = {
+        ...view,
+        ...(objectValue.docked === true ? { docked: true } : {}),
+        ...(objectValue.reaction === true ? { reaction: true } : {}),
+      };
     } else if (namespace === "learn") next.progress = objectValue;
     else next.extensions = { ...next.extensions, [namespace]: value };
     const nodes = cloneNodes(state, options);
@@ -213,9 +222,10 @@ function reduceNodeCreate(state, event, options) {
   const rawOrigin = /** @type {Record<string, any>} */ (event.origin || {});
   const author = rawOrigin.author === "agent" ? "agent" : "human";
   const noteAttribution = author === "agent" ? { author } : {};
+  const instruction = typeof rawOrigin.instruction === "string" ? rawOrigin.instruction.trim().slice(0, 4000) : "";
   const origin = !note ? null : parentId !== null && rawOrigin.anchor
-    ? { kind: "note", ...noteAttribution, selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection" }
-    : { kind: "note", ...noteAttribution };
+    ? { kind: "note", ...noteAttribution, selected_text: String(rawOrigin.selected_text ?? "").trim(), anchor: normalizeAnchor(rawOrigin.anchor), branch_type: "selection", ...(instruction ? { instruction } : {}) }
+    : { kind: "note", ...noteAttribution, ...(instruction ? { instruction } : {}) };
   // Docking is presentation and only means anything on a parent: the note has
   // no canvas geometry until it is placed, and the flag lives in the
   // extensions bag so nothing about the note's identity changes with it.
@@ -310,6 +320,9 @@ function reduceNodeAnswered(state, event, options) {
     status: "answered",
     read: event.read ?? false,
   });
+  if (Object.prototype.hasOwnProperty.call(current, "extensions")) {
+    next.extensions = stripNodeAttention(current.extensions);
+  }
   next.font_scale = /** @type {number} */ (event.font_scale ?? current.font_scale ?? 1);
   const base = normalizeStoredBaseUrlFields(next);
   next.base_url = base.base_url;

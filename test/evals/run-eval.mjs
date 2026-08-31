@@ -75,7 +75,6 @@ function scoreAsk(ask, { body, title }) {
   if (ask.expectMath) checks.math = hasBalancedParseableMath(body);
   if (ask.expectShow) checks.show = hasSafeShowFence(body, html);
   if (ask.lens === "eli5") checks.lens = averageSentenceWords(body) <= 18;
-  if (ask.lens === "example") checks.lens = /\bexample\b|for instance|```|- /i.test(body);
   if (ask.lens === "deeper") checks.lens = wordCount(body) >= (ask.minWords || 120);
   if (ask.expectCode) checks.code = /```|`[^`]+`/.test(body);
 
@@ -229,13 +228,13 @@ function buildGoldenAsks() {
       }),
     },
     {
-      name: "example_lens",
-      lens: "example",
+      name: "explain_lens",
+      lens: "explain",
       context: baseContext({
-        lens: "example",
+        lens: "explain",
         parent_markdown: "A cache stores expensive results so repeated calls can return quickly.",
         selected_text: "cache",
-        question: "Give a concrete example.",
+        question: "Explain how this helps repeated calls.",
       }),
     },
     {

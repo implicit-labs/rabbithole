@@ -1,18 +1,30 @@
-export const ASK_PRESET_KEYS = Object.freeze(["explain", "eli5", "example", "deeper"]);
+export const DEFAULT_ASK_PRESET_KEYS = Object.freeze(["explain", "eli5", "deeper"]);
+export const ASK_PRESET_KEYS = Object.freeze([...DEFAULT_ASK_PRESET_KEYS, "custom"]);
 
 /*
  * Default instructions are deliberately minimal: the model already sees the
  * selection and the document, so a preset only needs to name the move. Anyone
  * who wants a more opinionated instruction edits the preset in Settings.
+ *
+ * These are the three built-in slots. A reader can add one optional custom
+ * slot; it stays absent from the defaults until they do.
  */
-/** @type {Readonly<Record<PropertyKey, { label: string, instruction: string }>>} */
+/** @type {Readonly<Record<PropertyKey, { label: string, instruction: string, removed?: boolean }>>} */
 export const LENSES = Object.freeze({
   explain: Object.freeze({ label: "Explain", instruction: "Explain this further." }),
   eli5: Object.freeze({ label: "ELI5", instruction: "Explain like I'm five." }),
-  example: Object.freeze({ label: "Example", instruction: "Give a concrete example." }),
   deeper: Object.freeze({ label: "Go deeper", instruction: "Go one level deeper." }),
 });
 
+/*
+ * Lens keys that once shipped as defaults. Old nodes still carry them in
+ * origin.lens, so they keep a display label without ever being offered again.
+ */
+/** @type {Readonly<Record<PropertyKey, string>>} */
+const LEGACY_LENS_LABELS = Object.freeze({ example: "Example" });
+
+// Selection and follow-up ask the same three questions out of the box; the
+// sets only diverge once someone unlinks them in Settings.
 export const DEFAULT_ASK_PRESETS = Object.freeze({
   selection: LENSES,
   followup: LENSES,
@@ -26,11 +38,13 @@ export function truncate(value, length) {
 
 /** @param {PropertyKey} key */
 export function lensLabel(key) {
-  return LENSES[key] ? LENSES[key].label : String(key || "");
+  if (LENSES[key]) return LENSES[key].label;
+  if (key === "custom") return "Custom question";
+  return LEGACY_LENS_LABELS[key] || String(key || "");
 }
 
 /** @param {unknown} lens */
 export function normalizeLens(lens) {
   const key = String(lens ?? "").trim();
-  return Object.prototype.hasOwnProperty.call(LENSES, key) ? key : null;
+  return ASK_PRESET_KEYS.includes(key) ? key : null;
 }

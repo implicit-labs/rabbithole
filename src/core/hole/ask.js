@@ -1,6 +1,7 @@
 import { validateAssetName } from "../assets.js";
 import { MAX_ASK_ATTACHMENTS, normalizeAskAttachments, validateAskAttachments } from "../attachments.js";
 import { normalizeAnchor } from "./anchor.js";
+import { reactionInstructionForNode } from "./reaction.js";
 import { lineageNodesFromMap, valuesOfNodes } from "./tree.js";
 
 /** @typedef {import("../contracts/engine.js").HoleNode} HoleNode */
@@ -25,6 +26,12 @@ export function isNoteNode(node) {
 export function isDockedNote(node) {
   return isNoteNode(node) && (node?.parent_id ?? null) !== null
     && (node?.view?.docked === true || node?.extensions?.note?.docked === true);
+}
+
+/** @param {{ origin?: unknown, parent_id?: unknown, view?: any, extensions?: any } | null | undefined} node */
+export function isReactionNote(node) {
+  return isDockedNote(node)
+    && (node?.view?.reaction === true || node?.extensions?.note?.reaction === true);
 }
 
 /** @param {unknown} type @param {string} [selectedText] */
@@ -175,7 +182,7 @@ function noteEntry(node) {
     note_id: node.id,
     on_node_id: node.parent_id,
     on_selected_text: (/** @type {{ selected_text?: string } | null | undefined} */ (node.origin))?.selected_text || null,
-    content: node.markdown,
+    content: isReactionNote(node) ? reactionInstructionForNode(node) : node.markdown,
     ...(author === "agent" ? { author } : {}),
     created_at: node.created_at,
   };
