@@ -154,6 +154,7 @@ This inventory is derived from the source tree.
 - `src/ui/authoring/standalone-note-submit.js`
 - `src/ui/branch-surfaces.js`
 - `src/ui/canvas-settings.js`
+- `src/ui/canvas/attention.js`
 - `src/ui/canvas/auto-tidy-policy.js`
 - `src/ui/canvas/auto-tidy.js`
 - `src/ui/canvas/camera.js`
