@@ -357,15 +357,16 @@ function appearanceMarkup() {
   }).join("");
   const theme =
     '<div class="settings-segmented" role="radiogroup" aria-labelledby="settings-theme-label">' + segments + "</div>";
+  // Reset leads the stepper: appearing must never move the A− / A+ pair.
   const size =
     '<div class="settings-stepper" role="group" aria-labelledby="settings-reading-size-label">' +
+    BUTTON_OPEN +
+    ' type="button" class="settings-reset" data-reading-reset hidden>Reset</button>' +
     BUTTON_OPEN +
     ' type="button" class="settings-step" data-reading-step="-1" aria-label="Decrease reading size">A−</button>' +
     '<span class="settings-step-value" data-reading-value aria-live="polite">100%</span>' +
     BUTTON_OPEN +
     ' type="button" class="settings-step" data-reading-step="1" aria-label="Increase reading size">A+</button>' +
-    BUTTON_OPEN +
-    ' type="button" class="settings-reset" data-reading-reset hidden>Reset</button>' +
     "</div>";
   // Subs describe the effect, never the mechanism — what changes, not how.
   return (

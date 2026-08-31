@@ -42,7 +42,7 @@ import { createCleanupScope } from "./kit/scope.js";
 import { disposePalette, initPalette } from "./palette.js";
 import { disposeReader, initReader, openNode } from "./reader.js";
 import { ensureNodeHtml, setRendererAssetData } from "./renderer.js";
-import { closeSettingsSheet, initSettingsSheet } from "./settings-sheet.js";
+import { closeSettingsSheet, initSettingsSheet, registerSettingsSection } from "./settings-sheet.js";
 import { disposeVisuals, initVisuals } from "./visuals.js";
 
 let activeRuntime = null;
@@ -114,6 +114,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       ensureCanvasBuilt: ensureCanvasBuilt,
       diveToNode: diveToNode,
       scheduleEdges: scheduleEdges,
+      modeChanged: capabilities.modeChanged || noop,
     });
     const readerHooks = {
       hideAsk: hideAsk,
@@ -138,6 +139,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
       persistNode: host.persistNode || noop,
       persistNodesBulk: host.persistNodesBulk || noop,
       scheduleViewSave: host.scheduleViewSave || noop,
+      createCanvasMaintenance: capabilities.canvasMaintenanceFactory || null,
     };
     const paletteHooks = {
       hideAsk: hideAsk,
@@ -152,6 +154,9 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
     /* The gear lives in the shared taskbar, which outlives any one hole: the
        sheet binds once per host and every hole simply re-confirms it. Sections
        are data — a host that registers none still gets Appearance. */
+    (capabilities.settingsSections || []).forEach(function (section) {
+      registerSettingsSection(section);
+    });
     initSettingsSheet({ hostLabel: capabilities.settingsHostLabel });
     own(function () {
       closeSettingsSheet({ restoreFocus: false });

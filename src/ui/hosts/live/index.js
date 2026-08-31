@@ -1,8 +1,12 @@
 import checkCss from "../../../design/document/check.css";
 import mermaidCss from "../../../design/document/mermaid.css";
 import visualBaseCss from "../../../design/document/visual-base.css";
+import { createAutoTidy, notifyAutoTidyModeChanged } from "../../canvas/auto-tidy.js";
+import { canvasSettingsSection } from "../../canvas-settings.js";
 import { createRabbitholeUi } from "../../composition.js";
 import { mountPdfView } from "../../pdf-view.js";
+import { createHostPreferenceBacking } from "../../preference-host-backing.js";
+import { configurePreferenceBacking, resetPreferenceBacking } from "../../preferences.js";
 import { downloadSnapshot, resetSnapshotHooks, setSnapshotHooks } from "../../snapshot.js";
 import {
   connectSse,
@@ -25,35 +29,61 @@ export function startRabbithole(hydration, options) {
   options = options || {};
   if (options.snapshotHooks) setSnapshotHooks(options.snapshotHooks);
   setTransportAdapter(options.transport);
-  const runtime = createRabbitholeUi({
-    hydration: hydration,
-    host: {
-      post: post,
-      putAsset: putAsset,
-      deleteAsset: deleteAsset,
-      connect: connectSse,
-      refreshStatus: refreshStatus,
-      persistNode: persistNode,
-      persistNodesBulk: persistNodesBulk,
-      scheduleViewSave: scheduleViewSave,
-      start: initTransportStatus,
-      flush: flushPendingSaves,
-      dispose: disposeTransportStatus,
-    },
-    capabilities: {
-      mountPdfView: function (container, node) {
-        return mountPdfView(container, node, { getTranscriptionCapability: options.getPdfTranscriptionCapability });
+  const preferenceBacking = Object.hasOwn(options, "preferences")
+    ? createHostPreferenceBacking({ seed: options.preferences, post: post })
+    : null;
+  if (preferenceBacking) configurePreferenceBacking(preferenceBacking);
+
+  function flushLiveState() {
+    return Promise.all([flushPendingSaves(), preferenceBacking ? preferenceBacking.flush() : Promise.resolve()]);
+  }
+
+  async function disposeLiveState() {
+    if (preferenceBacking) await preferenceBacking.flush();
+    return disposeTransportStatus();
+  }
+
+  let runtime;
+  try {
+    runtime = createRabbitholeUi({
+      hydration: hydration,
+      host: {
+        post: post,
+        putAsset: putAsset,
+        deleteAsset: deleteAsset,
+        connect: connectSse,
+        refreshStatus: refreshStatus,
+        persistNode: persistNode,
+        persistNodesBulk: persistNodesBulk,
+        scheduleViewSave: scheduleViewSave,
+        start: initTransportStatus,
+        flush: flushLiveState,
+        dispose: disposeLiveState,
       },
-      loadMermaid: options.loadMermaid || null,
-      exportSnapshot: downloadSnapshot,
-      exportPortable: options.exportPortable || null,
-    },
-  });
+      capabilities: {
+        mountPdfView: function (container, node) {
+          return mountPdfView(container, node, { getTranscriptionCapability: options.getPdfTranscriptionCapability });
+        },
+        loadMermaid: options.loadMermaid || null,
+        exportSnapshot: downloadSnapshot,
+        exportPortable: options.exportPortable || null,
+        canvasMaintenanceFactory: createAutoTidy,
+        modeChanged: notifyAutoTidyModeChanged,
+        settingsSections: [canvasSettingsSection()],
+      },
+    });
+  } catch (error) {
+    preferenceBacking?.dispose();
+    if (preferenceBacking) resetPreferenceBacking();
+    throw error;
+  }
   const dispose = runtime.dispose;
   runtime.dispose = async function () {
     try {
       await dispose();
     } finally {
+      preferenceBacking?.dispose();
+      if (preferenceBacking) resetPreferenceBacking();
       resetSnapshotHooks();
     }
   };

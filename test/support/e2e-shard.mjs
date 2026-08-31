@@ -14,6 +14,7 @@
 // each file lands in the currently lightest bin, so the assignment depends
 // only on the checked-in file set — every matrix job computes the same bins.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -95,7 +96,12 @@ console.log(`shard ${index}/${total}: ${bin.files.length} file(s)`);
 for (const file of bin.files) console.log(`  ${path.relative(process.cwd(), file)}`);
 for (const file of bin.files) {
   console.log(`\n--- ${path.relative(process.cwd(), file)}`);
-  const result = spawnSync(process.execPath, [file], { stdio: "inherit" });
+  // Throwaway store dir: e2e tests boot real server modules, which otherwise
+  // default to ~/.rabbithole and write into the operator's live data.
+  const result = spawnSync(process.execPath, [file], {
+    stdio: "inherit",
+    env: { ...process.env, RABBITHOLE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "rabbithole-test-store-")) },
+  });
   if (result.status !== 0) {
     process.exit(result.status === null ? 1 : result.status);
   }

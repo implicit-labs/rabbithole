@@ -34,6 +34,8 @@ function cubicBezier(x1, y1, x2, y2, x) {
   return bezierCoord(t, y1, y2);
 }
 
+export const EASE_OUT_MOTION_CSS = "cubic-bezier(.23, 1, .32, 1)";
+
 export function easeOutMotion(k) {
   return cubicBezier(0.23, 1, 0.32, 1, k);
 }

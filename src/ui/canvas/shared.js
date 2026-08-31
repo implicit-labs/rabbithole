@@ -1,14 +1,13 @@
 import { BRANCH_FOLLOWUP, BRANCH_SELECTION, branchTypeOfNode, isDockedNote } from "../../core/hole/ask.js";
 import {
+  CANVAS_BASE,
   edgesSvg,
   flashHint,
+  fontPx,
   frozen,
-  MAX_SCALE,
-  MIN_SCALE,
   motionSourceFromEvent,
   nextStack,
   nodes,
-  postBrowserEvent,
   view,
   viewport,
   world,
@@ -16,11 +15,20 @@ import {
 } from "../core.js";
 import { createModuleLifecycle } from "../kit/scope.js";
 import { createPinnedWindows } from "../pinned-windows.js";
+import { onPreferenceChange } from "../preferences.js";
 import { createAnchoredMenu } from "../primitives/anchored-menu.js";
 import { cancelViewAnimation, exposeFilmCameraHook, showPinnedOriginal, zoomAt, zoomTo } from "./camera.js";
 import { onWorldMouseOut, onWorldMouseOver, scheduleEdges, scheduleNodeEdges } from "./edges.js";
 import { layoutNode } from "./gestures.js";
 import { onCardMenuClick } from "./menu.js";
+import {
+  canPinWindow,
+  nodePin,
+  persistCanvasExtension,
+  pinnedFontScale,
+  setPinnedFontScale,
+  syncNodePinPresentation,
+} from "./pins.js";
 import { r } from "./runtime.js";
 import { tidy } from "./tidy.js";
 import { initViewportPan, onViewportDblClick, onViewportWheel } from "./viewport.js";
@@ -83,31 +91,13 @@ export function defaultCanvasHooks() {
     persistNode: function () {},
     persistNodesBulk: function () {},
     scheduleViewSave: function () {},
+    createCanvasMaintenance: null,
     // Docked notes render on the cards this module owns, so the canvas asks
     // for them by hook rather than reaching into their module.
     renderDockedNotes: function () {},
     positionDockedNotes: function () {},
     closeDockedNotePopover: function () {},
   };
-}
-
-export function canPinWindow(node) {
-  return !!node && !node._ephemeral && !isDockedNote(node);
-}
-
-export function nodePin(node) {
-  if (!canPinWindow(node)) return null;
-  const pin = node.view && node.view.pin;
-  if (
-    !pin ||
-    !Number.isFinite(pin.x) ||
-    !Number.isFinite(pin.y) ||
-    !Number.isFinite(pin.scale) ||
-    pin.scale < MIN_SCALE ||
-    pin.scale > MAX_SCALE
-  )
-    return null;
-  return pin;
 }
 
 export function canvasCard(node) {
@@ -118,15 +108,7 @@ export function canvasBody(node) {
   return node && (node.canvasBodyEl || node.bodyEl);
 }
 
-export function persistCanvasExtension(node) {
-  postBrowserEvent({ type: "node_extensions_patch", node_id: node.id, namespace: "canvas", value: node.view });
-}
-
-export function syncNodePinPresentation(node) {
-  if (!node || !node.el) return;
-  const pin = nodePin(node);
-  r.pinnedWindows?.sync(node, pin);
-}
+export { canPinWindow, nodePin, persistCanvasExtension, pinnedFontScale, setPinnedFontScale, syncNodePinPresentation };
 
 export function syncNodeCanvasPresentation(node) {
   layoutNode(node);
@@ -159,11 +141,27 @@ export function initCanvasView(hooks) {
   r.lifecycle.register(hooks);
   cleanupCanvasView(false);
   const canvasScope = r.lifecycle.beginInit();
+  if (!frozen && typeof r.lifecycle.hooks.createCanvasMaintenance === "function") {
+    r.canvasMaintenance = r.lifecycle.hooks.createCanvasMaintenance();
+    canvasScope.addCleanup(function () {
+      r.canvasMaintenance?.dispose();
+      r.canvasMaintenance = null;
+    });
+  }
   r.pinnedWindows = createPinnedWindows({
     layer: document.getElementById("pinned-windows"),
     readOnly: frozen,
     onChange: function (node) {
       persistCanvasExtension(node);
+    },
+    // The proxy shows the card as it lives in the document — the authorial
+    // text size, not whatever the pinned window has been dialed to.
+    prepareProxy: function (node, visual) {
+      const surfaces = visual.querySelectorAll(".doc-content, .note-editor");
+      for (let i = 0; i < surfaces.length; i++) {
+        if (surfaces[i].dataset.nodeId !== node.id) continue;
+        surfaces[i].style.fontSize = fontPx(CANVAS_BASE, node.font_scale || 1) + "px";
+      }
     },
     onShowOriginal: showPinnedOriginal,
     onUnpin: function (node) {
@@ -177,6 +175,14 @@ export function initCanvasView(hooks) {
     r.pinnedWindows?.dispose();
     r.pinnedWindows = null;
   });
+  // A global reading-scale change resizes the live surfaces in core, but the
+  // inert pin proxies carry no node id — re-render them under the new scale.
+  canvasScope.addCleanup(
+    onPreferenceChange(function (kind) {
+      if (kind !== "reading-scale") return;
+      for (const id in nodes) if (nodePin(nodes[id])) syncNodePinPresentation(nodes[id]);
+    }),
+  );
   if (typeof ResizeObserver === "function")
     r.cardResizeObserver = new ResizeObserver(function (entries) {
       for (let i = 0; i < entries.length; i++) {
@@ -242,6 +248,8 @@ export function cleanupCanvasView(resetHooks) {
   r.suppressClickUntil = 0;
   r.cardMenuController = null;
   r.cardMenuNode = null;
+  r.canvasMaintenance?.dispose();
+  r.canvasMaintenance = null;
   r.pinnedWindows?.dispose();
   r.pinnedWindows = null;
   cancelViewAnimation();

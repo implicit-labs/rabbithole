@@ -1,3 +1,5 @@
+import { stripNodeAttention } from "../../core/hole/node.js";
+
 const DOCUMENT_EVENTS = new Set([
   "node_answered",
   "node_deleted",
@@ -41,6 +43,7 @@ export function applyServerEvent(store, message, options = {}) {
     node.base_url = message.base_url || null;
     node.base_url_source = message.base_url_source || null;
     node.origin = message.origin || node.origin || null;
+    node.extensions = stripNodeAttention(node.extensions);
     invalidated.add("document");
     invalidated.add("status");
   } else if (type === "node_progress" && node.status === "pending") {
@@ -60,11 +63,14 @@ export function applyServerEvent(store, message, options = {}) {
     if (message.namespace === "pdf") node.source = Object.keys(value).length ? value : null;
     else if (message.namespace === "canvas") {
       const docked = node.view?.docked === true;
-      node.view = { ...value, ...(docked ? { docked: true } : {}) };
+      const reaction = node.view?.reaction === true;
+      node.view = { ...value, ...(docked ? { docked: true } : {}), ...(reaction ? { reaction: true } : {}) };
     } else if (message.namespace === "note") {
       node.view = { ...node.view };
       if (value.docked === true) node.view.docked = true;
       else delete node.view.docked;
+      if (value.reaction === true) node.view.reaction = true;
+      else delete node.view.reaction;
     } else if (message.namespace === "learn") node.progress = value;
     else node.extensions = { ...(node.extensions || {}), [message.namespace]: message.value };
     result.namespace = message.namespace;

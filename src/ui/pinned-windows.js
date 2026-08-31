@@ -57,6 +57,7 @@ export function createPinnedWindows(options) {
       renderFrame: 0,
       movingCard: true,
       pinnedActions: [],
+      pinBadge: null,
       graphStyle: {
         height: source.style.height,
         minHeight: source.style.minHeight,
@@ -107,8 +108,33 @@ export function createPinnedWindows(options) {
   }
 
   function syncPinnedActions(entry) {
-    const acts = entry.card.querySelector(":scope > .card-head > .card-acts");
-    if (!acts) return;
+    const head = entry.card.querySelector(":scope > .card-head");
+    const acts = head?.querySelector(":scope > .card-acts");
+    if (!head || !acts) return;
+    if (!entry.pinBadge) {
+      // The filled pin leading the title is the pinned state and the unpin
+      // control merged into one element; read-only holes keep the state marker
+      // without the affordance.
+      const badge = document.createElement(options.readOnly ? "span" : "button");
+      badge.className = "pinned-pin";
+      badge.innerHTML = iconSvg("pin-active");
+      if (options.readOnly) {
+        badge.setAttribute("role", "img");
+        badge.setAttribute("aria-label", "Pinned to screen");
+        badge.title = "Pinned to screen";
+      } else {
+        const button = /** @type {HTMLButtonElement} */ (badge);
+        button.type = "button";
+        button.dataset.pinnedAction = "unpin";
+        button.setAttribute("aria-label", "Unpin window");
+        button.title = "Unpin window";
+        button.addEventListener("click", function (event) {
+          event.stopPropagation();
+          options.onUnpin?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
+        });
+      }
+      entry.pinBadge = badge;
+    }
     if (!entry.pinnedActions.length) {
       const focus = iconButton("locate", "Focus original on canvas", "focus-original");
       focus.addEventListener("click", function (event) {
@@ -116,15 +142,8 @@ export function createPinnedWindows(options) {
         options.onShowOriginal?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
       });
       entry.pinnedActions.push(focus);
-      if (!options.readOnly) {
-        const unpin = iconButton("pin-active", "Unpin window", "unpin");
-        unpin.addEventListener("click", function (event) {
-          event.stopPropagation();
-          options.onUnpin?.(entry.node, event.detail === 0 ? "keyboard" : "pointer");
-        });
-        entry.pinnedActions.push(unpin);
-      }
     }
+    head.insertBefore(entry.pinBadge, head.firstChild);
     const divider = entry.node.actDivider;
     for (let i = 0; i < entry.pinnedActions.length; i++)
       acts.insertBefore(entry.pinnedActions[i], divider || acts.firstChild);
@@ -153,6 +172,9 @@ export function createPinnedWindows(options) {
     visual.style.maxHeight = entry.node.collapsed ? "" : entry.graphStyle.maxHeight;
     visual.inert = true;
     visual.setAttribute("aria-hidden", "true");
+    // The caller restyles the clone as the card lives in the graph (e.g. the
+    // authorial text size) while its node ids are still intact to match on.
+    options.prepareProxy?.(entry.node, visual);
     visual.querySelectorAll("[id]").forEach(function (el) {
       el.removeAttribute("id");
     });
@@ -165,6 +187,10 @@ export function createPinnedWindows(options) {
     visual.querySelectorAll("*").forEach(function (el) {
       for (let i = 0; i < DUPLICATE_REFERENCE_ATTRIBUTES.length; i++)
         el.removeAttribute(DUPLICATE_REFERENCE_ATTRIBUTES[i]);
+    });
+    // The proxy is the card as it lives in the graph: no pinned chrome.
+    visual.querySelectorAll(".pinned-pin, .pinned-window-action").forEach(function (el) {
+      el.remove();
     });
 
     const overlay = document.createElement("button");
@@ -326,6 +352,7 @@ export function createPinnedWindows(options) {
     entry.pinnedActions.forEach(function (action) {
       action.remove();
     });
+    entry.pinBadge?.remove();
     if (entry.card?.isConnected) {
       entry.origin.before(entry.card);
       entry.card.classList.remove("pinned-window-card");

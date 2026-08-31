@@ -81,6 +81,7 @@ function defaultCoreHooks() {
     ensureNodeHtml: function () {},
     persistNode: function () {},
     scheduleEdges: function () {},
+    modeChanged: function () {},
     revealDockedNote: function () {
       return false;
     },
@@ -231,6 +232,7 @@ export function setCurrentNodeId(id) {
 export function setModeValue(value) {
   mode = value;
   holeStore.patch({ mode: value });
+  coreHooks.modeChanged(value);
 }
 export function setClosedState(value, reason) {
   closed = !!value;
@@ -296,9 +298,23 @@ export function isVisible(node, cache) {
 export function fontPx(base, scale) {
   return Math.round(base * readingScale() * normalizeFontScale(scale));
 }
-function normalizeFontScale(value) {
+export function normalizeFontScale(value) {
   if (!Number.isFinite(value)) return 1;
   return Math.round(Math.min(MAX_FS, Math.max(MIN_FS, value)) * 100) / 100;
+}
+/*
+ * A pinned window owns its own text size: the pin carries a presentation
+ * fontScale that is never written back to the authorial font_scale, so the
+ * canvas surface shows the pin's size while pinned and the document keeps the
+ * size it had before pinning. Reader surfaces always read the authorial scale.
+ */
+export function surfaceFontScale(node, surfaceKind) {
+  if (!node) return 1;
+  if (surfaceKind !== "reader") {
+    const pin = node.view && node.view.pin;
+    if (pin && Number.isFinite(pin.fontScale)) return pin.fontScale;
+  }
+  return node.font_scale;
 }
 // The global scale changed under every card at once — repaint the sizes the
 // document itself never knew about.
@@ -308,8 +324,11 @@ export function refreshDocumentTextSizes() {
   for (let i = 0; i < surfaces.length; i++) {
     const surface = surfaces[i];
     const node = nodes[surface.dataset.nodeId];
+    // Pin proxies carry no node id; their size is owned by the proxy render,
+    // so a global change must not clobber them back to scale 1.
+    if (!node) continue;
     const base = surface.dataset.surface === "reader" ? READER_BASE : CANVAS_BASE;
-    surface.style.fontSize = fontPx(base, node ? node.font_scale : 1) + "px";
+    surface.style.fontSize = fontPx(base, surfaceFontScale(node, surface.dataset.surface)) + "px";
   }
   coreHooks.scheduleEdges();
 }
@@ -321,7 +340,7 @@ export function setNodeFontScale(node, value) {
   for (let i = 0; i < surfaces.length; i++) {
     if (surfaces[i].dataset.nodeId !== node.id) continue;
     const base = surfaces[i].dataset.surface === "reader" ? READER_BASE : CANVAS_BASE;
-    surfaces[i].style.fontSize = fontPx(base, node.font_scale) + "px";
+    surfaces[i].style.fontSize = fontPx(base, surfaceFontScale(node, surfaces[i].dataset.surface)) + "px";
   }
   coreHooks.persistNode(node);
   // Reflowed text moves the inline marks edges anchor to.
@@ -549,7 +568,7 @@ export function buildDocContent(node, base) {
   dc.className = "doc-content md";
   dc.dataset.nodeId = node.id;
   dc.dataset.surface = base === CANVAS_BASE ? "canvas" : "reader";
-  dc.style.fontSize = fontPx(base, node.font_scale) + "px";
+  dc.style.fontSize = fontPx(base, surfaceFontScale(node, dc.dataset.surface)) + "px";
   if (node.status === "pending") {
     if (node.html) fillStreaming(dc, node, visualSurfaceKey(node, base));
     else dc.appendChild(buildLoading(node));

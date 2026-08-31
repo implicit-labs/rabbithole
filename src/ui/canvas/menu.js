@@ -1,4 +1,4 @@
-import { isDockedNote, isNoteNode } from "../../core/hole/ask.js";
+import { isDockedNote, isNoteNode, isReactionNote } from "../../core/hole/ask.js";
 import { iconButtonMarkup } from "../../core/html/markup.js";
 import { changeNodeFontScale, childrenOf, closed, frozen, resetNodeFontScale, rootId } from "../core.js";
 import { closestEl, qs } from "../dom.js";
@@ -7,7 +7,14 @@ import { cardButton } from "./card-composer.js";
 import { branchAllCollapsed, setBranchCollapsed, setChildrenCollapsed, toggleCollapse } from "./fold.js";
 import { convertNoteToAsk, startTitleEditing } from "./note-convert.js";
 import { r } from "./runtime.js";
-import { canPinWindow, nodePin, setWindowPinned } from "./shared.js";
+import { canPinWindow, nodePin, pinnedFontScale, setPinnedFontScale, setWindowPinned } from "./shared.js";
+
+// The menu reads and writes whichever presentation the card is in: a pinned
+// window owns its own text size, so its % never reflects — or touches — the
+// document's authorial font_scale, and unpinning restores the pre-pin size.
+function menuFontScale(node) {
+  return nodePin(node) ? pinnedFontScale(node) : node.font_scale || 1;
+}
 
 export function syncCollapseButton(node, btn) {
   // "card", not "document": expanding a *document* is the reader button's
@@ -52,6 +59,7 @@ export function canConvertNote(node) {
     !closed &&
     node.id !== rootId &&
     isNoteNode(node) &&
+    !isReactionNote(node) &&
     childrenOf(node.id).length === 0
   );
 }
@@ -64,7 +72,7 @@ export function openCardMenu(node, trigger, openedByKeyboard) {
   // a gesture like zoom, drag, or pan: the glide yields to it.
   cancelViewAnimation();
   r.cardMenuNode = node;
-  document.getElementById("cm-textreset").textContent = Math.round((node.font_scale || 1) * 100) + "%";
+  document.getElementById("cm-textreset").textContent = Math.round(menuFontScale(node) * 100) + "%";
   // Collapsing is a way of looking, not a change to the hole, so the fold
   // group survives into a frozen snapshot exactly as the header's own
   // collapse button does.
@@ -88,10 +96,12 @@ export function onCardMenuClick(e) {
   const node = r.cardMenuNode;
   if (!button || !node) return;
   if (button.id === "cm-textdown" || button.id === "cm-textup" || button.id === "cm-textreset") {
-    const scale =
-      button.id === "cm-textreset"
+    const delta = button.id === "cm-textup" ? 0.1 : -0.1;
+    const scale = nodePin(node)
+      ? setPinnedFontScale(node, button.id === "cm-textreset" ? 1 : pinnedFontScale(node) + delta)
+      : button.id === "cm-textreset"
         ? resetNodeFontScale(node)
-        : changeNodeFontScale(node, button.id === "cm-textup" ? 0.1 : -0.1);
+        : changeNodeFontScale(node, delta);
     document.getElementById("cm-textreset").textContent = Math.round(scale * 100) + "%";
     return;
   }

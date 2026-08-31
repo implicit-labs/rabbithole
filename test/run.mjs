@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Every spawned test gets a throwaway store dir. Tests that boot the real
+// server modules otherwise default to ~/.rabbithole and write holes and
+// host-persisted preferences into the operator's live data.
+const hermeticStoreDir = await fs.mkdtemp(path.join(os.tmpdir(), "rabbithole-test-store-"));
 const testDir = path.join(rootDir, "test");
 const tier = process.argv[2] || "all";
 const tiers = ["unit", "contracts", "integration", "e2e", "performance", "packaging"];
@@ -74,7 +79,7 @@ function testJob(file) {
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: rootDir, env: process.env, stdio: "inherit" });
+    const child = spawn(command, args, { cwd: rootDir, env: { ...process.env, RABBITHOLE_DIR: hermeticStoreDir }, stdio: "inherit" });
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve(signal ? 1 : (code ?? 1)));
   });

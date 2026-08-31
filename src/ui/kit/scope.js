@@ -161,6 +161,13 @@ export function nextFrame(callback) {
 
 /** @param {number | ReturnType<typeof setTimeout>} handle */
 export function cancelFrame(handle) {
-  if (typeof handle === "number" && typeof cancelAnimationFrame === "function") cancelAnimationFrame(handle);
+  if (
+    typeof handle === "number" &&
+    typeof cancelAnimationFrame === "function" &&
+    typeof requestAnimationFrame === "function"
+  ) {
+    cancelAnimationFrame(handle);
+    return;
+  }
   clearTimeout(handle);
 }

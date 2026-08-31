@@ -1,7 +1,10 @@
 {
+  "auto-tidy.test.mjs": { "ms": 55000, "browsers": [] },
   "canvas-edge-scroll.test.mjs": { "ms": 2500, "browsers": [] },
   "cross-host-journey.test.mjs": { "ms": 5500, "browsers": [] },
   "enter-composition.test.mjs": { "ms": 3500, "browsers": [] },
+  "preferences-persistence.test.mjs": { "ms": 4000, "browsers": [] },
+  "reactions.test.mjs": { "ms": 1800, "browsers": [] },
   "reducer-browser-parity.test.mjs": { "ms": 1500, "browsers": [] },
   "selection-popover.test.mjs": { "ms": 1300, "browsers": [] },
   "ui-primitives-browsers.test.mjs": { "ms": 12000, "browsers": ["firefox", "webkit"] },

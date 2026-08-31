@@ -21,6 +21,7 @@ export const r = {
   suppressClickUntil: 0,
   cardMenuController: null,
   cardMenuNode: null,
+  canvasMaintenance: null,
   pinnedWindows: null,
   COLLAPSED_STACK_GAP: 12,
   COLLAPSED_STACK_INDENT: 24,

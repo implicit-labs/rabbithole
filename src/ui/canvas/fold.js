@@ -160,6 +160,7 @@ export function toggleCollapse(node) {
   if (node._ephemeral) return;
   const restored = node.collapsed ? restoreCollapseStacksFor([node], false) : [];
   if (!applyCollapsedState(node, !node.collapsed)) return;
+  if (!node.collapsed) r.canvasMaintenance?.branchExpanded(node.id);
   renderVisibility();
   drawEdges();
   if (restored.length) r.lifecycle.hooks.persistNodesBulk(Array.from(new Set(restored.concat(node))));
@@ -176,6 +177,7 @@ export function setBranchCollapsed(node, collapsed) {
   if (collapsed) compactCollapsedBranch(node, branch);
   branch.forEach(layoutNode);
   if (changed.length || collapsed) r.lifecycle.hooks.persistNodesBulk(branch);
+  if (!collapsed) r.canvasMaintenance?.branchExpanded(node.id);
   renderVisibility();
   drawEdges();
 }

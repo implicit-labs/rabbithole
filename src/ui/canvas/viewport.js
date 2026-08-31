@@ -100,8 +100,11 @@ export function onViewportWheel(e) {
     e.preventDefault();
     const nb = r.wheelCard ? r.wheelCard.querySelector(".card-body") : null;
     if (nb) {
+      const beforeLeft = nb.scrollLeft;
+      const beforeTop = nb.scrollTop;
       nb.scrollLeft += e.deltaX;
       nb.scrollTop += e.deltaY;
+      if (nb.scrollLeft !== beforeLeft || nb.scrollTop !== beforeTop) r.canvasMaintenance?.cardScrolled(r.wheelCard);
     }
     return;
   }
@@ -119,6 +122,7 @@ export function onViewportWheel(e) {
     el = el.parentNode;
   }
   if (!consumable) e.preventDefault();
+  else r.canvasMaintenance?.cardScrolled(r.wheelCard);
 }
 
 export function frameAll(animate, source) {

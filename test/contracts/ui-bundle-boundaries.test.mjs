@@ -20,16 +20,43 @@ const result = await esbuild.build({
 const inputs = Object.keys(result.metafile.inputs);
 const forbidden = inputs.filter((input) =>
   input.startsWith("src/ui/hosts/live/")
+  || input === "src/ui/preference-host-backing.js"
   || input.startsWith("src/web/")
 );
 
 assert.deepEqual(
   forbidden,
   [],
-  `frozen UI must not reach anything under hosts/live:\n${forbidden.join("\n")}`,
+  `frozen UI must not reach live host modules or browser persistence:\n${forbidden.join("\n")}`,
+);
+
+const liveResult = await esbuild.build({
+  entryPoints: ["src/ui/entry.js"],
+  bundle: true,
+  write: false,
+  metafile: true,
+  format: "iife",
+  platform: "browser",
+  target: "es2018",
+  external: ["pdfjs-dist/build/pdf.mjs"],
+  loader: { ".css": "text" },
+  logLevel: "silent",
+});
+const autoTidyImporters = Object.entries(liveResult.metafile.inputs)
+  .filter(([, input]) => input.imports.some((dependency) => dependency.path === "src/ui/canvas/auto-tidy.js"))
+  .map(([input]) => input)
+  .sort();
+assert.deepEqual(
+  autoTidyImporters,
+  ["src/ui/hosts/live/index.js"],
+  "only the live-host composition may own the auto-tidy engine and its guarded mode notification shim",
 );
 
 const frozenBundle = result.outputFiles[0].text;
+for (const liveOnlyText of ["rh-auto-tidy", "Folds branches you've moved on from", "data-tidy-enabled"]) {
+  assert.doesNotMatch(frozenBundle, new RegExp(liveOnlyText), `frozen UI must exclude auto-tidy: ${liveOnlyText}`);
+}
+assert.doesNotMatch(frozenBundle, /preferences_patch/, "frozen UI must exclude the machine preference writer");
 const removedActivityUi = `${CANVAS_SHELL}\n${CANVAS_STYLES}\n${frozenBundle}`;
 for (const pattern of [
   /id=["']since["']/,

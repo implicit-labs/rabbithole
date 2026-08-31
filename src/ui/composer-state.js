@@ -1,5 +1,14 @@
 import { followupCommitFromEnter, isComposingText } from "./input-intent.js";
 
+/** @param {{ text: HTMLTextAreaElement, hasDraft?: boolean | (() => boolean) }} elements */
+export function composerHasDraft(elements) {
+  return typeof elements.hasDraft === "function"
+    ? elements.hasDraft()
+    : typeof elements.hasDraft === "boolean"
+      ? elements.hasDraft
+      : !!elements.text.value.trim();
+}
+
 /**
  * @param {{ text: HTMLTextAreaElement, commits: Iterable<HTMLButtonElement>, lenses?: Iterable<HTMLButtonElement>, wrap: Element, hasDraft?: boolean | (() => boolean) }} elements
  * @param {{ phase: "frozen" | "closed" | "away" | "live", pending: boolean, disabled?: boolean, unavailable?: boolean }} state
@@ -12,12 +21,7 @@ export function applyComposerState(elements, state, copy) {
   // already on screen, while asks need the parent answer to settle first.
   const down = !!(state.phase === "frozen" || state.phase === "closed" || state.unavailable);
   const commitsDown = down || !!state.disabled;
-  const hasDraft =
-    typeof elements.hasDraft === "function"
-      ? elements.hasDraft()
-      : typeof elements.hasDraft === "boolean"
-        ? elements.hasDraft
-        : !!elements.text.value.trim();
+  const hasDraft = composerHasDraft(elements);
   elements.text.disabled = down;
   elements.wrap.classList.toggle("disabled", down);
   const placeholderPhase =
@@ -42,7 +46,8 @@ export function applyComposerState(elements, state, copy) {
  *   hasDraft?: () => boolean,
  *   commitFromEnter?: (event: KeyboardEvent) => string | null,
  *   onCommit: (kind: string, event: Event) => void,
- *   onLens: (lens: string, event: Event) => void }} surface */
+ *   onLens: (lens: string, event: Event) => void,
+ *   onReaction?: (reaction: "up" | "down", event: Event) => void }} surface */
 export function wireComposerActions(surface) {
   const listen =
     surface.listen ||
@@ -61,6 +66,9 @@ export function wireComposerActions(surface) {
     if (!button || button.disabled) return;
     if (button.dataset.commit && hasDraft()) surface.onCommit(button.dataset.commit, e);
     else if (button.dataset.lens) surface.onLens(button.dataset.lens, e);
+    else if ((button.dataset.react === "up" || button.dataset.react === "down") && surface.onReaction) {
+      surface.onReaction(button.dataset.react, e);
+    }
   });
   listen(surface.text, "keydown", function (e) {
     const commit = commitFromEnter(e);
@@ -97,6 +105,25 @@ export function wireComposerActions(surface) {
       if (!lens) return;
       e.preventDefault();
       if (!lens.disabled) surface.onLens(lens.dataset.lens || "", e);
+      return;
+    }
+    if (
+      surface.onReaction &&
+      !isComposingText(e) &&
+      surface.text.value === "" &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.key === "ArrowUp" || e.key === "ArrowDown")
+    ) {
+      const reaction = e.key === "ArrowUp" ? "up" : "down";
+      const thumb = /** @type {HTMLButtonElement | null} */ (
+        surface.actions.querySelector('.thumb[data-react="' + reaction + '"]')
+      );
+      if (!thumb) return;
+      e.preventDefault();
+      if (!thumb.disabled) surface.onReaction(reaction, e);
     }
   });
 }

@@ -1,6 +1,6 @@
 /** @protects lifecycle capability contracts. */
 import assert from "node:assert/strict";
-import { createCleanupScope } from "../../src/ui/kit/scope.js";
+import { cancelFrame, createCleanupScope, nextFrame } from "../../src/ui/kit/scope.js";
 
 const scope = createCleanupScope();
 const target = new EventTarget();
@@ -35,5 +35,28 @@ delayed.dispose();
 await new Promise((resolve) => setTimeout(resolve, 20));
 assert.equal(timeoutFired, false);
 assert.equal(intervalFired, false);
+
+const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+const originalClearTimeout = globalThis.clearTimeout;
+const canceledFrames = [];
+const clearedTimers = [];
+try {
+  globalThis.requestAnimationFrame = () => 7;
+  globalThis.cancelAnimationFrame = (id) => canceledFrames.push(id);
+  globalThis.clearTimeout = (id) => clearedTimers.push(id);
+  const frame = nextFrame(() => {});
+  cancelFrame(frame);
+  assert.deepEqual(canceledFrames, [7]);
+  assert.deepEqual(
+    clearedTimers,
+    [],
+    "canceling a browser animation frame must not clear an unrelated timer with the same numeric id",
+  );
+} finally {
+  globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+  globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  globalThis.clearTimeout = originalClearTimeout;
+}
 
 console.log("ok lifecycle: owned resources dispose once in reverse order");
