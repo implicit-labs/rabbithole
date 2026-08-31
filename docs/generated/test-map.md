@@ -66,8 +66,6 @@ Each description is harvested from the test file's `@protects` declaration.
 - `test/integration/artifact-portability.test.mjs` — artifact portability capability contracts.
 - `test/integration/bridge-failure-modes.test.mjs` — bridge failure modes capability contracts.
 - `test/integration/bridge-http.test.mjs` — bridge http capability contracts.
-- `test/integration/claude-isolation.test.mjs` — claude isolation capability contracts.
-- `test/integration/codex-isolation.test.mjs` — codex isolation capability contracts.
 - `test/integration/custom-endpoint.test.mjs` — custom endpoint capability contracts.
 - `test/integration/generation-lifecycle.test.mjs` — generation lifecycle capability contracts.
 - `test/integration/image-experience.test.mjs` — image experience capability contracts.
@@ -109,4 +107,9 @@ Each description is harvested from the test file's `@protects` declaration.
 ## packaging
 
 - `test/packaging/install-smoke.test.mjs` — install smoke capability contracts.
+
+## isolation-live
+
+- `test/isolation-live/claude-isolation.test.mjs` — claude isolation capability contracts.
+- `test/isolation-live/codex-isolation.test.mjs` — codex isolation capability contracts.
 

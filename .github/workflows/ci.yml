@@ -45,6 +45,8 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      PLAYWRIGHT_BROWSERS: "chromium"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -55,17 +57,20 @@ jobs:
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Resolve Playwright browser cache suffix
+        id: playwright-browsers
+        run: echo "cache-suffix=${PLAYWRIGHT_BROWSERS// /-}" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ steps.playwright-browsers.outputs.cache-suffix }}
       # Chromium's OS libraries are preinstalled on the runner image, so no
       # install-deps here — only the browser binary on a cache miss.
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium
+        run: npx playwright install ${PLAYWRIGHT_BROWSERS}
       - run: npm run build
       # Contracts ride here, not in checks: compatibility-security launches
       # chromium, and this is the lightest job that already installs it.
@@ -81,6 +86,8 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
+    env:
+      PLAYWRIGHT_BROWSERS: "chromium firefox webkit"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,15 +98,18 @@ jobs:
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Resolve Playwright browser cache suffix
+        id: playwright-browsers
+        run: echo "cache-suffix=${PLAYWRIGHT_BROWSERS// /-}" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium-firefox-webkit
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ steps.playwright-browsers.outputs.cache-suffix }}
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium firefox webkit
+        run: npx playwright install ${PLAYWRIGHT_BROWSERS}
       # Only firefox/webkit need apt OS libraries (chromium's are preinstalled),
       # and each shard installs only the browsers its bin actually launches.
       # The shard script owns the bin assignment, so ask it.
@@ -149,6 +159,8 @@ jobs:
   performance:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      PLAYWRIGHT_BROWSERS: "chromium"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -159,15 +171,18 @@ jobs:
       - name: Resolve Playwright version
         id: playwright-version
         run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Resolve Playwright browser cache suffix
+        id: playwright-browsers
+        run: echo "cache-suffix=${PLAYWRIGHT_BROWSERS// /-}" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ steps.playwright-browsers.outputs.cache-suffix }}
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium
+        run: npx playwright install ${PLAYWRIGHT_BROWSERS}
       - run: npm run build
       - run: npm run test:performance
 

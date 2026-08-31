@@ -53,6 +53,7 @@ through `npx` without adding it to the project.
 | `npm run test:e2e` | Run real-browser product and cross-host journeys. |
 | `npm run test:performance` | Check recorded size and timing ceilings. |
 | `npm run test:packaging` | Pack and install Rabbithole in a clean consumer project, then verify MCP startup. |
+| `npm run check:isolation-live` | Run opt-in Claude and Codex isolation acceptance checks; installed agent binaries are required. |
 | `npm run eval` | Run opt-in live-provider quality evaluations; credentials are required. |
 | `npm run build:publish` | Assemble the ignored `publish/` directory for Cloudflare Pages. |
 
@@ -96,6 +97,9 @@ Add the smallest test that proves the behavior:
 4. Use `test/e2e/` for browser journeys or movement between hosts.
 5. Use `test/performance/` for measured regression ceilings and
    `test/packaging/` for clean-install behavior.
+6. Use `test/isolation-live/` for acceptance checks that require locally
+   installed Claude or Codex binaries. This directory is never part of
+   `npm test`; run it with `npm run check:isolation-live`.
 
 Every bug fix should include a regression at the lowest layer that can
 reproduce it. Prefer observable behavior over private function names or
