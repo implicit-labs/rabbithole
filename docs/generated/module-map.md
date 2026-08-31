@@ -30,6 +30,7 @@ This inventory is derived from the source tree.
 - `src/core/hole/events.js`
 - `src/core/hole/lens.js`
 - `src/core/hole/node.js`
+- `src/core/hole/reaction.js`
 - `src/core/hole/reduce.js`
 - `src/core/hole/run.js`
 - `src/core/hole/state.js`
@@ -120,6 +121,7 @@ This inventory is derived from the source tree.
 - `src/node/mcp/registry.js`
 - `src/node/mcp/server.js`
 - `src/node/mcp/store/fs-store.js`
+- `src/node/mcp/store/prefs-store.js`
 - `src/node/mcp/tools.js`
 - `src/node/pdf-crop.js`
 - `src/node/pdf-ingest.js`
@@ -151,6 +153,9 @@ This inventory is derived from the source tree.
 - `src/ui/authoring/note-editor.js`
 - `src/ui/authoring/standalone-note-submit.js`
 - `src/ui/branch-surfaces.js`
+- `src/ui/canvas-settings.js`
+- `src/ui/canvas/auto-tidy-policy.js`
+- `src/ui/canvas/auto-tidy.js`
 - `src/ui/canvas/camera.js`
 - `src/ui/canvas/card-composer.js`
 - `src/ui/canvas/card.js`
@@ -162,6 +167,7 @@ This inventory is derived from the source tree.
 - `src/ui/canvas/inline-note.js`
 - `src/ui/canvas/menu.js`
 - `src/ui/canvas/note-convert.js`
+- `src/ui/canvas/pins.js`
 - `src/ui/canvas/runtime.js`
 - `src/ui/canvas/shared.js`
 - `src/ui/canvas/standalone-note.js`
@@ -199,6 +205,7 @@ This inventory is derived from the source tree.
 - `src/ui/pdf-runtime.js`
 - `src/ui/pdf-view.js`
 - `src/ui/pinned-windows.js`
+- `src/ui/preference-host-backing.js`
 - `src/ui/preferences.js`
 - `src/ui/primitives/anchored-menu.js`
 - `src/ui/primitives/combobox.js`
