@@ -42,19 +42,28 @@ const liveResult = await esbuild.build({
   loader: { ".css": "text" },
   logLevel: "silent",
 });
-const autoTidyImporters = Object.entries(liveResult.metafile.inputs)
-  .filter(([, input]) => input.imports.some((dependency) => dependency.path === "src/ui/canvas/auto-tidy.js"))
-  .map(([input]) => input)
-  .sort();
-assert.deepEqual(
-  autoTidyImporters,
-  ["src/ui/hosts/live/index.js"],
-  "only the live-host composition may own the auto-tidy engine and its guarded mode notification shim",
-);
+for (const liveMaintenanceModule of ["src/ui/canvas/attention.js", "src/ui/canvas/auto-tidy.js"]) {
+  const importers = Object.entries(liveResult.metafile.inputs)
+    .filter(([, input]) => input.imports.some((dependency) => dependency.path === liveMaintenanceModule))
+    .map(([input]) => input)
+    .sort();
+  assert.deepEqual(
+    importers,
+    ["src/ui/hosts/live/index.js"],
+    "only the live-host composition may own " + liveMaintenanceModule,
+  );
+  assert.equal(inputs.includes(liveMaintenanceModule), false, "frozen UI must exclude " + liveMaintenanceModule);
+}
 
 const frozenBundle = result.outputFiles[0].text;
-for (const liveOnlyText of ["rh-auto-tidy", "Folds branches you've moved on from", "data-tidy-enabled"]) {
-  assert.doesNotMatch(frozenBundle, new RegExp(liveOnlyText), `frozen UI must exclude auto-tidy: ${liveOnlyText}`);
+for (const liveOnlyText of [
+  "attention",
+  "auto-tidy: false fold",
+  "rh-auto-tidy",
+  "Folds branches you've moved on from",
+  "data-tidy-enabled",
+]) {
+  assert.doesNotMatch(frozenBundle, new RegExp(liveOnlyText), `frozen UI must exclude live maintenance: ${liveOnlyText}`);
 }
 assert.doesNotMatch(frozenBundle, /preferences_patch/, "frozen UI must exclude the machine preference writer");
 const removedActivityUi = `${CANVAS_SHELL}\n${CANVAS_STYLES}\n${frozenBundle}`;

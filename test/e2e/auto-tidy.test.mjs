@@ -199,6 +199,7 @@ try {
   await context.close();
 
   assert(betaId, "the fixture retains the warm branch identity");
+  await verifyEnableMidSession(app);
   await verifyFreshAnswerInvalidation(app);
 } finally {
   await app.close();
@@ -258,6 +259,72 @@ async function setComposerDraft(card, value) {
     textarea.value = next;
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: next }));
   }, value);
+}
+
+async function verifyEnableMidSession(app) {
+  const context = await app.browser.newContext();
+  try {
+    await seedConfiguredOpenRouter(context);
+    await context.addInitScript(() => {
+      localStorage.setItem("rh-auto-tidy-grace", "5");
+    });
+    const page = await context.newPage();
+    await routeProvider(page, {
+      streams: [
+        ["TITLE: Read while off\n", "First answer read before enabling."],
+        ["TITLE: Warm while off\n", "Second answer becomes the warm spine."],
+      ],
+    });
+    await page.goto(app.baseUrl, { waitUntil: "networkidle" });
+    await createDocument(page, "# Enable-mid-session fixture\n\nFirst anchor.\n\nSecond anchor.");
+
+    await askFromSelection(page, "First anchor", "Why first?");
+    const first = page.locator('.card:not(.root)', { hasText: "First answer read before enabling." });
+    await first.waitFor();
+    const firstId = await first.getAttribute("data-id");
+    await waitForStoredStatus(page, firstId, "answered");
+    await first.locator(".card-title").click();
+
+    await askFromSelection(page, "Second anchor", "Why second?");
+    const second = page.locator('.card:not(.root)', { hasText: "Second answer becomes the warm spine." });
+    await second.waitFor();
+    const secondId = await second.getAttribute("data-id");
+    await waitForStoredStatus(page, secondId, "answered");
+    await second.locator(".card-title").click();
+    await page.waitForFunction(async (ids) => {
+      const hole = await window.__rabbitholeTest.readStoredHole();
+      return ids.every((id) => !!hole.nodes.find((node) => node.id === id)?.extensions.attention?.seen_at);
+    }, [firstId, secondId]);
+    assert.equal(await first.evaluate((card) => card.classList.contains("collapsed")), false);
+    assert.equal(await second.evaluate((card) => card.classList.contains("collapsed")), false);
+
+    await page.locator("#t-settings").click();
+    await page.getByRole("tab", { name: "Canvas" }).click();
+    assert.equal(await page.locator("[data-tidy-enabled]").isChecked(), false, "the journey starts with folding off");
+    await page.locator("[data-tidy-enabled]").check();
+    await page.locator("[data-settings-close]").click();
+    await page.waitForTimeout(1000);
+    assert.equal(
+      await first.evaluate((card) => card.classList.contains("collapsed")),
+      false,
+      "enabling starts a fresh grace clock instead of backfilling elapsed time",
+    );
+    await page.waitForSelector('.card[data-id="' + firstId + '"].collapsed', { timeout: 12000 });
+    assert.equal(
+      await second.evaluate((card) => card.classList.contains("collapsed")),
+      false,
+      "the last card engaged while off becomes the warm spine when folding starts",
+    );
+  } finally {
+    await context.close();
+  }
+}
+
+async function waitForStoredStatus(page, id, status) {
+  await page.waitForFunction(async (expected) => {
+    const hole = await window.__rabbitholeTest.readStoredHole();
+    return hole.nodes.find((node) => node.id === expected.id)?.status === expected.status;
+  }, { id: id, status: status });
 }
 
 async function verifyFreshAnswerInvalidation(app) {

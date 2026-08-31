@@ -1,16 +1,6 @@
 import { systemClock } from "../../core/clock.js";
-import { nodeNeedsReading } from "../../core/hole/node.js";
 import { composerHasDraft } from "../composer-state.js";
-import {
-  childrenOf,
-  currentNodeId,
-  mode,
-  nodes,
-  postBrowserEvent,
-  rootId,
-  shouldReduceMotion,
-  world,
-} from "../core.js";
+import { childrenOf, currentNodeId, mode, nodes, rootId, shouldReduceMotion } from "../core.js";
 import { EASE_OUT_MOTION_CSS } from "../easing.js";
 import { autoTidyEnabled, autoTidyGraceSeconds, onPreferenceChange } from "../preferences.js";
 import { isSettingsSheetOpen } from "../settings-sheet.js";
@@ -22,22 +12,15 @@ import { r } from "./runtime.js";
 const SWEEP_MS = 5000;
 const GLIDE_MS = 320;
 
-function cardIdFromTarget(target) {
-  const element = target && target.nodeType === 1 ? target : target?.parentElement;
-  const card = element && typeof element.closest === "function" ? element.closest(".card") : null;
-  return card ? card.dataset.nodeId || card.dataset.id || null : null;
-}
-
-export function createAutoTidy() {
+export function createAutoTidy(options) {
+  const attention = options.attention;
   let warmId = currentNodeId || rootId;
   let coldSince = new Map();
   let pausedAt = 0;
   let sweepTimer = /** @type {ReturnType<typeof setInterval> | 0} */ (0);
-  let hoveredCardId = null;
   let enabled = false;
   let disposed = false;
   const glides = new Map();
-  const seenWriteCycles = new Map();
   const autoFoldProvenance = new Map();
 
   function nowForWarmth() {
@@ -152,7 +135,7 @@ export function createAutoTidy() {
     retime(now, false);
     const decisions = decideAutoTidyFolds(currentRibs(), coldSince, nodes, childrenOf, now, {
       graceMs: autoTidyGraceSeconds() * 1000,
-      hoveredCardId: hoveredCardId,
+      hoveredCardId: attention.getHoveredCardId(),
       nodePinned: nodePin,
       nodeHasDraft: nodeHasDraft,
     });
@@ -187,57 +170,17 @@ export function createAutoTidy() {
     start();
   }
 
-  function markSeen(id) {
-    const node = nodes[id];
-    if (!nodeNeedsReading(node)) return;
-    const previous = seenWriteCycles.get(id);
-    if (previous && (previous.pending || previous.extensions === node.extensions)) return;
-    const cycle = { extensions: node.extensions, pending: true };
-    seenWriteCycles.set(id, cycle);
-    postBrowserEvent({
-      type: "node_extensions_patch",
-      node_id: id,
-      namespace: "attention",
-      value: { seen_at: systemClock.now() },
-    }).then(function (result) {
-      cycle.pending = false;
-      if ((!result || !result.ok) && seenWriteCycles.get(id) === cycle) seenWriteCycles.delete(id);
-    });
-  }
-
   function engageCard(id) {
-    if (!enabled || !id || !nodes[id]) return;
+    if (!id || !nodes[id]) return;
     const card = nodes[id]?.el;
     if (card) finishGlide(card);
     syncPause();
-    markSeen(id);
     warm(id);
   }
 
-  function onAttention(event) {
-    engageCard(cardIdFromTarget(event.target));
-  }
-
-  function onSelectionChange() {
-    engageCard(cardIdFromTarget(document.getSelection()?.anchorNode));
-  }
-
-  function onMouseOver(event) {
-    const id = cardIdFromTarget(event.target);
-    if (id) hoveredCardId = id;
-  }
-
-  function onMouseOut(event) {
-    const from = cardIdFromTarget(event.target);
-    const to = cardIdFromTarget(event.relatedTarget);
-    if (from && from !== to && hoveredCardId === from) hoveredCardId = to;
-  }
-
   function modeChanged(nextMode) {
-    if (!enabled) return;
     syncPause();
-    if (nextMode === "reader") markSeen(currentNodeId || rootId);
-    if (nextMode === "canvas" || nextMode === "reader") warm(currentNodeId || rootId);
+    if (nextMode === "canvas") warm(currentNodeId || rootId);
   }
 
   function branchExpanded(id) {
@@ -249,14 +192,10 @@ export function createAutoTidy() {
     }
   }
 
-  world.addEventListener("pointerdown", onAttention, true);
-  world.addEventListener("focusin", onAttention, true);
-  world.addEventListener("mouseover", onMouseOver);
-  world.addEventListener("mouseout", onMouseOut);
-  document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("visibilitychange", syncPause);
   window.addEventListener("blur", syncPause);
   window.addEventListener("focus", syncPause);
+  const stopAttention = attention.onEngage(engageCard);
   const stopPreferences = onPreferenceChange(function (kind) {
     if (kind === "auto-tidy") syncEnabled();
   });
@@ -265,24 +204,16 @@ export function createAutoTidy() {
 
   return {
     branchExpanded: branchExpanded,
-    cardScrolled: function (card) {
-      engageCard(cardIdFromTarget(card));
-    },
     modeChanged: modeChanged,
     dispose: function () {
       if (disposed) return;
       disposed = true;
       stop();
+      stopAttention();
       stopPreferences();
-      world.removeEventListener("pointerdown", onAttention, true);
-      world.removeEventListener("focusin", onAttention, true);
-      world.removeEventListener("mouseover", onMouseOver);
-      world.removeEventListener("mouseout", onMouseOut);
-      document.removeEventListener("selectionchange", onSelectionChange);
       document.removeEventListener("visibilitychange", syncPause);
       window.removeEventListener("blur", syncPause);
       window.removeEventListener("focus", syncPause);
-      seenWriteCycles.clear();
       autoFoldProvenance.clear();
       Array.from(glides.keys()).forEach(finishGlide);
     },

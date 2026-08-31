@@ -1,6 +1,7 @@
 import checkCss from "../../../design/document/check.css";
 import mermaidCss from "../../../design/document/mermaid.css";
 import visualBaseCss from "../../../design/document/visual-base.css";
+import { createCanvasAttention } from "../../canvas/attention.js";
 import { createAutoTidy, notifyAutoTidyModeChanged } from "../../canvas/auto-tidy.js";
 import { canvasSettingsSection } from "../../canvas-settings.js";
 import { createRabbitholeUi } from "../../composition.js";
@@ -23,6 +24,29 @@ import {
   setTransportAdapter,
 } from "../../transport-status.js";
 import { setVisualStyles } from "../../visual-style-runtime.js";
+
+function createCanvasMaintenance() {
+  const attention = createCanvasAttention();
+  let autoTidy;
+  try {
+    autoTidy = createAutoTidy({ attention: attention });
+  } catch (error) {
+    attention.dispose();
+    throw error;
+  }
+  return {
+    branchExpanded: autoTidy.branchExpanded,
+    cardScrolled: attention.cardScrolled,
+    modeChanged: function (nextMode) {
+      attention.modeChanged(nextMode);
+      autoTidy.modeChanged(nextMode);
+    },
+    dispose: function () {
+      autoTidy.dispose();
+      attention.dispose();
+    },
+  };
+}
 
 export function startRabbithole(hydration, options) {
   setVisualStyles({ visualBaseCss, checkCss, mermaidCss });
@@ -67,7 +91,7 @@ export function startRabbithole(hydration, options) {
         loadMermaid: options.loadMermaid || null,
         exportSnapshot: downloadSnapshot,
         exportPortable: options.exportPortable || null,
-        canvasMaintenanceFactory: createAutoTidy,
+        canvasMaintenanceFactory: createCanvasMaintenance,
         modeChanged: notifyAutoTidyModeChanged,
         settingsSections: [canvasSettingsSection()],
       },
