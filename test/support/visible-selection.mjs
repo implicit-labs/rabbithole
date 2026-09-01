@@ -1,4 +1,32 @@
+import assert from "node:assert/strict";
+
 const DEFAULT_ROOT = ".card .doc-content[data-node-id]";
+
+/**
+ * Fail before Playwright spends its global action timeout on a selection
+ * surface that the product has deliberately made non-interactive.
+ * @param {import("playwright").Page} page
+ */
+export async function assertSelectionPopoverUsable(page) {
+  const state = await page.locator("#ask").evaluate((surface) => {
+    const rect = surface.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const bounds = {
+      left: viewport?.offsetLeft || 0,
+      top: viewport?.offsetTop || 0,
+      right: (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth),
+      bottom: (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight),
+    };
+    return {
+      anchorHidden: surface.hasAttribute("data-anchor-hidden"),
+      intersects: rect.right > bounds.left && rect.left < bounds.right && rect.bottom > bounds.top && rect.top < bounds.bottom,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      viewport: bounds,
+    };
+  });
+  assert.equal(state.anchorHidden, false, `selection popover anchor must be visible before interaction: ${JSON.stringify(state)}`);
+  assert.equal(state.intersects, true, `selection popover must intersect the viewport before interaction: ${JSON.stringify(state)}`);
+}
 
 async function waitForCanvasView(page) {
   await page.evaluate(async () => {

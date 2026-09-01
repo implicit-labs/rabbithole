@@ -98,10 +98,16 @@ for (const file of bin.files) {
   console.log(`\n--- ${path.relative(process.cwd(), file)}`);
   // Throwaway store dir: e2e tests boot real server modules, which otherwise
   // default to ~/.rabbithole and write into the operator's live data.
-  const result = spawnSync(process.execPath, [file], {
-    stdio: "inherit",
-    env: { ...process.env, RABBITHOLE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "rabbithole-test-store-")) },
-  });
+  const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), "rabbithole-test-store-"));
+  let result;
+  try {
+    result = spawnSync(process.execPath, [file], {
+      stdio: "inherit",
+      env: { ...process.env, RABBITHOLE_DIR: storeDir },
+    });
+  } finally {
+    fs.rmSync(storeDir, { recursive: true, force: true });
+  }
   if (result.status !== 0) {
     process.exit(result.status === null ? 1 : result.status);
   }

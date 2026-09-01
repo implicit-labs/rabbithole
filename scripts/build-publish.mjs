@@ -10,8 +10,17 @@ const webDist = path.join(rootDir, "web/dist");
 const aboutSourceDir = path.join(rootDir, "website/about");
 const websitePublicDir = path.join(rootDir, "website/public");
 const publishDir = path.join(rootDir, "publish");
+const skipBuild = process.argv.includes("--skip-build");
 
-run(process.execPath, ["build.mjs"], { cwd: rootDir });
+if (skipBuild) {
+  await assertFile(
+    path.join(webDist, "index.html"),
+    "web/dist/index.html",
+    "Cannot use --skip-build because web/dist/index.html is missing. Run `npm run build:publish` without --skip-build to perform a full build.",
+  );
+} else {
+  run(process.execPath, ["build.mjs"], { cwd: rootDir });
+}
 
 await assertFile(path.join(webDist, "index.html"), "web/dist/index.html");
 await assertFile(path.join(webDist, "favicon.svg"), "web/dist/favicon.svg");
@@ -191,12 +200,12 @@ function sitemapText() {
   ].join("\n");
 }
 
-async function assertFile(file, label) {
+async function assertFile(file, label, errorMessage = `Expected ${label} to exist after build.`) {
   try {
     const stat = await fs.stat(file);
     if (stat.isFile()) return;
   } catch {
     // fall through
   }
-  throw new Error(`Expected ${label} to exist after build.`);
+  throw new Error(errorMessage);
 }

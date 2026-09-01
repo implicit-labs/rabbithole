@@ -1,6 +1,7 @@
 /** @protects selection popover capability contracts. */
 import assert from "node:assert/strict";
 import { bootWebApp } from "../support/web-app-harness.mjs";
+import { assertSelectionPopoverUsable } from "../support/visible-selection.mjs";
 
 const app = await bootWebApp();
 const { browser, baseUrl } = app;
@@ -103,10 +104,17 @@ try {
   await page.waitForSelector("#ask.visible[data-anchor-hidden]");
   await scrollCardBody(0);
   await page.waitForSelector("#ask.visible:not([data-anchor-hidden])");
-  await page.keyboard.press("Escape");
+  await assertSelectionPopoverUsable(page);
+  await page.fill("#ask-text", "The returned popover still commits");
+  await assertSelectionPopoverUsable(page);
+  await page.click('#ask .ask-commit[data-commit="note"]', { timeout: 4_000 });
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
+  await page.waitForSelector(".card.root .note-dot");
+  await page.waitForFunction(async () => (await window.__rabbitholeTest.readStoredHole()).nodes.some(
+    (node) => node.origin?.kind === "note" && node.markdown === "The returned popover still commits",
+  ));
 
-  console.log("ok e2e: final-paragraph selection opens the popover");
+  console.log("ok e2e: selection popover returns from hidden anchors and remains usable");
 } finally {
   await app.close();
 }

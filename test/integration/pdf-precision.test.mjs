@@ -7,7 +7,7 @@ import { ensureWebDist } from "../support/build.mjs";
 import { serveStatic } from "../support/static-server.mjs";
 import { corsHeaders, sse } from "../support/provider-mock.mjs";
 import { ATTENTION_PDF_PAGE_COUNT, ATTENTION_PDF_SHA256, ATTENTION_PAGE_VIEW, readAttentionPdf } from "../support/attention-pdf.mjs";
-import { selectVisibleText } from "../support/visible-selection.mjs";
+import { assertSelectionPopoverUsable, selectVisibleText } from "../support/visible-selection.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const WEB_DIST = path.join(ROOT, "web/dist");
@@ -609,7 +609,8 @@ async function selectAndFill(page, itemText, start, end, text) {
 
 async function selectAndAsk(page, itemText, start, end, question) {
   const expected = await selectAndFill(page, itemText, start, end, question);
-  await page.click('#ask .ask-commit[data-commit="ask"]');
+  await assertSelectionPopoverUsable(page);
+  await page.click('#ask .ask-commit[data-commit="ask"]', { timeout: 4_000 });
   await page.waitForFunction((count) => document.querySelectorAll(".card").length >= count, expected);
   await page.waitForFunction((count) => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }
@@ -618,7 +619,8 @@ async function selectAndAsk(page, itemText, start, end, question) {
 // group plus a margin dot, and deliberately no new card on the canvas.
 async function selectAndNote(page, itemText, start, end, markdown) {
   const before = await selectAndFill(page, itemText, start, end, markdown) - 1;
-  await page.click('#ask .ask-commit[data-commit="note"]');
+  await assertSelectionPopoverUsable(page);
+  await page.click('#ask .ask-commit[data-commit="note"]', { timeout: 4_000 });
   await page.waitForSelector(".card .rh-pdf-mark.mark-note");
   await page.waitForSelector(".card .note-dot");
   assert.equal(await page.locator(".card").count(), before, "a docked PDF note must not spawn a card");
@@ -644,7 +646,8 @@ async function selectAcrossAndAsk(page, { firstText, firstOffset, lastText, last
   await page.waitForSelector("#ask.visible");
   await page.fill("#ask-text", question);
   const expected = await page.locator(".card").count() + 1;
-  await page.click('#ask .ask-commit[data-commit="ask"]');
+  await assertSelectionPopoverUsable(page);
+  await page.click('#ask .ask-commit[data-commit="ask"]', { timeout: 4_000 });
   await page.waitForFunction((count) => document.querySelectorAll(".card").length >= count, expected);
   await page.waitForFunction((count) => document.querySelectorAll(".card .rh-pdf-mark.mark-ready").length >= count, expected - 1);
 }

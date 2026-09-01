@@ -8,7 +8,7 @@ import { ensureWebDist } from "../support/build.mjs";
 import { serveStatic } from "../support/static-server.mjs";
 import { corsHeaders, sse } from "../support/provider-mock.mjs";
 import { ATTENTION_PDF_PAGE_COUNT, ATTENTION_PDF_SHA256, readAttentionPdf, readAttentionPdfTwoPage } from "../support/attention-pdf.mjs";
-import { selectVisibleText } from "../support/visible-selection.mjs";
+import { assertSelectionPopoverUsable, selectVisibleText } from "../support/visible-selection.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const WEB_DIST = path.join(ROOT, "web/dist");
@@ -166,7 +166,8 @@ try {
     end: "Attention".length,
   });
   assert.equal(selected.text, "Attention");
-  await page.click('#ask-actions .lens[data-lens="explain"]');
+  await assertSelectionPopoverUsable(page);
+  await page.click('#ask-actions .lens[data-lens="explain"]', { timeout: 4_000 });
   const mark = page.locator(".card .rh-pdf-mark.mark-ready").first();
   await mark.waitFor();
   assert.equal(await page.locator(".card .rh-pdf-convert").count(), 0, "creating the first branch should immediately remove the text-version action");

@@ -7,7 +7,7 @@ import { serializeForInlineScript } from "../../src/core/utils.js";
 import { assertCodeCopy } from "../support/code-copy.mjs";
 import { MOCK_MODEL, corsHeaders, routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { ROOT, bootWebApp } from "../support/web-app-harness.mjs";
-import { panCanvasBy, selectVisibleText } from "../support/visible-selection.mjs";
+import { assertSelectionPopoverUsable, panCanvasBy, selectVisibleText } from "../support/visible-selection.mjs";
 
 const MOCK_KEY = `sk-or-v1-${"x".repeat(64)}`;
 const BAD_KEY = `sk-or-v1-${"y".repeat(64)}`;
@@ -511,7 +511,8 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
     assert(initial.lensMinHeight >= 44, `${engineName}: mobile lens targets must be at least 44px tall (got ${initial.lensMinHeight})`);
     assert.equal(initial.keyHintsHidden, true, `${engineName}: desktop keyboard shortcut hints should be hidden on touch surfaces`);
 
-    await canvasPage.click("#ask-text");
+    await assertSelectionPopoverUsable(canvasPage);
+    await canvasPage.click("#ask-text", { timeout: 4_000 });
     await canvasPage.fill("#ask-text", "Why is this reliable?");
     await canvasPage.setViewportSize({ width: 390, height: 430 });
     await canvasPage.waitForFunction(() => {
@@ -524,7 +525,8 @@ async function verifyMobileSelectionSurface(browserEngine, engineName) {
     assert(commitMinHeight >= 44, `${engineName}: mobile Note/Ask targets must be at least 44px tall (got ${commitMinHeight})`);
     assert.deepEqual(await canvasPage.locator("#ask .ask-commit kbd").evaluateAll((chips) => chips.map((chip) => getComputedStyle(chip).display !== "none")),
       [true, true], `${engineName}: mobile commit chips must stay visible`);
-    await canvasPage.click('#ask .ask-commit[data-commit="ask"]');
+    await assertSelectionPopoverUsable(canvasPage);
+    await canvasPage.click('#ask .ask-commit[data-commit="ask"]', { timeout: 4_000 });
     await canvasPage.waitForSelector("#ask:not(.visible)");
     await canvasPage.locator(".card:not(.root)", { hasText: "Mobile custom question completed." }).waitFor();
     await canvasPage.close();

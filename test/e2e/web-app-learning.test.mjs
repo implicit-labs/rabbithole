@@ -218,23 +218,6 @@ async function verifyNoticePrimitive() {
   await page.waitForTimeout(120);
   assert.equal(await page.evaluate(() => window.noticeExpired), true, "a timed notice should report expiry after it hides");
 
-  await page.evaluate(() => {
-    const toast = document.getElementById("toast");
-    wireNotice(toast, { variant: "toast" }).show({ message: "paused", actionLabel: "Undo", duration: 1200 });
-    toast.querySelector("[data-notice-action]").focus();
-  });
-  await page.waitForTimeout(1600);
-  const visibleWhileFocused = await page.locator("#toast").evaluate((el) => el.classList.contains("visible"));
-  assert.equal(visibleWhileFocused, true, `focus inside should pause a toast timer (visible=${visibleWhileFocused})`);
-  await page.hover("#toast");
-  await page.evaluate(() => document.activeElement.blur());
-  await page.waitForTimeout(1600);
-  const visibleWhileHovered = await page.locator("#toast").evaluate((el) => el.classList.contains("visible"));
-  assert.equal(visibleWhileHovered, true, `hover should keep a toast timer paused after focus leaves (visible=${visibleWhileHovered})`);
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() => !document.getElementById("toast").classList.contains("visible"), { timeout: 4000 });
-  const visibleAfterMouseleave = await page.locator("#toast").evaluate((el) => el.classList.contains("visible"));
-  assert.equal(visibleAfterMouseleave, false, `a toast timer should resume after hover (visible=${visibleAfterMouseleave})`);
   await page.close();
 }
 

@@ -24,13 +24,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check:types
-      - run: npm run build
       - run: npm run check:dist
       - run: npm run check:purity
       - run: npm run check:docs
       - run: npm run test:unit
-      # Build the deployable site once here so deploy-pages.yml can download
-      # the exact verified bytes instead of rebuilding them.
+      # check:dist has already verified committed dist/ against a fresh source
+      # build. Rebuild here because web/dist is generated and not committed.
       - name: Build the production site for deploy
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: npm run build:publish

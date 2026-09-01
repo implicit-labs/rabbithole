@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { bootWebApp } from "../support/web-app-harness.mjs";
-import { selectVisibleText } from "../support/visible-selection.mjs";
+import { assertSelectionPopoverUsable, selectVisibleText } from "../support/visible-selection.mjs";
 
 const app = await bootWebApp();
 const longScrollAnswer = Array.from({ length: 90 }, (_, index) => "Paragraph " + (index + 1) + " keeps this card scrollable.").join("\n\n");
@@ -222,7 +222,8 @@ async function askFromSelection(page, text, question) {
     rootSelector: ".card.root .doc-content[data-node-id]",
   });
   await page.locator("#ask-text").fill(question);
-  await page.locator('#ask [data-commit="ask"]').click();
+  await assertSelectionPopoverUsable(page);
+  await page.locator('#ask [data-commit="ask"]').click({ timeout: 4_000 });
 }
 
 async function waitForStoredNode(page, id, predicate) {
