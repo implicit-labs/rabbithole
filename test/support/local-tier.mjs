@@ -12,7 +12,7 @@ if (!new Set(["integration", "e2e"]).has(tier)) usage("Expected integration or e
 // CI runners are small; parallelism is a local-laptop win.
 const defaultJobs = process.env.CI === "true" ? 1 : 2;
 const jobs = parseJobs(args, process.env.RABBITHOLE_TEST_JOBS || defaultJobs);
-if (tier === "e2e" && jobs > 3) usage("The e2e sweep has three bins, so --jobs may not exceed 3.");
+if (tier === "e2e" && jobs > 4) usage("The e2e sweep has four lanes, so --jobs may not exceed 4.");
 
 if (process.env.CI !== "true") {
   process.stdout.write("\n==> build\n");
@@ -28,6 +28,10 @@ const bins = Array.from({ length: 3 }, (_, index) => ({
   name: `e2e shard ${index}/3`,
   command: [process.execPath, ["test/support/e2e-shard.mjs", String(index), "3"]],
 }));
+bins.push({
+  name: "e2e cross-browser",
+  command: [process.execPath, ["test/support/e2e-shard.mjs", "--cross-browser"]],
+});
 const failures = await runPool(bins, jobs);
 if (failures.length) {
   process.stderr.write(`E2E shard failures:\n${failures.map((name) => `- ${name}`).join("\n")}\n`);

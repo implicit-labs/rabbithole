@@ -40,6 +40,7 @@ ${getDompurifyScript()}
 	  delete hydration.preferences;
 	${liveSnapshotSource}${clientSource}
 	  RabbitholeClient.startRabbithole(hydration, {
+	    clock: window.__rabbitholeTest && window.__rabbitholeTest.autoTidyClock,
 	    preferences: preferences,
 	    snapshotHooks: {
 	${liveSnapshotHoleHook}      getFrozenClientSource: function(){ return window.__RABBITHOLE_FROZEN_CLIENT__ || ""; },

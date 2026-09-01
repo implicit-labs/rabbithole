@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/**"]
   pull_request:
 
 # A newer push to the same ref supersedes in-flight verification; the newer
@@ -79,13 +80,43 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    # Generous only for the rare run that must pull apt packages through a
-    # sick mirror to repopulate the deb cache; steady state is ~3 minutes.
-    timeout-minutes: 22
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
+    env:
+      PLAYWRIGHT_BROWSERS: "chromium"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Resolve Playwright browser cache suffix
+        id: playwright-browsers
+        run: echo "cache-suffix=${PLAYWRIGHT_BROWSERS// /-}" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-${{ steps.playwright-browsers.outputs.cache-suffix }}
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install ${PLAYWRIGHT_BROWSERS}
+      - run: npm run build
+      - run: node test/support/e2e-shard.mjs ${{ matrix.shard }} 3
+
+  e2e-cross-browser:
+    runs-on: ubuntu-latest
+    # Generous only for the rare run that must pull apt packages through a
+    # sick mirror to repopulate the deb cache; steady state is much shorter.
+    timeout-minutes: 22
     env:
       PLAYWRIGHT_BROWSERS: "chromium firefox webkit"
     steps:
@@ -110,12 +141,9 @@ jobs:
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install ${PLAYWRIGHT_BROWSERS}
-      # Only firefox/webkit need apt OS libraries (chromium's are preinstalled),
-      # and each shard installs only the browsers its bin actually launches.
-      # The shard script owns the bin assignment, so ask it.
-      - name: Determine which browser OS dependencies this shard needs
+      - name: Determine browser OS dependencies
         id: needs-deps
-        run: echo "browsers=$(node test/support/e2e-shard.mjs --needs-deps ${{ matrix.shard }} 3)" >> "$GITHUB_OUTPUT"
+        run: echo "browsers=$(node test/support/e2e-shard.mjs --needs-deps --cross-browser)" >> "$GITHUB_OUTPUT"
       # The Ubuntu mirrors have been observed both stalling outright and
       # crawling at ~100KB/s, so the network is not something this job may
       # depend on: the downloaded .debs are cached, apt is told to keep and
@@ -153,7 +181,7 @@ jobs:
             sleep 5
           done
       - run: npm run build
-      - run: node test/support/e2e-shard.mjs ${{ matrix.shard }} 3
+      - run: node test/support/e2e-shard.mjs --cross-browser
 
   # Isolated so the budget gauges never share a runner with other browser jobs.
   performance:

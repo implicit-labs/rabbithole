@@ -11,8 +11,9 @@ export function installTestSeam({
   selectionAnchorClipBounds,
   exportSnapshot,
   exportPortable,
+  autoTidyClock,
 }) {
-  window.__rabbitholeTest = Object.freeze({
+  const seam = {
     // Routing/reload tests need the raw persistence identity, which the product UI does not expose.
     currentHoleId,
     // Persistence tests need raw records before the store's read boundary clones them.
@@ -47,7 +48,12 @@ export function installTestSeam({
     exportSnapshot,
     // Portable-projection tests need pre-download artifact strings to compare with the snapshot HTML carrier.
     exportPortable,
-  });
+  };
+  if (typeof autoTidyClock?.advance === "function") {
+    // Time is environmental state: tests still drive every product action through the real UI.
+    seam.advanceAutoTidyClock = (ms) => autoTidyClock.advance(ms);
+  }
+  window.__rabbitholeTest = Object.freeze(seam);
 }
 
 async function readRawRecord(store, id) {

@@ -25,11 +25,11 @@ import {
 } from "../../transport-status.js";
 import { setVisualStyles } from "../../visual-style-runtime.js";
 
-function createCanvasMaintenance() {
+function createCanvasMaintenance(clock) {
   const attention = createCanvasAttention();
   let autoTidy;
   try {
-    autoTidy = createAutoTidy({ attention: attention });
+    autoTidy = createAutoTidy({ attention: attention, clock: clock });
   } catch (error) {
     attention.dispose();
     throw error;
@@ -91,7 +91,9 @@ export function startRabbithole(hydration, options) {
         loadMermaid: options.loadMermaid || null,
         exportSnapshot: downloadSnapshot,
         exportPortable: options.exportPortable || null,
-        canvasMaintenanceFactory: createCanvasMaintenance,
+        canvasMaintenanceFactory: function () {
+          return createCanvasMaintenance(options.clock);
+        },
         modeChanged: notifyAutoTidyModeChanged,
         settingsSections: [canvasSettingsSection()],
       },

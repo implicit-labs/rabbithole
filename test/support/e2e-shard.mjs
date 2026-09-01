@@ -1,13 +1,16 @@
 // Deterministic e2e shard runner for CI.
 //
 //   node test/support/e2e-shard.mjs <index> <total>
-//     Runs this shard's files sequentially, failing fast on the first
-//     nonzero exit (the child's code is propagated).
+//     Runs this Chromium-only shard's files sequentially, failing fast on the
+//     first nonzero exit (the child's code is propagated).
+//
+//   node test/support/e2e-shard.mjs --cross-browser
+//     Runs every file whose timings metadata declares extra browsers.
 //
 //   node test/support/e2e-shard.mjs --needs-deps <index> <total>
-//     Prints the space-separated browsers in this shard whose apt OS
-//     libraries the runner lacks — the ones whose playwright import
-//     destructures firefox or webkit (chromium's are preinstalled).
+//   node test/support/e2e-shard.mjs --needs-deps --cross-browser
+//     Prints the space-separated browsers in this lane whose apt OS libraries
+//     the runner lacks (chromium's are preinstalled).
 //     Prints nothing for a chromium-only shard.
 //
 // Packing is greedy by descending measured runtime (stable name tiebreak):
@@ -22,12 +25,13 @@ import { fileURLToPath } from "node:url";
 const E2E_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "e2e");
 const TIMINGS = JSON.parse(fs.readFileSync(path.join(E2E_DIR, "..", "timings.json"), "utf8"));
 
-function listTestFiles() {
-  return fs
+function listTestFiles({ crossBrowser }) {
+  const files = fs
     .readdirSync(E2E_DIR)
     .filter((name) => name.endsWith(".test.mjs"))
     .sort()
     .map((name) => path.join(E2E_DIR, name));
+  return files.filter((file) => (declaredExtraBrowsers(file).size > 0) === crossBrowser);
 }
 
 function packIntoBins(files, total) {
@@ -50,51 +54,52 @@ function packIntoBins(files, total) {
   return bins;
 }
 
-// True iff the file itself launches firefox or webkit, judged from its
-// playwright import destructuring. A bare word match is too loose: e.g.
-// style.webkitBackdropFilter would count a chromium-only file.
-function importedExtraBrowsers(file) {
+function declaredExtraBrowsers(file) {
   const measured = TIMINGS[path.basename(file)];
-  if (measured) return new Set(measured.browsers || []);
-  const source = fs.readFileSync(file, "utf8");
-  const importPattern = /import\s*\{([^}]*)\}\s*from\s*["']playwright["']/g;
-  const browsers = new Set();
-  for (const match of source.matchAll(importPattern)) {
-    if (/\bfirefox\b/.test(match[1])) browsers.add("firefox");
-    if (/\bwebkit\b/.test(match[1])) browsers.add("webkit");
+  if (!measured || !Array.isArray(measured.browsers)) {
+    throw new Error(`Missing browser metadata for ${path.basename(file)}`);
   }
-  return browsers;
+  return new Set(measured.browsers);
 }
 
 function usage() {
   console.error("usage: node test/support/e2e-shard.mjs [--needs-deps] <index> <total>");
+  console.error("       node test/support/e2e-shard.mjs [--needs-deps] --cross-browser");
   process.exit(2);
 }
 
 const args = process.argv.slice(2);
-const needsDepsMode = args[0] === "--needs-deps";
-const positional = needsDepsMode ? args.slice(1) : args;
-if (positional.length !== 2) usage();
-const index = Number(positional[0]);
-const total = Number(positional[1]);
-if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 0 || index >= total) {
-  usage();
-}
+const needsDepsMode = args.includes("--needs-deps");
+const crossBrowserMode = args.includes("--cross-browser");
+const unknownFlags = args.filter((arg) => arg.startsWith("--") && arg !== "--needs-deps" && arg !== "--cross-browser");
+const positional = args.filter((arg) => !arg.startsWith("--"));
+if (unknownFlags.length || (crossBrowserMode ? positional.length !== 0 : positional.length !== 2)) usage();
 
-const bin = packIntoBins(listTestFiles(), total)[index];
+let label;
+let files;
+if (crossBrowserMode) {
+  label = "cross-browser";
+  files = listTestFiles({ crossBrowser: true });
+} else {
+  const index = Number(positional[0]);
+  const total = Number(positional[1]);
+  if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || index < 0 || index >= total) usage();
+  label = `shard ${index}/${total}`;
+  files = packIntoBins(listTestFiles({ crossBrowser: false }), total)[index].files;
+}
 
 if (needsDepsMode) {
   const needed = new Set();
-  for (const file of bin.files) {
-    for (const browser of importedExtraBrowsers(file)) needed.add(browser);
+  for (const file of files) {
+    for (const browser of declaredExtraBrowsers(file)) needed.add(browser);
   }
   console.log([...needed].sort().join(" "));
   process.exit(0);
 }
 
-console.log(`shard ${index}/${total}: ${bin.files.length} file(s)`);
-for (const file of bin.files) console.log(`  ${path.relative(process.cwd(), file)}`);
-for (const file of bin.files) {
+console.log(`${label}: ${files.length} file(s)`);
+for (const file of files) console.log(`  ${path.relative(process.cwd(), file)}`);
+for (const file of files) {
   console.log(`\n--- ${path.relative(process.cwd(), file)}`);
   // Throwaway store dir: e2e tests boot real server modules, which otherwise
   // default to ~/.rabbithole and write into the operator's live data.

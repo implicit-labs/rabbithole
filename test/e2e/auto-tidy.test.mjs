@@ -120,8 +120,14 @@ try {
   const betaId = await beta.getAttribute("data-id");
 
   await beta.locator(".card-title").click();
-  await page.waitForSelector('.card[data-id="' + alphaId + '"].collapsed', { timeout: 12000 });
-  await page.waitForSelector('.card[data-id="' + deltaId + '"].collapsed', { timeout: 7000 });
+  // One real-clock smoke covers the browser interval integration. The
+  // exemption matrix below advances the injected clock without wall time.
+  await page.waitForFunction(
+    ([alphaNodeId, deltaNodeId]) => [alphaNodeId, deltaNodeId].every((id) =>
+      document.querySelector('.card[data-id="' + id + '"]')?.classList.contains("collapsed")),
+    [alphaId, deltaId],
+    { timeout: 12000 },
+  );
   assert.equal(await beta.evaluate((card) => card.classList.contains("collapsed")), false, "the touched spine stays open");
   assert.equal(await page.locator(".card.root").evaluate((card) => card.classList.contains("collapsed")), false);
   assert.equal(await gamma.evaluate((card) => card.classList.contains("collapsed")), false, "an answered but never-engaged branch stays open");
@@ -143,8 +149,10 @@ try {
     const hole = await window.__rabbitholeTest.readStoredHole();
     return hole.nodes.find((node) => node.id === id)?.collapsed === false;
   }, alphaId);
+  await page.addInitScript(installAutoTidyClock);
   await page.reload({ waitUntil: "networkidle" });
-  await page.waitForSelector('.card[data-id="' + alphaId + '"].collapsed', { timeout: 12000 });
+  await advanceAutoTidyClock(page, 11_000);
+  await page.waitForSelector('.card[data-id="' + alphaId + '"].collapsed');
   assert.equal(await gamma.evaluate((card) => card.classList.contains("collapsed")), false, "reload keeps an unread sibling protected");
   const reloadedAlpha = await waitForStoredNode(page, alphaId, (node) => node.collapsed === true);
   assert.equal(!!reloadedAlpha.extensions.attention?.seen_at, true, "seen state survives reload before the new session clock elapses");
@@ -153,23 +161,24 @@ try {
   await page.waitForSelector('.card[data-id="' + alphaId + '"]:not(.collapsed)');
   await beta.locator(".card-title").click();
   await alpha.evaluate((card) => card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
-  await page.waitForTimeout(11000);
+  await advanceAutoTidyClock(page, 11_000);
   assert.equal(await alpha.evaluate((card) => card.classList.contains("collapsed")), false, "hover defers a due fold");
   await alpha.evaluate((card) => card.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
-  await page.waitForSelector('.card[data-id="' + alphaId + '"].collapsed', { timeout: 7000 });
+  await advanceAutoTidyClock(page, 5_000);
+  await page.waitForSelector('.card[data-id="' + alphaId + '"].collapsed');
 
   await toggleBranch(alpha);
   await alpha.locator(".card-more").evaluate((button) => button.click());
   await page.locator("#cm-pin").evaluate((button) => button.click());
   await beta.locator(".card-title").click();
-  await page.waitForTimeout(11000);
+  await advanceAutoTidyClock(page, 11_000);
   assert.equal(await alpha.evaluate((card) => card.classList.contains("collapsed")), false, "a pinned card exempts its branch");
 
   await page.locator('.pinned-window-card[data-id="' + alphaId + '"] .pinned-pin').evaluate((button) => button.click());
   await alpha.locator(".nc-handle").evaluate((button) => button.click());
   await setComposerDraft(alpha, "Unsent draft protects this branch");
   await beta.locator(".card-title").click();
-  await page.waitForTimeout(11000);
+  await advanceAutoTidyClock(page, 11_000);
   assert.equal(await alpha.evaluate((card) => card.classList.contains("collapsed")), false, "an unsent card-composer draft exempts its branch");
 
   await page.locator("#t-settings").click();
@@ -178,7 +187,7 @@ try {
   await page.locator("[data-settings-close]").click();
   await setComposerDraft(alpha, "");
   await beta.locator(".card-title").click();
-  await page.waitForTimeout(11000);
+  await advanceAutoTidyClock(page, 11_000);
   assert.equal(await alpha.evaluate((card) => card.classList.contains("collapsed")), false, "turning the mode off stops future folds");
 
   const frozenHtml = await page.evaluate(() => window.__rabbitholeTest.exportSnapshot());
@@ -253,6 +262,7 @@ async function verifyEnableMidSession(app) {
   const context = await app.browser.newContext();
   try {
     await seedConfiguredOpenRouter(context);
+    await context.addInitScript(installAutoTidyClock);
     await context.addInitScript(() => {
       localStorage.setItem("rh-auto-tidy-grace", "5");
     });
@@ -291,13 +301,14 @@ async function verifyEnableMidSession(app) {
     assert.equal(await page.locator("[data-tidy-enabled]").isChecked(), false, "the journey starts with folding off");
     await page.locator("[data-tidy-enabled]").check();
     await page.locator("[data-settings-close]").click();
-    await page.waitForTimeout(1000);
+    await advanceAutoTidyClock(page, 1_000);
     assert.equal(
       await first.evaluate((card) => card.classList.contains("collapsed")),
       false,
       "enabling starts a fresh grace clock instead of backfilling elapsed time",
     );
-    await page.waitForSelector('.card[data-id="' + firstId + '"].collapsed', { timeout: 12000 });
+    await advanceAutoTidyClock(page, 4_000);
+    await page.waitForSelector('.card[data-id="' + firstId + '"].collapsed');
     assert.equal(
       await second.evaluate((card) => card.classList.contains("collapsed")),
       false,
@@ -357,6 +368,7 @@ async function verifyFreshAnswerInvalidation(app) {
       renderPage: (hydration) => buildCanvasHtml(hydration),
     });
     context = await app.browser.newContext();
+    await context.addInitScript(installAutoTidyClock);
     const page = await context.newPage();
     await page.goto(session.url, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('.card[data-id="a"]');
@@ -372,19 +384,23 @@ async function verifyFreshAnswerInvalidation(app) {
     session.broadcast(freshAnswer);
     await page.locator('.card[data-id="a"]', { hasText: "New content must be read again." }).waitFor();
     assert.equal(session.nodes.get("a").extensions.attention, undefined, "node_answered clears the server-side seen ledger");
-    await page.waitForTimeout(11000);
+    await advanceAutoTidyClock(page, 11_000);
     assert.equal(
       await page.locator('.card[data-id="a"]').evaluate((card) => card.classList.contains("collapsed")),
       false,
       "a new answer protects a previously seen branch until it is engaged again",
     );
+    const attentionWritten = page.waitForResponse((response) => {
+      if (!response.url().endsWith("/events") || response.request().method() !== "POST") return false;
+      const payload = response.request().postDataJSON();
+      return payload?.type === "node_extensions_patch" && payload.node_id === "a" && payload.namespace === "attention";
+    });
     await page.locator('.card[data-id="a"] .card-title').click();
-    for (let attempt = 0; attempt < 40 && !session.nodes.get("a").extensions.attention?.seen_at; attempt++) {
-      await page.waitForTimeout(50);
-    }
+    await attentionWritten;
     assert.equal(!!session.nodes.get("a").extensions.attention?.seen_at, true, "re-engagement writes a fresh seen ledger entry");
     await page.locator('.card[data-id="b"] .card-title').click();
-    await page.waitForSelector('.card[data-id="a"].collapsed', { timeout: 12000 });
+    await advanceAutoTidyClock(page, 10_000);
+    await page.waitForSelector('.card[data-id="a"].collapsed');
   } finally {
     if (context) await context.close();
     if (session) await session.close("auto_tidy_test_complete");
@@ -394,4 +410,51 @@ async function verifyFreshAnswerInvalidation(app) {
     else process.env.RABBITHOLE_NO_BROWSER = previousNoBrowser;
     await fs.rm(storeDir, { recursive: true, force: true });
   }
+}
+
+async function advanceAutoTidyClock(page, ms) {
+  await page.evaluate((amount) => {
+    const seam = window.__rabbitholeTest;
+    if (typeof seam?.advanceAutoTidyClock === "function") return seam.advanceAutoTidyClock(amount);
+    if (typeof seam?.autoTidyClock?.advance === "function") return seam.autoTidyClock.advance(amount);
+    throw new Error("the auto-tidy clock seam is unavailable");
+  }, ms);
+}
+
+function installAutoTidyClock() {
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  const nativeClearTimeout = window.clearTimeout.bind(window);
+  let now = Date.now();
+  let nextHandle = 1;
+  const intervals = new Map();
+  const clock = {
+    now: () => now,
+    setInterval: (callback, delay) => {
+      const handle = nextHandle++;
+      const every = Math.max(1, Number(delay) || 0);
+      intervals.set(handle, { callback, every, at: now + every });
+      return handle;
+    },
+    clearInterval: (handle) => intervals.delete(handle),
+    setTimeout: nativeSetTimeout,
+    clearTimeout: nativeClearTimeout,
+    advance: (ms) => {
+      const target = now + Math.max(0, Number(ms) || 0);
+      while (true) {
+        let dueHandle = 0;
+        let due = null;
+        for (const [handle, interval] of intervals) {
+          if (interval.at > target || (due && interval.at >= due.at)) continue;
+          dueHandle = handle;
+          due = interval;
+        }
+        if (!due) break;
+        now = due.at;
+        due.at += due.every;
+        if (intervals.get(dueHandle) === due) due.callback();
+      }
+      now = target;
+    },
+  };
+  window.__rabbitholeTest = { autoTidyClock: clock };
 }

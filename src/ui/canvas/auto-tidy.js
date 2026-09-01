@@ -14,6 +14,7 @@ const GLIDE_MS = 320;
 
 export function createAutoTidy(options) {
   const attention = options.attention;
+  const clock = normalizeAutoTidyClock(options.clock);
   let warmId = currentNodeId || rootId;
   let coldSince = new Map();
   let pausedAt = 0;
@@ -24,7 +25,7 @@ export function createAutoTidy(options) {
   const autoFoldProvenance = new Map();
 
   function nowForWarmth() {
-    return pausedAt || systemClock.now();
+    return pausedAt || clock.now();
   }
 
   function currentRibs() {
@@ -51,7 +52,7 @@ export function createAutoTidy(options) {
   }
 
   function syncPause() {
-    const now = systemClock.now();
+    const now = clock.now();
     if (paused()) {
       if (!pausedAt) pausedAt = now;
       return;
@@ -73,7 +74,7 @@ export function createAutoTidy(options) {
     if (!glide) return;
     glides.delete(card);
     if (glide.frame) cancelAnimationFrame(glide.frame);
-    if (glide.timer) clearTimeout(glide.timer);
+    if (glide.timer) clock.clearTimeout(glide.timer);
     card.removeEventListener("transitionend", glide.onEnd);
     card.style.transition = "";
     card.style.transform = "";
@@ -99,7 +100,7 @@ export function createAutoTidy(options) {
       card.addEventListener("transitionend", glide.onEnd);
       card.style.transition = "transform " + GLIDE_MS + "ms " + EASE_OUT_MOTION_CSS;
       card.style.transform = "translate(0px,0px)";
-      glide.timer = setTimeout(function () {
+      glide.timer = clock.setTimeout(function () {
         finishGlide(card);
       }, GLIDE_MS + 40);
     });
@@ -131,7 +132,7 @@ export function createAutoTidy(options) {
     if (!enabled || disposed) return;
     syncPause();
     if (pausedAt || r.activePointerGestures.size || isSettingsSheetOpen()) return;
-    const now = systemClock.now();
+    const now = clock.now();
     retime(now, false);
     const decisions = decideAutoTidyFolds(currentRibs(), coldSince, nodes, childrenOf, now, {
       graceMs: autoTidyGraceSeconds() * 1000,
@@ -149,12 +150,12 @@ export function createAutoTidy(options) {
 
   function start() {
     if (sweepTimer) return;
-    sweepTimer = setInterval(sweep, SWEEP_MS);
+    sweepTimer = clock.setInterval(sweep, SWEEP_MS);
   }
 
   function stop() {
     if (!sweepTimer) return;
-    clearInterval(sweepTimer);
+    clock.clearInterval(sweepTimer);
     sweepTimer = 0;
   }
 
@@ -187,7 +188,7 @@ export function createAutoTidy(options) {
     const provenance = autoFoldProvenance.get(id);
     if (!provenance) return;
     autoFoldProvenance.delete(id);
-    if (systemClock.now() - provenance.foldedAt <= 10000) {
+    if (clock.now() - provenance.foldedAt <= 10000) {
       console.debug("auto-tidy: false fold", id, provenance.reason);
     }
   }
@@ -217,6 +218,20 @@ export function createAutoTidy(options) {
       autoFoldProvenance.clear();
       Array.from(glides.keys()).forEach(finishGlide);
     },
+  };
+}
+
+function normalizeAutoTidyClock(clock) {
+  return {
+    now: () => (typeof clock?.now === "function" ? clock.now() : systemClock.now()),
+    setInterval: (callback, delay) =>
+      typeof clock?.setInterval === "function" ? clock.setInterval(callback, delay) : setInterval(callback, delay),
+    clearInterval: (handle) =>
+      typeof clock?.clearInterval === "function" ? clock.clearInterval(handle) : clearInterval(handle),
+    setTimeout: (callback, delay) =>
+      typeof clock?.setTimeout === "function" ? clock.setTimeout(callback, delay) : setTimeout(callback, delay),
+    clearTimeout: (handle) =>
+      typeof clock?.clearTimeout === "function" ? clock.clearTimeout(handle) : clearTimeout(handle),
   };
 }
 

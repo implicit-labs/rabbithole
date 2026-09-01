@@ -71,6 +71,7 @@ consumeInitialBridgePairing();
 let currentPdfTranscriptionCapability = { available: false, status: "checking", model: "", reason: "Checking PDF transcription support…" };
 let pdfTranscriptionCheckToken = 0;
 const subscriptionModelUnknownRetries = new Set();
+const injectedAutoTidyClock = window.__rabbitholeTest?.autoTidyClock || null;
 
 applyInitialWebTheme();
 
@@ -133,6 +134,7 @@ async function boot() {
       await currentHost?.flushSave();
       return (await loadWorkspaceRuntime()).buildRabbitholeExport(store, currentHoleId);
     },
+    autoTidyClock: injectedAutoTidyClock,
   });
 }
 
@@ -825,6 +827,7 @@ async function mountHole(hole, { replace = false } = {}) {
     currentAssetLease = await createLiveAssetData(hole.hole_id);
     hydration.asset_data = currentAssetLease.data;
     currentUi = canvasRuntime.startRabbithole(hydration, {
+      clock: injectedAutoTidyClock,
       transport: host.adapter(),
       exportPortable: exportCurrentRabbithole,
       loadMermaid: loadMermaidRuntime,
