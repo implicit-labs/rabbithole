@@ -29,8 +29,9 @@
 | `npm run icons:studio` | `node tools/icon-studio/server.mjs` |
 | `npm run test` | `node test/run.mjs all` |
 | `npm run test:contracts` | `node test/run.mjs contracts` |
-| `npm run test:e2e` | `node test/run.mjs e2e` |
-| `npm run test:integration` | `node test/run.mjs integration` |
+| `npm run test:e2e` | `node test/support/local-tier.mjs e2e` |
+| `npm run test:integration` | `node test/support/local-tier.mjs integration` |
 | `npm run test:packaging` | `node test/run.mjs packaging` |
 | `npm run test:performance` | `node test/run.mjs performance` |
+| `npm run test:quick` | `node test/support/quick-test.mjs` |
 | `npm run test:unit` | `node test/run.mjs unit` |
