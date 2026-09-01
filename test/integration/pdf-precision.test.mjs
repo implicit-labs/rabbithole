@@ -7,6 +7,7 @@ import { ensureWebDist } from "../support/build.mjs";
 import { serveStatic } from "../support/static-server.mjs";
 import { corsHeaders, sse } from "../support/provider-mock.mjs";
 import { ATTENTION_PDF_PAGE_COUNT, ATTENTION_PDF_SHA256, ATTENTION_PAGE_VIEW, readAttentionPdf } from "../support/attention-pdf.mjs";
+import { selectVisibleText } from "../support/visible-selection.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const WEB_DIST = path.join(ROOT, "web/dist");
@@ -594,16 +595,14 @@ async function pendingRegionBounds(page) {
 // Select [start, end) of one PDF text item, open the popover, and fill the box.
 // Returns the node count a single commit should reach.
 async function selectAndFill(page, itemText, start, end, text) {
-  const picked = await page.evaluate(({ itemText, start, end }) => {
-    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((element) => element.textContent === itemText);
-    if (!span?.firstChild) throw new Error(`Text item not found: ${itemText}`);
-    span.scrollIntoView({ block: "center", inline: "center" });
-    const range = document.createRange(); range.setStart(span.firstChild, start); range.setEnd(span.firstChild, end);
-    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    const value = selection.toString(); span.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); return value;
-  }, { itemText, start, end });
-  assert.equal(picked, itemText.slice(start, end));
-  await page.waitForSelector("#ask.visible");
+  const selection = await selectVisibleText(page, {
+    text: itemText,
+    rootSelector: ".card .rh-pdf-textlayer",
+    exact: true,
+    start,
+    end,
+  });
+  assert.equal(selection.text, itemText.slice(start, end));
   await page.fill("#ask-text", text);
   return await page.locator(".card").count() + 1;
 }

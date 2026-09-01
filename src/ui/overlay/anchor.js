@@ -6,7 +6,7 @@ function tokenPx(surface, name) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function viewportRect() {
+export function viewportRect() {
   const viewport = window.visualViewport;
   return {
     left: viewport ? viewport.offsetLeft : 0,
@@ -34,7 +34,7 @@ function oppositeSide(side) {
 // its anchor leaves this region the surface hides (data-anchor-hidden) rather
 // than clamps to an edge, because clamping strands an orphan beside nothing
 // and dismissing would throw away a draft.
-function anchorClipBounds(element, viewport) {
+export function anchorClipBounds(element, viewport) {
   let left = viewport.left,
     top = viewport.top,
     right = viewport.left + viewport.width,
@@ -64,6 +64,11 @@ export function anchorSurface(trigger, surface, options) {
   const contextElement = trigger && trigger.contextElement;
   const observedTrigger = contextElement || trigger;
   const virtual = !!contextElement || !(trigger instanceof Element);
+  // Anchor-visibility tracking is for surfaces that annotate content — their
+  // anchor can scroll or pan out of view. A surface anchored to the viewport
+  // itself (the mobile sheet) opts out: its anchor is a zero-height rect on
+  // the viewport edge, which no intersection test can call visible.
+  const trackVisibility = options.trackAnchorVisibility !== false;
   let placement = options.placement || "bottom-end",
     disposed = false,
     frame = 0,
@@ -109,9 +114,11 @@ export function anchorSurface(trigger, surface, options) {
     } else {
       // Centered surfaces are exempt: a modal is not an annotation of its
       // trigger, so the trigger scrolling away must not hide it.
-      const clip = anchorClipBounds(observedTrigger instanceof Element ? observedTrigger : null, viewport);
-      anchorVisible =
-        anchor.left < clip.right && anchor.right > clip.left && anchor.top < clip.bottom && anchor.bottom > clip.top;
+      if (trackVisibility) {
+        const clip = anchorClipBounds(observedTrigger instanceof Element ? observedTrigger : null, viewport);
+        anchorVisible =
+          anchor.left < clip.right && anchor.right > clip.left && anchor.top < clip.bottom && anchor.bottom > clip.top;
+      }
       const vertical = side === "top" || side === "bottom";
       // Sticky side: once a side has been settled on, keep preferring it.
       if (settledSide === side || settledSide === oppositeSide(side)) side = settledSide;
@@ -201,13 +208,16 @@ export function anchorSurface(trigger, surface, options) {
 }
 
 /**
- * @param {{ surface: Element, anchor: Element | { getBoundingClientRect: () => DOMRect, contextElement?: Element }, placement?: string, trigger?: Element, restoreFocus?: boolean, closeOnOutsidePointer?: boolean, preventOutsidePointerDefault?: boolean, ignoreOutsidePointer?: (event: PointerEvent) => boolean, onClose?: (reason: string) => void }} options
+ * @param {{ surface: Element, anchor: Element | { getBoundingClientRect: () => DOMRect, contextElement?: Element }, placement?: string, trackAnchorVisibility?: boolean, trigger?: Element, restoreFocus?: boolean, closeOnOutsidePointer?: boolean, preventOutsidePointerDefault?: boolean, ignoreOutsidePointer?: (event: PointerEvent) => boolean, onClose?: (reason: string) => void }} options
  */
 export function openAnchoredSurface(options) {
   const surface = options.surface;
   const anchor = options.anchor;
   setSurfaceOrigin(surface, anchor.getBoundingClientRect());
-  const position = anchorSurface(anchor, surface, { placement: options.placement });
+  const position = anchorSurface(anchor, surface, {
+    placement: options.placement,
+    trackAnchorVisibility: options.trackAnchorVisibility,
+  });
   const unregister = registerLayer({
     element: surface,
     trigger: options.trigger,

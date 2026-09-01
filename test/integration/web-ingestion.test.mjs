@@ -8,6 +8,7 @@ import { ensureWebDist } from "../support/build.mjs";
 import { serveStatic } from "../support/static-server.mjs";
 import { corsHeaders, sse } from "../support/provider-mock.mjs";
 import { ATTENTION_PDF_PAGE_COUNT, ATTENTION_PDF_SHA256, readAttentionPdf, readAttentionPdfTwoPage } from "../support/attention-pdf.mjs";
+import { selectVisibleText } from "../support/visible-selection.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const WEB_DIST = path.join(ROOT, "web/dist");
@@ -157,17 +158,14 @@ try {
   assert.notEqual(localZoom.after.label, localZoom.before.label, "Ctrl+wheel must update local PDF zoom");
   assert(localZoom.after.width > localZoom.before.width, "local PDF zoom must enlarge the source-rendered page");
   await page.click(".card .rh-pdf-zoom-value");
-  const selected = await page.evaluate(() => {
-    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
-    const text = span.firstChild, range = document.createRange();
-    range.setStart(text, 0); range.setEnd(text, "Attention".length);
-    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    const picked = selection.toString(); // the ask box focuses on open, collapsing the native selection
-    span.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    return picked;
+  const selected = await selectVisibleText(page, {
+    text: "Attention Is All You Need",
+    rootSelector: ".card .rh-pdf-textlayer",
+    exact: true,
+    start: 0,
+    end: "Attention".length,
   });
-  assert.equal(selected, "Attention");
-  await page.waitForSelector("#ask.visible");
+  assert.equal(selected.text, "Attention");
   await page.click('#ask-actions .lens[data-lens="explain"]');
   const mark = page.locator(".card .rh-pdf-mark.mark-ready").first();
   await mark.waitFor();
@@ -264,16 +262,10 @@ try {
   assert.match(answerBodies[3].messages.at(-1).content[0].text, /^Selection region image: attached/);
   assert.equal(typeof answerBodies[4].messages.at(-1).content, "string", "inherited images must use the same text-only retry path");
 
-  await page.evaluate((clipId) => {
-    const dc = document.querySelector(`.card[data-id="${clipId}"] .doc-content`);
-    const walker = document.createTreeWalker(dc, NodeFilter.SHOW_TEXT);
-    let text; while ((text = walker.nextNode()) && !text.data.includes("Streamed")) {}
-    const start = text.data.indexOf("Streamed"), range = document.createRange();
-    range.setStart(text, start); range.setEnd(text, start + "Streamed".length);
-    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    dc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  }, boxClip.id);
-  await page.waitForSelector("#ask.visible");
+  await selectVisibleText(page, {
+    text: "Streamed",
+    rootSelector: `.card[data-id="${boxClip.id}"] .doc-content`,
+  });
   await page.fill("#ask-text", "What does this wording mean?");
   await page.click('#ask .ask-commit[data-commit="ask"]');
   for (let i = 0; i < 100 && answerBodies.length < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -427,17 +419,14 @@ try {
 
   // ---- Convert is disabled once the document has branches ------------------
   await page.waitForFunction(() => [...document.querySelectorAll(".card .rh-pdf-textlayer span")].some((el) => el.textContent === "Attention Is All You Need"));
-  const askSelected = await page.evaluate(() => {
-    const span = [...document.querySelectorAll(".card .rh-pdf-textlayer span")].find((el) => el.textContent === "Attention Is All You Need");
-    const text = span.firstChild, range = document.createRange();
-    range.setStart(text, 0); range.setEnd(text, 9);
-    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    const picked = selection.toString(); // the ask box focuses on open, collapsing the native selection
-    span.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    return picked;
+  const askSelected = await selectVisibleText(page, {
+    text: "Attention Is All You Need",
+    rootSelector: ".card .rh-pdf-textlayer",
+    exact: true,
+    start: 0,
+    end: 9,
   });
-  assert.equal(askSelected, "Attention");
-  await page.waitForSelector("#ask.visible");
+  assert.equal(askSelected.text, "Attention");
   await page.click('#ask-actions .lens[data-lens="explain"]');
   await page.locator(".card .rh-pdf-mark.mark-ready").first().waitFor();
   await reloadReadyApp(page);

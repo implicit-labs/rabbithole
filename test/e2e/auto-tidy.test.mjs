@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { bootWebApp } from "../support/web-app-harness.mjs";
+import { selectVisibleText } from "../support/visible-selection.mjs";
 
 const app = await bootWebApp();
 const longScrollAnswer = Array.from({ length: 90 }, (_, index) => "Paragraph " + (index + 1) + " keeps this card scrollable.").join("\n\n");
@@ -216,24 +217,10 @@ async function createDocument(page, markdown) {
 }
 
 async function askFromSelection(page, text, question) {
-  await page.evaluate((needle) => {
-    const root = document.querySelector(".card.root .doc-content[data-node-id]");
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const index = node.nodeValue.indexOf(needle);
-      if (index === -1) continue;
-      const range = document.createRange();
-      range.setStart(node, index);
-      range.setEnd(node, index + needle.length);
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 120, clientY: 160 }));
-      return;
-    }
-    throw new Error("Selection text not found: " + needle);
-  }, text);
+  await selectVisibleText(page, {
+    text,
+    rootSelector: ".card.root .doc-content[data-node-id]",
+  });
   await page.locator("#ask-text").fill(question);
   await page.locator('#ask [data-commit="ask"]').click();
 }

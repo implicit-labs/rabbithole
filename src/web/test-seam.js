@@ -3,7 +3,15 @@
  * exists only for state or artifact inspection that cannot be observed through
  * the product UI; product actions themselves must be driven through real UI.
  */
-export function installTestSeam({ store, currentHoleId, createDocument, exportSnapshot, exportPortable }) {
+export function installTestSeam({
+  store,
+  currentHoleId,
+  createDocument,
+  waitForCanvasViewSettled,
+  selectionAnchorClipBounds,
+  exportSnapshot,
+  exportPortable,
+}) {
   window.__rabbitholeTest = Object.freeze({
     // Routing/reload tests need the raw persistence identity, which the product UI does not expose.
     currentHoleId,
@@ -30,6 +38,11 @@ export function installTestSeam({ store, currentHoleId, createDocument, exportSn
     listStoredHoles: () => store.listHoles(),
     // Structured-authoring tests need model rewrite fixtures, for which the product has no equivalent UI action.
     createDocument,
+    // Camera glides run in a JavaScript rAF loop, outside the Web Animations API.
+    // Selection tests need its real completion promise before emulating a user gesture.
+    waitForCanvasViewSettled,
+    // Keep synthetic selection visibility on the product's exact visual-viewport/overflow geometry.
+    selectionAnchorClipBounds,
     // Snapshot byte/content tests need pre-download artifact strings, which the download UI cannot return.
     exportSnapshot,
     // Portable-projection tests need pre-download artifact strings to compare with the snapshot HTML carrier.

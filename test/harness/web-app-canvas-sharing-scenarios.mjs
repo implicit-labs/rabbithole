@@ -7,6 +7,7 @@ import { serializeForInlineScript } from "../../src/core/utils.js";
 import { assertCodeCopy } from "../support/code-copy.mjs";
 import { MOCK_MODEL, corsHeaders, routeProvider, seedConfiguredOpenRouter } from "../support/provider-mock.mjs";
 import { ROOT, bootWebApp } from "../support/web-app-harness.mjs";
+import { panCanvasBy, selectVisibleText } from "../support/visible-selection.mjs";
 
 const MOCK_KEY = `sk-or-v1-${"x".repeat(64)}`;
 const BAD_KEY = `sk-or-v1-${"y".repeat(64)}`;
@@ -4123,9 +4124,10 @@ async function verifyCanvasBranching() {
       return new DOMRect(-24, innerHeight - 24, 100, 20);
     };
   });
-  await selectText(page, "Euler identity");
-  await page.waitForSelector("#ask.visible");
-  await page.waitForTimeout(180);
+  const edgeSelection = await selectVisibleText(page, {
+    text: "Euler identity",
+    anchorMovesWithCanvas: false,
+  });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "ask-text", "opening the selection bar must focus its input for immediate typing");
   const askEdge = await page.evaluate(() => {
     const anchor = window.getSelection().getRangeAt(0).getBoundingClientRect();
@@ -4138,12 +4140,16 @@ async function verifyCanvasBranching() {
   assert.equal(askEdge.placement, "top-start", "a virtual selection anchor should flip above at the viewport bottom");
   assert(Math.abs(askEdge.gap - askEdge.tokenGap) < 1, `a flipped virtual selection anchor should preserve the token gap, got ${askEdge.gap.toFixed(2)}px vs ${askEdge.tokenGap.toFixed(2)}px`);
   assert(askEdge.left >= askEdge.edge - 1 && askEdge.right <= askEdge.width - askEdge.edge + 1, "the selection bar should clamp inside token viewport edges");
-  await page.evaluate(() => { Range.prototype.getBoundingClientRect = window.__askRangeRect; delete window.__askRangeRect; });
+  await page.evaluate(() => {
+    Range.prototype.getBoundingClientRect = window.__askRangeRect;
+    delete window.__askRangeRect;
+  });
   await page.keyboard.press("Escape");
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
   await page.waitForFunction(() => document.activeElement?.matches(".card.root"));
   assert.equal(await page.evaluate(() => window.getSelection().toString()), "Euler identity", "selection-bar Escape should preserve the live text selection");
   assert.equal(await page.evaluate(() => document.body.classList.contains("mode-canvas")), true, "selection-bar Escape must stay inside the selection bar");
+  await panCanvasBy(page, { x: -edgeSelection.pan.x, y: -edgeSelection.pan.y });
 
   await selectText(page, "Euler identity");
   await page.waitForSelector("#ask.visible");
@@ -4535,24 +4541,7 @@ async function waitForCanvasText(page, text) {
 }
 
 async function selectText(page, needle, rootSelector = ".card .doc-content[data-node-id]") {
-  await page.evaluate(({ text, rootSelector }) => {
-    const root = document.querySelector(rootSelector);
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const idx = node.nodeValue.indexOf(text);
-      if (idx === -1) continue;
-      const range = document.createRange();
-      range.setStart(node, idx);
-      range.setEnd(node, idx + text.length);
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 120, clientY: 160 }));
-      return;
-    }
-    throw new Error(`Text not found: ${text}`);
-  }, { text: needle, rootSelector });
+  await selectVisibleText(page, { text: needle, rootSelector });
 }
 
 async function selectAcrossBlocks(page, startNeedle, endNeedle) {

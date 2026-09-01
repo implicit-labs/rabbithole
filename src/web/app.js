@@ -119,6 +119,11 @@ async function boot() {
     store,
     currentHoleId: () => currentHoleId,
     createDocument: createFromComposerDocument,
+    waitForCanvasViewSettled: async () => (await loadCanvasRuntime()).whenViewAnimationSettled(),
+    selectionAnchorClipBounds: async (element) => {
+      const runtime = await loadCanvasRuntime();
+      return runtime.anchorClipBounds(element, runtime.overlayViewportRect());
+    },
     exportSnapshot: async () => {
       const runtime = await loadCanvasRuntime();
       return runtime.buildSnapshotHtml(await runtime.buildSnapshotProjection());

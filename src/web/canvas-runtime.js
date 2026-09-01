@@ -7,3 +7,5 @@ export { syncPdfTranscriptionControls } from "../ui/pdf-view.js";
 export { buildSnapshotHtml, buildSnapshotProjection, setSnapshotHooks } from "../ui/snapshot.js";
 export { flushPendingSaves } from "../ui/transport-status.js";
 export { registerRendererAssetName } from "../ui/renderer.js";
+export { whenViewAnimationSettled } from "../ui/canvas/camera.js";
+export { anchorClipBounds, viewportRect as overlayViewportRect } from "../ui/overlay/anchor.js";

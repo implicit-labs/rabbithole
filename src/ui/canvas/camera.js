@@ -169,7 +169,25 @@ export function animatePan(tx, ty, source, duration, ease) {
 // search/activity jumps. A newer glide cancels an in-flight one; hidden windows jump
 // instantly (rAF never fires there).
 let viewAnimId = 0,
-  viewAnimRaf = 0;
+  viewAnimRaf = 0,
+  viewAnimPromise = null,
+  resolveViewAnim = null;
+
+function finishViewAnimation() {
+  if (!resolveViewAnim) return;
+  const resolve = resolveViewAnim;
+  viewAnimPromise = null;
+  resolveViewAnim = null;
+  resolve();
+}
+
+// The camera uses a JavaScript rAF loop, so Web Animations and DOM stability
+// cannot report when a glide has actually landed. The web host exposes this
+// promise through its existing test seam; production callers never wait on it.
+export function whenViewAnimationSettled() {
+  const pending = viewAnimPromise;
+  return pending ? pending.then(whenViewAnimationSettled) : Promise.resolve();
+}
 
 export function cancelViewAnimation() {
   viewAnimId++;
@@ -177,6 +195,7 @@ export function cancelViewAnimation() {
     cancelAnimationFrame(viewAnimRaf);
     viewAnimRaf = 0;
   }
+  finishViewAnimation();
 }
 
 export function animateView(tx, ty, ts, opts) {
@@ -195,6 +214,9 @@ export function animateView(tx, ty, ts, opts) {
     ss = view.scale,
     t0 = performance.now(),
     D = opts.duration || 270;
+  viewAnimPromise = new Promise(function (resolve) {
+    resolveViewAnim = resolve;
+  });
   const easeFn = opts.ease === "inOut" ? easeInOutMotion : easeOutMotion;
   function step(t) {
     viewAnimRaf = 0;
@@ -206,6 +228,7 @@ export function animateView(tx, ty, ts, opts) {
     view.scale = ss + (ts - ss) * k;
     applyTransform();
     if (p < 1) viewAnimRaf = requestAnimationFrame(step);
+    else finishViewAnimation();
   }
   viewAnimRaf = requestAnimationFrame(step);
 }

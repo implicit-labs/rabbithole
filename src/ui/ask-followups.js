@@ -331,6 +331,9 @@ function openAskSurface(anchor, owner) {
     surface: ask,
     anchor: surfaceAnchor,
     placement: mobile ? "top-center" : "bottom-start",
+    // The mobile sheet is anchored to the visual viewport, not to the selected
+    // text — the viewport can't scroll away from itself.
+    trackAnchorVisibility: !mobile,
     restoreFocus: false,
     ignoreOutsidePointer: function (event) {
       return !!closestEl(event.target, ".rh-pdf-zoom-control");
