@@ -139,12 +139,15 @@ export const CANVAS_SHELL = `
      and outside-click dismiss it, exactly like every other product surface. -->
 <div id="notepop" class="anchored-menu note-pop" role="dialog" aria-label="Note" tabindex="-1">
   <div class="note-pop-body"></div>
-  <!-- One footer for both states: destructive on the left, document actions
-       on the right; the edit state swaps in the composer's commit pair. -->
+  <!-- One footer for both states: destructive alone on the left, the two
+       forward verbs paired on the right; the edit state swaps in the
+       composer's Note / Ask commit pair on the same skeleton. -->
   <div class="note-pop-actions ask-actions">
     ${iconButtonMarkup({ bare: true, className: "note-pop-btn note-pop-delete", id: "np-delete", svgIconHtml: iconSvg("delete"), title: "Delete note", ariaLabel: "Delete note", aria: { keyshortcuts: "Backspace Delete" } })}
-    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-ask", id: "np-ask", label: "Ask" })}
-    ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-place", id: "np-place", label: "Place on canvas ", kbdHint: "⌘↵", aria: { keyshortcuts: "Meta+Enter Control+Enter" } })}
+    <div class="note-pop-verbs">
+      ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-ask", id: "np-ask", label: "Ask" })}
+      ${buttonMarkup({ bare: true, className: "note-pop-btn note-pop-place", id: "np-place", label: "Place on canvas ", kbdHint: "⌘↵", aria: { keyshortcuts: "Meta+Enter Control+Enter" } })}
+    </div>
   </div>
 </div>
 

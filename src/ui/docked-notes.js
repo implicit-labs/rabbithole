@@ -925,10 +925,14 @@ function renderPopoverState(state) {
   session.view.title = editingAllowed() ? "Double-click to edit" : "";
   // A snapshot reads and nothing more — the whole bar stands down with its verbs.
   footer.style.display = editingAllowed() ? "" : "none";
+  const showPlace = isDockedNote(session.node);
+  const showAsk = showPlace && canAskFromNote(session);
   const place = /** @type {HTMLElement} */ (surface.querySelector(".note-pop-place"));
-  place.style.display = isDockedNote(session.node) ? "" : "none";
+  place.style.display = showPlace ? "" : "none";
   const ask = /** @type {HTMLButtonElement} */ (surface.querySelector(".note-pop-ask"));
-  ask.style.display = isDockedNote(session.node) && canAskFromNote(session) ? "" : "none";
+  ask.style.display = showAsk ? "" : "none";
+  // A pair's seam only makes sense between two standing verbs.
+  footer.classList.toggle("note-only", !(showPlace && showAsk));
 }
 
 /* The edit state is the read state with a caret — same inset, same face — and

@@ -725,10 +725,19 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-pop-view .md p:not(:last-child) { margin-bottom: calc(var(--leading-doc) * 1em); }
 /* One footer for both states, wearing the composer's own hairline bar (see
    .ask-actions above), run out to the popover's edge. Read offers delete,
-   one-gesture Ask, and placement; edit swaps in the Note / Ask commit pair. */
+   one-gesture Ask, and placement; edit swaps in the Note / Ask commit pair.
+   Read borrows the pair's grammar too: delete stands alone on the left, and
+   Ask / Place sit together on the right as a commit pair, each worn at its
+   own width with the seam on their true boundary — the labels are too
+   unequal for the edit bar's half-and-half split. The seam stands down with
+   either verb (see .note-only above). */
 .note-pop .note-pop-actions { margin: 0 calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); }
+.note-pop-verbs { display: flex; gap: 2px; margin-left: auto; }
 .note-pop-delete svg { display: block; }
 .note-pop-ask, .note-pop-place { color: var(--note-ink); }
+.note-pop-place { position: relative; }
+.note-pop-place::before { content: ""; position: absolute; top: 6px; bottom: 6px; left: -1.5px; width: 1px; background: var(--border); pointer-events: none; }
+.note-pop-actions.note-only .note-pop-place::before { display: none; }
 /* Delete reads as ordinary text until you are on it, like every other
    destructive row in the product. */
 .note-pop-delete:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
