@@ -25,14 +25,15 @@ jobs:
       - run: npm ci
       - run: npm run check:types
       - run: npm run check:dist
+      # check:dist must verify the committed dist bytes before build rewrites
+      # them; build then recreates identical dist plus web/dist for docs/deploy.
+      - run: npm run build
       - run: npm run check:purity
       - run: npm run check:docs
       - run: npm run test:unit
-      # check:dist has already verified committed dist/ against a fresh source
-      # build. Rebuild here because web/dist is generated and not committed.
       - name: Build the production site for deploy
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: npm run build:publish
+        run: npm run build:publish -- --skip-build
       - name: Upload the production site artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4

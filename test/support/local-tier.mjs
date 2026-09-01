@@ -9,7 +9,9 @@ import path from "node:path";
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const [tier, ...args] = process.argv.slice(2);
 if (!new Set(["integration", "e2e"]).has(tier)) usage("Expected integration or e2e tier.");
-const jobs = parseJobs(args, process.env.RABBITHOLE_TEST_JOBS || 2);
+// CI runners are small; parallelism is a local-laptop win.
+const defaultJobs = process.env.CI === "true" ? 1 : 2;
+const jobs = parseJobs(args, process.env.RABBITHOLE_TEST_JOBS || defaultJobs);
 if (tier === "e2e" && jobs > 3) usage("The e2e sweep has three bins, so --jobs may not exceed 3.");
 
 if (process.env.CI !== "true") {
