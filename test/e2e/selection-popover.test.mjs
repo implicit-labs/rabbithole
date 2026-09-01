@@ -50,21 +50,35 @@ try {
   // pointer leaving the surface open and stranded in screen space.
   await paragraphs.nth(0).click({ clickCount: 3, position: { x: 36, y: 10 } });
   await page.waitForSelector("#ask.visible");
-  const drift = await page.evaluate(async () => {
+  const attachment = await page.evaluate(async () => {
     const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const offsetFromAnchor = () => {
+      const ask = document.getElementById("ask");
+      const range = CSS.highlights.get("rh-ask").values().next().value;
+      const anchor = range.getBoundingClientRect();
+      return {
+        x: Number.parseFloat(ask.style.left) - anchor.left,
+        y: Number.parseFloat(ask.style.top) - anchor.bottom,
+      };
+    };
     await settle();
-    const ask = document.getElementById("ask");
-    const before = ask.getBoundingClientRect();
+    const before = offsetFromAnchor();
     document.getElementById("viewport").dispatchEvent(
       new WheelEvent("wheel", { deltaX: 64, deltaY: 48, bubbles: true, cancelable: true }),
     );
     await settle();
-    const after = ask.getBoundingClientRect();
-    return { dx: after.left - before.left, dy: after.top - before.top };
+    return { before, after: offsetFromAnchor() };
   });
+  // getBoundingClientRect() includes the popover's 160 ms opening transform,
+  // whose changing scale/translation can add a few visual pixels on a slow
+  // runner. Layout attachment is the invariant; 0.01px only covers CSS-number
+  // serialization (a stranded surface changes this offset by the 64/48px pan).
+  const attachmentEpsilon = 0.01;
   assert.ok(
-    Math.abs(drift.dx + 64) <= 2 && Math.abs(drift.dy + 48) <= 2,
-    `the selection popover must track a canvas pan (moved ${drift.dx},${drift.dy}; expected -64,-48)`,
+    Math.abs(attachment.after.x - attachment.before.x) <= attachmentEpsilon &&
+      Math.abs(attachment.after.y - attachment.before.y) <= attachmentEpsilon,
+    `the selection popover must preserve its anchor offset through a canvas pan ` +
+      `(before ${attachment.before.x},${attachment.before.y}; after ${attachment.after.x},${attachment.after.y})`,
   );
   await page.keyboard.press("Escape");
   await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
