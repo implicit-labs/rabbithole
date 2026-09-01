@@ -1,5 +1,6 @@
 import { BRANCH_SELECTION, branchTypeOfNode, isDockedNote, isReactionNote } from "../core/hole/ask.js";
 import { makeNode } from "../core/hole/node.js";
+import { iconSvg } from "../core/html/icons.js";
 import { DEFAULT_CHILD, nodeOrder, placeChild as sharedPlaceChild } from "../core/layout.js";
 import { removeBranch } from "./branch-surfaces.js";
 import {
@@ -593,7 +594,10 @@ function reactionTooltipContent(node) {
     remove.type = "button";
     remove.className = "reaction-delete";
     remove.setAttribute("aria-label", "Remove reaction");
-    remove.textContent = "×";
+    // The product's close icon, not a text ×: glyph ink never centers in its
+    // em box, an SVG centers exactly. Rendered small so it reads as
+    // punctuation beside the emoji, never a peer control.
+    remove.innerHTML = iconSvg("close", { size: 10 });
     tip.appendChild(remove);
   }
   return tip;

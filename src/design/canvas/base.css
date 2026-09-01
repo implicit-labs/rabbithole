@@ -700,14 +700,19 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    layout. */
 .reaction-tip-wrap { position: absolute; z-index: var(--layer-local-top); bottom: 100%; display: block; padding-bottom: 5px;
   transform: translateX(-50%); pointer-events: auto; font: var(--text-ui)/1 var(--font-ui); white-space: nowrap; }
-.reaction-tooltip { display: inline-flex; min-height: 24px; align-items: center; gap: 3px; padding: 0 4px 0 7px;
+.reaction-tooltip { display: inline-flex; min-height: 24px; align-items: center; gap: 2px; padding: 0 3px 0 7px;
   border: var(--border-default); border-radius: var(--radius-control); background: var(--surface-popover-bg); color: var(--fg-bold);
   box-shadow: var(--surface-popover-shadow); -webkit-backdrop-filter: var(--surface-popover-blur); backdrop-filter: var(--surface-popover-blur); }
 .reaction-tooltip-glyph { display: inline-flex; align-items: center; filter: none; }
+/* The remove affordance wears the resting icon-button grammar (.tool-icon):
+   faint ink that speaks only through the icon — bold on hover, a small dip on
+   press, never a wash. The hit target stays 22px; only the ink is small. */
 .reaction-delete { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; padding: 0; border: 0;
-  border-radius: var(--radius-control); background: none; color: var(--fg-dim); cursor: pointer; font: var(--weight-medium) var(--text-lg)/1 var(--font-ui); }
-@media (hover: hover) { .reaction-delete:hover { background: var(--note-hl-strong); color: var(--fg-bold); } }
-.reaction-delete:active { background: var(--note-hl-strong); }
+  border-radius: var(--radius-control); background: none; color: var(--fg-faint); cursor: pointer; transition: var(--transition-color); }
+.reaction-delete svg { display: block; transition: transform var(--duration-fast) var(--ease-standard); }
+@media (hover: hover) { .reaction-delete:hover { color: var(--fg-bold); } }
+.reaction-delete:active { color: var(--fg-bold); }
+.reaction-delete:active svg { transform: scale(0.88); }
 .reaction-delete:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .reaction-tip-svg { overflow: visible; transform: none; }
 .reaction-tip-svg-inner { display: flex; width: 100%; height: 100%; align-items: flex-end; justify-content: center; }
@@ -738,9 +743,10 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .note-pop-place { position: relative; }
 .note-pop-place::before { content: ""; position: absolute; top: 6px; bottom: 6px; left: -1.5px; width: 1px; background: var(--border); pointer-events: none; }
 .note-pop-actions.note-only .note-pop-place::before { display: none; }
-/* Delete reads as ordinary text until you are on it, like every other
-   destructive row in the product. */
-.note-pop-delete:hover { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+/* Delete reads as ordinary text until you are on it; the warning lives in
+   the icon alone — no wash behind it. */
+.note-pop-delete:hover { color: var(--warn); background: none; }
+.note-pop-delete:active { color: var(--warn); background: none; }
 
 /* Mobile selection is a separate interaction model: keep the desktop palette
    anchored to the text, but give touch users a stable, thumb-reachable sheet. */
