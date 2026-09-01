@@ -774,6 +774,19 @@ async function verifyDockedNotes() {
       return hole.nodes.find((node) => node.markdown === markdown).id;
     }
 
+    async function selectPopoverText() {
+      await page.locator("#notepop .doc-content").evaluate((surface) => {
+        const text = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT).nextNode();
+        const range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, text.textContent.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      });
+    }
+
     // The unadvertised power chord keeps the pre-docking outcome: one note
     // born with geometry and a standard parent edge, never a transient dot.
     await selectText(page, "this document");
@@ -859,6 +872,9 @@ async function verifyDockedNotes() {
       ], viewStyle: { background: "rgba(0, 0, 0, 0)", borderLeft: "0px", padding: ["8px", "10px", "8px", "10px"] },
       editors: 0 },
     "read state: icon-only delete on the left, one-gesture Ask, and Place on canvas on the right");
+    await selectPopoverText();
+    assert.equal(await page.locator("#ask.visible").count(), 0,
+      "selecting text in a docked note's read state must not open the selection popover");
     const chipParity = await popover.evaluate((surface) => {
       const signature = (chip) => {
         const style = getComputedStyle(chip);
@@ -904,6 +920,9 @@ async function verifyDockedNotes() {
 
     await popover.locator(".note-pop-view").dblclick();
     await popover.locator(".note-editor").waitFor();
+    await selectPopoverText();
+    assert.equal(await page.locator("#ask.visible").count(), 0,
+      "selecting text in a docked note's edit state must not open the selection popover");
     assert.deepEqual(await popover.locator(".ask-commit").evaluateAll((buttons) => buttons.map((button) => ({
       commit: button.dataset.commit, hint: button.querySelector("kbd")?.textContent }))), [
       { commit: "note", hint: "↵" }, { commit: "ask", hint: "⌘↵" },

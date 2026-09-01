@@ -173,7 +173,11 @@ function queueMobileAsk(delay) {
 }
 
 function selectionOwner(dc) {
-  return (dc && dc.closest && dc.closest(".card")) || readerMain;
+  const card = dc && dc.closest && dc.closest(".card");
+  if (card) return card;
+  // A .doc-content outside a card or reader (docked-note popover, pinned-origin
+  // proxy) is not an askable surface.
+  return dc && readerMain && readerMain.contains(dc) ? readerMain : null;
 }
 function onAskOwnerKeydown(e) {
   if (e.key !== "Tab" || e.shiftKey || !ask.classList.contains("visible")) return;
@@ -201,6 +205,8 @@ function maybeShowAsk() {
   if (dc.classList.contains("rh-pdf")) return;
   const parentId = dc.dataset.nodeId;
   if (!parentId || !nodes[parentId]) return;
+  const owner = selectionOwner(dc);
+  if (!owner) return;
   // The surface stays open while the agent is merely away — only a fully
   // closed session cannot accept a durable note or queued ask.
   if (closed) {
@@ -230,7 +236,6 @@ function maybeShowAsk() {
   paintSelectionHighlight(selectionDraft.range);
   ask.classList.add("visible");
   updateSelectionComposerState();
-  const owner = selectionOwner(dc);
   const virtualAnchor = {
     getBoundingClientRect: function () {
       return selectionDraft.range.getBoundingClientRect();
@@ -308,7 +313,7 @@ export function showAskFromSelection(options) {
   if (selectionDraft.range) paintSelectionHighlight(selectionDraft.range);
   ask.classList.add("visible");
   updateSelectionComposerState();
-  const owner = selectionOwner(selectionDraft.container);
+  const owner = selectionOwner(selectionDraft.container) || readerMain;
   askTabOwner = owner;
   askOwnerCleanup = askLifecycle.scope
     ? askLifecycle.scope.listen(document, "keydown", onAskOwnerKeydown)
