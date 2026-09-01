@@ -541,6 +541,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
   transform: scale(0.97) translateY(-4px); transform-origin: top center;
   transition: opacity var(--duration-enter) var(--ease-out), transform var(--duration-enter) var(--ease-out), visibility var(--duration-zero) linear var(--duration-enter); }
 #ask.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: scale(1) translateY(0); transition-delay: var(--duration-zero); }
+/* An anchored surface annotates visible text. When its anchor pans or scrolls
+   out of view the surface fades away with it — still open, draft intact — and
+   fades back in beside the text when it returns. Opacity only: flipping
+   visibility here would cut the fade short. */
+#ask.visible[data-anchor-hidden], .anchored-menu.visible[data-anchor-hidden] { opacity: 0; pointer-events: none; }
 #ask.over-lightbox { z-index: calc(var(--layer-lightbox) + 1); }
 /* Accent on the hairline only — the 3px glow around the whole surface was the harsh
    part. Pitched to sit at the weight of the lens hover wash: --hl itself is right for

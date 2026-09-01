@@ -44,6 +44,68 @@ try {
   assert.equal(await page.locator("#ask.visible").count(), 0,
     "a real selection extending into card controls must remain rejected");
 
+  // The popover must stay with its selection while the canvas view moves
+  // underneath it — a trackpad wheel-pan repositions the world without any
+  // pointer leaving the surface open and stranded in screen space.
+  await paragraphs.nth(0).click({ clickCount: 3, position: { x: 36, y: 10 } });
+  await page.waitForSelector("#ask.visible");
+  const drift = await page.evaluate(async () => {
+    const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await settle();
+    const ask = document.getElementById("ask");
+    const before = ask.getBoundingClientRect();
+    document.getElementById("viewport").dispatchEvent(
+      new WheelEvent("wheel", { deltaX: 64, deltaY: 48, bubbles: true, cancelable: true }),
+    );
+    await settle();
+    const after = ask.getBoundingClientRect();
+    return { dx: after.left - before.left, dy: after.top - before.top };
+  });
+  assert.ok(
+    Math.abs(drift.dx + 64) <= 2 && Math.abs(drift.dy + 48) <= 2,
+    `the selection popover must track a canvas pan (moved ${drift.dx},${drift.dy}; expected -64,-48)`,
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
+
+  // The popover annotates visible text: pan the card fully off-screen and the
+  // surface hides with it (still open, draft intact); pan back and it returns.
+  await paragraphs.nth(0).click({ clickCount: 3, position: { x: 36, y: 10 } });
+  await page.waitForSelector("#ask.visible");
+  const wheelPan = (dx, dy) =>
+    page.evaluate(async ([deltaX, deltaY]) => {
+      document
+        .getElementById("viewport")
+        .dispatchEvent(new WheelEvent("wheel", { deltaX, deltaY, bubbles: true, cancelable: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, [dx, dy]);
+  await wheelPan(2600, 0);
+  await page.waitForSelector("#ask.visible[data-anchor-hidden]");
+  await wheelPan(-2600, 0);
+  await page.waitForSelector("#ask.visible:not([data-anchor-hidden])");
+
+  // The same rule inside a card: scroll the selection out of the card body and
+  // the popover hides; scroll back and it returns.
+  await page.evaluate(() => {
+    const dc = document.querySelector(".card.root .doc-content");
+    for (let i = 0; i < 40; i++) {
+      const p = document.createElement("p");
+      p.textContent = `Filler paragraph ${i} so the card body scrolls.`;
+      dc.appendChild(p);
+    }
+  });
+  const scrollCardBody = (top) =>
+    page.evaluate(async (scrollTop) => {
+      document.querySelector(".card.root .card-body").scrollTop = scrollTop;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, top);
+  await scrollCardBody(4000);
+  await page.waitForSelector("#ask.visible[data-anchor-hidden]");
+  await scrollCardBody(0);
+  await page.waitForSelector("#ask.visible:not([data-anchor-hidden])");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#ask:not(.visible)", { state: "attached" });
+
   console.log("ok e2e: final-paragraph selection opens the popover");
 } finally {
   await app.close();

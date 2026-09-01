@@ -22,14 +22,16 @@ import { canvasCard } from "./shared.js";
 // CANVAS
 // ===========================================================================
 export function applyTransform() {
-  // The card menu is a fixed-position surface anchored to a card's screen
-  // rect, and a transform moves that rect without resizing anything the
-  // anchor observes. Panning or zooming with the menu open would strand it
-  // mid-canvas, so the view moving dismisses it.
+  // The card menu and the docked-note popover are transient command surfaces:
+  // the view moving underneath them dismisses them rather than chases them.
   if (r.cardMenuController && r.cardMenuController.isOpen()) r.cardMenuController.close({ restoreFocus: false });
   r.lifecycle.hooks.closeDockedNotePopover({ restoreFocus: false, commit: true });
   world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.scale + ")";
   zoomLabel.textContent = Math.round(view.scale * 100) + "%";
+  // A transform moves every on-canvas anchor rect without firing anything a
+  // resize or mutation observer can see. Announce the view change so open
+  // anchored surfaces (the selection ask/note popover) follow their anchors.
+  document.dispatchEvent(new CustomEvent("rh-view-change"));
   r.lifecycle.hooks.scheduleViewSave();
 }
 

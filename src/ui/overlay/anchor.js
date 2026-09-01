@@ -28,6 +28,31 @@ function oppositeSide(side) {
   return side === "top" ? "bottom" : side === "bottom" ? "top" : side === "left" ? "right" : "left";
 }
 
+// The region where an anchor counts as visible: the visual viewport cut down
+// by every overflow-clipping ancestor — the canvas viewport, a card body
+// scrolling its document. An anchored surface annotates visible content; when
+// its anchor leaves this region the surface hides (data-anchor-hidden) rather
+// than clamps to an edge, because clamping strands an orphan beside nothing
+// and dismissing would throw away a draft.
+function anchorClipBounds(element, viewport) {
+  let left = viewport.left,
+    top = viewport.top,
+    right = viewport.left + viewport.width,
+    bottom = viewport.top + viewport.height;
+  let el = element;
+  while (el && el !== document.body && el !== document.documentElement) {
+    if (/auto|scroll|hidden|clip/.test(getComputedStyle(el).overflow)) {
+      const rect = el.getBoundingClientRect();
+      if (rect.left > left) left = rect.left;
+      if (rect.top > top) top = rect.top;
+      if (rect.right < right) right = rect.right;
+      if (rect.bottom < bottom) bottom = rect.bottom;
+    }
+    el = el.parentElement;
+  }
+  return { left: left, top: top, right: right, bottom: bottom };
+}
+
 // An open surface keeps the side it opened on. Anchors wobble by fractions of
 // a pixel — hover transforms, streaming re-measures, dot repositioning — and a
 // naive side flip near the threshold teleports the surface across its anchor.
@@ -75,11 +100,18 @@ export function anchorSurface(trigger, surface, options) {
     let parts = placement.split("-"),
       side = parts[0],
       align = parts[1] || "center";
-    let left, top;
+    let left,
+      top,
+      anchorVisible = true;
     if (side === "center") {
       left = viewport.left + (viewport.width - box.width) / 2;
       top = viewport.top + (viewport.height - box.height) / 2;
     } else {
+      // Centered surfaces are exempt: a modal is not an annotation of its
+      // trigger, so the trigger scrolling away must not hide it.
+      const clip = anchorClipBounds(observedTrigger instanceof Element ? observedTrigger : null, viewport);
+      anchorVisible =
+        anchor.left < clip.right && anchor.right > clip.left && anchor.top < clip.bottom && anchor.bottom > clip.top;
       const vertical = side === "top" || side === "bottom";
       // Sticky side: once a side has been settled on, keep preferring it.
       if (settledSide === side || settledSide === oppositeSide(side)) side = settledSide;
@@ -113,8 +145,14 @@ export function anchorSurface(trigger, surface, options) {
               : anchor.top + (anchor.height - box.height) / 2;
       }
     }
-    left = clampToViewport(left, viewport.left + edge, viewport.left + viewport.width - edge - box.width);
-    top = clampToViewport(top, viewport.top + edge, viewport.top + viewport.height - edge - box.height);
+    // The reachability clamp is for a surface the user can see. A hidden
+    // surface keeps its unclamped position so it fades back in exactly beside
+    // its anchor when the content returns.
+    if (anchorVisible) {
+      left = clampToViewport(left, viewport.left + edge, viewport.left + viewport.width - edge - box.width);
+      top = clampToViewport(top, viewport.top + edge, viewport.top + viewport.height - edge - box.height);
+    }
+    surface.toggleAttribute("data-anchor-hidden", !anchorVisible);
     if (left !== lastLeft) surface.style.left = left + "px";
     if (top !== lastTop) surface.style.top = top + "px";
     lastLeft = left;
@@ -128,6 +166,13 @@ export function anchorSurface(trigger, surface, options) {
   window.addEventListener("resize", update, { passive: true });
   window.visualViewport?.addEventListener("resize", update, { passive: true });
   window.visualViewport?.addEventListener("scroll", update, { passive: true });
+  // Two things move an anchor's screen rect without firing anything an
+  // observer can see: the canvas view transform (announced as rh-view-change
+  // by applyTransform) and an ordinary DOM scroll — a card body or the reader
+  // scrolling under an open surface. Track both, so a surface follows its
+  // anchor instead of stranding at a stale screen position.
+  document.addEventListener("rh-view-change", update, { passive: true });
+  window.addEventListener("scroll", update, { capture: true, passive: true });
   const resizeObserver =
     typeof ResizeObserver === "function"
       ? new ResizeObserver(function () {
@@ -147,6 +192,8 @@ export function anchorSurface(trigger, surface, options) {
       window.removeEventListener("resize", update);
       window.visualViewport?.removeEventListener("resize", update);
       window.visualViewport?.removeEventListener("scroll", update);
+      document.removeEventListener("rh-view-change", update);
+      window.removeEventListener("scroll", update, { capture: true });
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     },
