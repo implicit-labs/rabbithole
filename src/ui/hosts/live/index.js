@@ -91,6 +91,7 @@ export function startRabbithole(hydration, options) {
         loadMermaid: options.loadMermaid || null,
         exportSnapshot: downloadSnapshot,
         exportPortable: options.exportPortable || null,
+        vivoUnitFromSelection: options.vivoUnitFromSelection || null,
         canvasMaintenanceFactory: function () {
           return createCanvasMaintenance(options.clock);
         },

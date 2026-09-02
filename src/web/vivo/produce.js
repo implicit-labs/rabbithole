@@ -103,3 +103,33 @@ export async function produceVivoNodes({ host, anchorForQuote = () => null }) {
   await host.flushSave();
   return { created: pending.length, skipped: units.length - pending.length };
 }
+
+/**
+ * Fold freshly minted units (archive shape: id/kind/task_category/text/
+ * verbatim/status) into the root's vivo namespace so produce-nodes can fan
+ * them out. Existing unit ids are skipped. Returns how many were added.
+ * @param {{host: any, units: any[]}} input
+ */
+export function appendVivoUnits({ host, units }) {
+  const state = host.state;
+  const root = state.nodes.get(state.root_id);
+  const vivo = root?.extensions?.vivo;
+  if (!vivo) throw new Error("This document is not a Vivo transcript.");
+  const existing = new Set((vivo.units ?? []).map((unit) => unit.unit_id));
+  const added = units
+    .filter((unit) => unit?.id && !existing.has(unit.id))
+    .map((unit) => ({
+      unit_id: unit.id,
+      kind: unit.kind,
+      task_category: unit.task_category ?? null,
+      text: unit.text,
+      verbatim: unit.verbatim ?? null,
+      status: unit.status ?? "inbox",
+    }));
+  if (added.length === 0) return 0;
+  host.engine.patchExtension(root.id, "vivo", {
+    ...vivo,
+    units: [...(vivo.units ?? []), ...added],
+  });
+  return added.length;
+}

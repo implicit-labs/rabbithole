@@ -52,3 +52,27 @@ export async function extractVivoUnits(baseUrl, ticket, text, fetchImpl = global
   }
   return body;
 }
+
+/**
+ * Mint atomic units from a highlighted transcript passage. The server verifies
+ * the passage against the stored transcript and persists the resulting units
+ * on the capture; the response uses the archive's atomic-unit shape.
+ * @param {string} baseUrl @param {string} ticket @param {string} captureId @param {string} passage
+ * @returns {Promise<{units: VivoUnit[]}>}
+ */
+export async function createVivoUnitsFromPassage(baseUrl, ticket, captureId, passage, fetchImpl = globalThis.fetch.bind(globalThis)) {
+  const response = await fetchImpl(`${baseUrl}/api/debug/transcripts/units`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ capture_id: captureId, passage }),
+  });
+  const body = await response.json().catch(() => null);
+  if (response.status === 401) throw new Error("Your Vivo session expired. Sign in again.");
+  if (response.status === 413) throw new Error("That selection is too long — highlight a tighter passage.");
+  if (response.status === 422) throw new Error("That selection doesn't match the raw transcript, so it can't ground a unit.");
+  if (!response.ok || !Array.isArray(body?.units)) {
+    throw new Error(body?.error || "Creating the unit is unavailable right now.");
+  }
+  return { units: body.units };
+}

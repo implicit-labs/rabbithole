@@ -2,6 +2,7 @@ import { systemClock } from "../core/clock.js";
 import { BRANCH_FOLLOWUP, BRANCH_SELECTION } from "../core/hole/ask.js";
 import { truncate } from "../core/hole/lens.js";
 import { makeNode } from "../core/hole/node.js";
+import { buttonMarkup } from "../core/html/markup.js";
 import {
   DEFAULT_CHILD,
   nodeOrder,
@@ -62,8 +63,12 @@ const askLifecycle = createModuleLifecycle({
 // ===========================================================================
 // ASK (shared by both views)
 // ===========================================================================
-export function initAskFollowups() {
+let vivoUnitHook = null;
+
+/** @param {{vivoUnitFromSelection?: Function | null}} [options] */
+export function initAskFollowups(options) {
   disposeAskFollowupResources(false);
+  vivoUnitHook = options && typeof options.vivoUnitFromSelection === "function" ? options.vivoUnitFromSelection : null;
   const askScope = askLifecycle.beginInit();
   // wireComposerActions takes a bare function — keep scope ownership explicit.
   function scopeListen(target, type, handler) {
@@ -74,6 +79,29 @@ export function initAskFollowups() {
   }
   renderAskPresetActions(document.getElementById("ask-actions"), "selection");
   renderAskPresetActions(composerActions, "followup");
+  const askActionsEl = document.getElementById("ask-actions");
+  askActionsEl.querySelector(".vivo-unit-commit")?.remove();
+  if (vivoUnitHook) {
+    // Vivo-only: turn the selected passage into a persisted atomic unit. The
+    // button shares .ask-commit state handling but no data-commit routing.
+    askActionsEl.querySelector(".commit-actions")?.insertAdjacentHTML(
+      "afterbegin",
+      buttonMarkup({
+        bare: true,
+        className: "ask-commit vivo-unit-commit",
+        title: "Create a Vivo atomic unit from this selection",
+        label: "Unit ",
+        labelClass: "ask-commit-label",
+        hidden: true,
+      }),
+    );
+    const vivoCommit = askActionsEl.querySelector(".vivo-unit-commit");
+    if (vivoCommit) {
+      askScope.listen(vivoCommit, "click", function () {
+        commitVivoUnit();
+      });
+    }
+  }
   askScope.addCleanup(
     onPreferenceChange(function (kind) {
       if (kind === "ask-presets") refreshAskPresetActions();
@@ -465,6 +493,19 @@ export function updateSelectionComposerState() {
       noteCommit.title = "Visual selections can be asked about";
     }
   }
+  const vivoCommit = /** @type {HTMLButtonElement | null} */ (actions.querySelector(".vivo-unit-commit"));
+  if (vivoCommit) {
+    const vivoDoc =
+      !!vivoUnitHook &&
+      !!parent?.extensions?.vivo?.capture_id &&
+      !selectionDraft.blockAnchor &&
+      !selectionDraft.pdfAnchor;
+    vivoCommit.hidden = !vivoDoc;
+    // Unlike Note/Ask, the unit action needs no typed draft — the selection
+    // itself is the input. Re-enable after the shared draft gating.
+    vivoCommit.disabled = !vivoDoc || askText.disabled || parentPending;
+    vivoCommit.dataset.intentBlocked = vivoCommit.disabled ? "true" : "false";
+  }
   const noteBlocked = !noteCommit || noteCommit.dataset.intentBlocked === "true";
   /** @type {NodeListOf<HTMLButtonElement>} */ (actions.querySelectorAll(".thumb")).forEach(function (thumb) {
     thumb.disabled = noteBlocked;
@@ -481,6 +522,15 @@ function retirePdfConversionAction(parent) {
   document
     .querySelector('#tb-document .rh-pdf-reader-toolbar[data-pdf-node-id="' + parent.id + '"] .rh-pdf-convert')
     ?.remove();
+}
+
+function commitVivoUnit() {
+  if (!vivoUnitHook || !selectionDraft || closed) return;
+  const parent = nodes[selectionDraft.parentId];
+  if (!parent || parent.status === "pending" || parent.source?.converting) return;
+  const draft = selectionDraft;
+  hideAsk();
+  vivoUnitHook({ parentId: draft.parentId, selectedText: draft.selectedText });
 }
 
 function submitAsk(lensKey, source) {

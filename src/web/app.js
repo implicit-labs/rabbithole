@@ -28,7 +28,7 @@ import { currentCanvasRuntime, loadCanvasRuntime, warmCanvasRuntime } from "./ca
 import { mountWebShell } from "./shell/shell.js";
 import { requireVivoSession, vivoStoreDbName } from "./vivo/gate.js";
 import { vivoBaseUrl } from "./vivo/config.js";
-import { listVivoCaptures, vivoCaptureTitle } from "./vivo/api.js";
+import { createVivoUnitsFromPassage, listVivoCaptures, vivoCaptureTitle } from "./vivo/api.js";
 import {
   autoGrowTextarea,
   formatRelativeDate,
@@ -767,6 +767,40 @@ function vivoAnchorForQuote(rootId, quote) {
   return { offset_start: start, offset_end: start + quote.length };
 }
 
+/** Selection popover hook: mint persisted unit(s) from a highlighted passage. */
+async function vivoUnitFromSelection({ selectedText }) {
+  const host = currentHost;
+  if (!host || !vivoSession) return;
+  const workspaceRuntime = await loadWorkspaceRuntime();
+  const root = host.state.nodes.get(host.state.root_id);
+  const captureId = root?.extensions?.vivo?.capture_id;
+  if (!captureId) return;
+  const passage = workspaceRuntime.rawPassageForSelection(root.markdown, selectedText);
+  if (!passage) {
+    showToast({ message: "That selection couldn't be matched to the raw transcript." });
+    return;
+  }
+  showToast({ message: "Creating atomic unit…" });
+  try {
+    const { units } = await createVivoUnitsFromPassage(vivoBaseUrl(), vivoSession.ticket, captureId, passage);
+    if (currentHost !== host) return;
+    if (!units.length) {
+      showToast({ message: "The pipeline found no durable unit in that passage." });
+      return;
+    }
+    workspaceRuntime.appendVivoUnits({ host, units });
+    const rootId = host.state.root_id;
+    const { created } = await workspaceRuntime.produceVivoNodes({
+      host,
+      anchorForQuote: (quote) => vivoAnchorForQuote(rootId, quote),
+    });
+    syncVivoProduceButton(workspaceRuntime);
+    showToast({ message: `Added ${created} unit${created === 1 ? "" : "s"} from your selection.` });
+  } catch (err) {
+    if (currentHost === host) showToast({ message: err?.message || "Creating the unit failed." });
+  }
+}
+
 async function runVivoProduce() {
   if (!currentHost) return;
   const host = currentHost;
@@ -967,6 +1001,9 @@ async function mountHole(hole, { replace = false } = {}) {
       clock: injectedAutoTidyClock,
       transport: host.adapter(),
       exportPortable: exportCurrentRabbithole,
+      vivoUnitFromSelection: vivoSession
+        ? (selection) => { void vivoUnitFromSelection(selection); }
+        : null,
       loadMermaid: loadMermaidRuntime,
       getPdfTranscriptionCapability: () => currentPdfTranscriptionCapability,
     });

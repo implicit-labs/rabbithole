@@ -170,7 +170,7 @@ export function createRabbitholeUi({ hydration, host, capabilities } = {}) {
     // sees the event once its surfaces have declined it.
     initDockedNotes();
     own(disposeDockedNotes);
-    initAskFollowups();
+    initAskFollowups({ vivoUnitFromSelection: capabilities.vivoUnitFromSelection || null });
     own(disposeAskFollowups);
     initPalette(paletteHooks);
     own(disposePalette);
