@@ -9,6 +9,7 @@ declare global {
   }
 
   const __RABBITHOLE_DEFAULT_PROXY_URL__: string;
+  const __VIVO_BASE_URL__: string;
 }
 
 export {};

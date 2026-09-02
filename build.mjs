@@ -171,6 +171,7 @@ async function buildWebApp(assetDir) {
     loader: { ".css": "text" },
     define: {
       __RABBITHOLE_DEFAULT_PROXY_URL__: JSON.stringify(proxyConfig.defaultUrl),
+      __VIVO_BASE_URL__: JSON.stringify(process.env.VIVO_BASE_URL || ""),
     },
     legalComments: "none",
     logLevel: "silent"

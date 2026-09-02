@@ -9,6 +9,7 @@ import { IdbStore } from "./store/idb-store.js";
 import { openDialog } from "../ui/primitives/dialog.js";
 import { openPopover } from "../ui/primitives/popover.js";
 import { escapeHtml } from "../core/utils.js";
+import { BUTTON_TAG, iconButtonMarkup } from "../core/html/markup.js";
 import { iconSvg } from "../core/html/icons.js";
 import { closestEl } from "../ui/dom.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
@@ -25,6 +26,9 @@ import {
 } from "./snapshot-runtime.js";
 import { currentCanvasRuntime, loadCanvasRuntime, warmCanvasRuntime } from "./canvas-runtime-loader.js";
 import { mountWebShell } from "./shell/shell.js";
+import { requireVivoSession, vivoStoreDbName } from "./vivo/gate.js";
+import { vivoBaseUrl } from "./vivo/config.js";
+import { listVivoCaptures, vivoCaptureTitle } from "./vivo/api.js";
 import {
   autoGrowTextarea,
   formatRelativeDate,
@@ -44,7 +48,9 @@ const GITHUB_REPO_API_URL = "https://api.github.com/repos/shlokkhemani/rabbithol
 const GITHUB_STARS_CACHE_KEY = "rh-github-stars-v1";
 const GITHUB_STARS_CACHE_TTL = 6 * 60 * 60 * 1000;
 
-const store = new IdbStore();
+/* Assigned in boot(): the Vivo gate decides which database this session uses. */
+let store = null;
+let vivoSession = null;
 let currentHost = null;
 let currentHoleId = null;
 let currentUi = null;
@@ -93,10 +99,13 @@ function consumeInitialBridgePairing() {
 
 async function boot() {
   document.body.classList.add("web-app");
+  vivoSession = await requireVivoSession();
+  store = vivoSession ? new IdbStore({ dbName: vivoStoreDbName(vivoSession.email) }) : new IdbStore();
   renderShell();
   initAppChrome();
   initComposer();
   initGlobalDrops();
+  if (vivoSession) initVivoComposerPath();
 
   const summariesPromise = store.listHoles().then((summaries) => {
     railSummaries = summaries;
@@ -500,6 +509,8 @@ function openComposer({ source = "button", value = "", trigger } = {}) {
   card.removeAttribute("data-path");
   document.getElementById("composer-start").hidden = false;
   document.getElementById("composer-entry").hidden = true;
+  const vivoSection = document.getElementById("composer-vivo");
+  if (vivoSection) vivoSection.hidden = true;
   input.value = value;
   autoGrowTextarea(input, composerInputMaxHeight());
   document.getElementById("blank-start").hidden = true;
@@ -570,6 +581,8 @@ function showComposerStart() {
   setIngestStatus("");
   document.getElementById("composer-card").removeAttribute("data-path");
   document.getElementById("composer-entry").hidden = true;
+  const vivoSection = document.getElementById("composer-vivo");
+  if (vivoSection) vivoSection.hidden = true;
   document.getElementById("composer-start").hidden = false;
   /** @type {HTMLTextAreaElement} */ (document.getElementById("composer-input")).value = "";
   document.getElementById("composer-card").focus({ preventScroll: true });
@@ -651,6 +664,130 @@ async function createFromUrl(rawUrl) {
     await startHole(await store.loadHole(hole.hole_id) || hole);
   } catch (err) {
     setIngestStatus(err?.message || String(err), "error");
+  }
+}
+
+/* Vivo chrome is injected only for signed-in sessions, so un-configured
+   builds keep the upstream DOM byte-for-byte (and upstream tests keep their
+   four composer paths). */
+function initVivoComposerPath() {
+  document.querySelector("#composer-modal .composer-paths")?.insertAdjacentHTML("beforeend",
+    `<${BUTTON_TAG} class="composer-path" id="composer-path-vivo" type="button" data-path="vivo"><span class="composer-path-icon" aria-hidden="true">${iconSvg("file-text")}</span><span class="composer-path-copy"><strong>Open a Vivo transcript</strong><small>Start from a captured voice session.</small></span><span class="composer-path-arrow" aria-hidden="true">→</span></button>`);
+  document.getElementById("composer-entry")?.insertAdjacentHTML("beforebegin",
+    `<section id="composer-vivo" class="composer-vivo" hidden>
+      <${BUTTON_TAG} id="composer-vivo-back" class="composer-back" type="button"><span aria-hidden="true">←</span> All options</button>
+      <header class="composer-entry-head"><h2>Open a Vivo transcript</h2><p>Pick a captured session, or record a new voice memo first.</p></header>
+      <ul id="composer-vivo-list" class="composer-vivo-list"></ul>
+      <div class="composer-vivo-actions">
+        <a id="composer-vivo-record" class="composer-vivo-record" href="${escapeHtml(`${vivoBaseUrl()}/vivo`)}" target="_blank" rel="noopener noreferrer">Record a voice memo ↗</a>
+        <${BUTTON_TAG} id="composer-vivo-refresh" type="button">Refresh</button>
+      </div>
+    </section>`);
+  document.getElementById("t-new")?.insertAdjacentHTML("afterend",
+    iconButtonMarkup({ id: "t-vivo-produce", title: "Produce Vivo nodes", ariaLabel: "Produce Vivo nodes", hidden: true, svgIconHtml: iconSvg("area-select") }));
+  document.getElementById("composer-path-vivo")?.addEventListener("click", () => { void showVivoPicker(); });
+  document.getElementById("composer-vivo-back")?.addEventListener("click", showComposerStart);
+  document.getElementById("composer-vivo-refresh")?.addEventListener("click", () => { void showVivoPicker(); });
+  document.getElementById("t-vivo-produce")?.addEventListener("click", () => { void runVivoProduce(); });
+}
+
+async function showVivoPicker() {
+  if (!vivoSession) return;
+  composerPath = "vivo";
+  document.getElementById("composer-start").hidden = true;
+  document.getElementById("composer-entry").hidden = true;
+  document.getElementById("composer-card").dataset.path = "vivo";
+  const section = document.getElementById("composer-vivo");
+  section.hidden = false;
+  const list = document.getElementById("composer-vivo-list");
+  list.innerHTML = "";
+  setIngestStatus("Loading sessions...", "busy");
+  try {
+    const captures = (await listVivoCaptures(vivoBaseUrl(), vivoSession.ticket))
+      .filter((capture) => String(capture.transcript || "").trim());
+    setIngestStatus("");
+    if (!captures.length) {
+      list.innerHTML = `<li class="composer-vivo-empty">No sessions yet. Record a voice memo, then refresh.</li>`;
+      return;
+    }
+    for (const capture of captures) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "composer-vivo-item";
+      const day = String(capture.created_at || "").slice(0, 10);
+      const units = capture.atomic_units?.length ?? 0;
+      button.innerHTML = `<span class="composer-vivo-item-meta">${escapeHtml(day)} · ${units} unit${units === 1 ? "" : "s"}</span><strong>${escapeHtml(vivoCaptureTitle(capture))}</strong>`;
+      button.addEventListener("click", () => { void createFromVivoCapture(capture); });
+      item.appendChild(button);
+      list.appendChild(item);
+    }
+  } catch (err) {
+    setIngestStatus(err?.message || String(err), "error");
+  }
+}
+
+/** @param {any} capture */
+async function createFromVivoCapture(capture) {
+  try {
+    setIngestStatus("Opening transcript...", "busy");
+    const { hole } = await (await loadWorkspaceRuntime()).vivoCaptureToStoredHole({ capture, store });
+    setIngestStatus("");
+    await startHole(await store.loadHole(hole.hole_id) || hole);
+  } catch (err) {
+    setIngestStatus(err?.message || String(err), "error");
+  }
+}
+
+/** @param {any} workspaceRuntime */
+function syncVivoProduceButton(workspaceRuntime) {
+  const button = /** @type {HTMLButtonElement | null} */ (document.getElementById("t-vivo-produce"));
+  if (!button) return;
+  if (!vivoSession || !currentHost) {
+    button.hidden = true;
+    return;
+  }
+  const { units, pending } = workspaceRuntime.pendingVivoUnits(currentHost.state);
+  const produceButton = /** @type {HTMLButtonElement} */ (button);
+  produceButton.hidden = units.length === 0;
+  produceButton.disabled = pending.length === 0;
+  produceButton.title = pending.length === 0
+    ? "All Vivo units are on the canvas"
+    : `Produce ${pending.length} Vivo unit${pending.length === 1 ? "" : "s"} as nodes`;
+}
+
+/** Rendered-text offsets for a verbatim quote inside the root document. */
+function vivoAnchorForQuote(rootId, quote) {
+  const card = document.querySelector(`.card[data-id="${CSS.escape(rootId)}"]`);
+  const dc = card?.querySelector(".doc-content");
+  if (!dc) return null;
+  const text = dc.textContent || "";
+  const start = text.indexOf(quote);
+  if (start < 0) return null;
+  return { offset_start: start, offset_end: start + quote.length };
+}
+
+async function runVivoProduce() {
+  if (!currentHost) return;
+  const host = currentHost;
+  const button = /** @type {HTMLButtonElement | null} */ (document.getElementById("t-vivo-produce"));
+  if (button) button.disabled = true;
+  try {
+    const workspaceRuntime = await loadWorkspaceRuntime();
+    const rootId = host.state.root_id;
+    const { created, skipped } = await workspaceRuntime.produceVivoNodes({
+      host,
+      anchorForQuote: (quote) => vivoAnchorForQuote(rootId, quote),
+    });
+    if (currentHost === host) {
+      showToast({ message: created
+        ? `Produced ${created} node${created === 1 ? "" : "s"} from this transcript.`
+        : `All ${skipped} units are already on the canvas.` });
+      syncVivoProduceButton(workspaceRuntime);
+    }
+  } catch (err) {
+    if (currentHost === host) showToast({ message: err?.message || "Producing nodes failed." });
+    if (button) button.disabled = false;
   }
 }
 
@@ -836,6 +973,7 @@ async function mountHole(hole, { replace = false } = {}) {
     const isNewRailItem = !railSummaries?.some((summary) => summary.hole_id === hole.hole_id);
     await renderRail({ refresh: isNewRailItem, firstHoleId: isNewRailItem ? hole.hole_id : null });
     host.startRootAnswer();
+    syncVivoProduceButton(workspaceRuntime);
   } catch (error) {
     await disposeCurrentHole();
     throw error;
@@ -852,6 +990,8 @@ async function disposeCurrentHole() {
   currentHost = null;
   currentAssetLease = null;
   currentHoleId = null;
+  const produceButton = document.getElementById("t-vivo-produce");
+  if (produceButton) produceButton.hidden = true;
   const errors = [];
   if (ui) {
     try { await ui.flush(); } catch (error) { errors.push(error); }

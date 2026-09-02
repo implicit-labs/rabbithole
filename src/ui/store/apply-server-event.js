@@ -43,6 +43,9 @@ export function applyServerEvent(store, message, options = {}) {
     node.base_url = message.base_url || null;
     node.base_url_source = message.base_url_source || null;
     node.origin = message.origin || node.origin || null;
+    if (message.extensions && typeof message.extensions === "object" && !Array.isArray(message.extensions)) {
+      node.extensions = { ...node.extensions, ...message.extensions };
+    }
     node.extensions = stripNodeAttention(node.extensions);
     invalidated.add("document");
     invalidated.add("status");

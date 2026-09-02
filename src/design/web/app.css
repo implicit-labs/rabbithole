@@ -690,6 +690,74 @@ body.blank-dragging .composer-card {
   background: var(--hl);
 }
 
+.composer-vivo {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.composer-vivo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.composer-vivo-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--sk-base);
+  color: var(--fg);
+  font: 13px/1.4 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-vivo-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.composer-vivo-item-meta {
+  font-size: var(--text-sm);
+  color: var(--fg-dim);
+}
+
+.composer-vivo-empty {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--fg-dim);
+  font: 13px/1.4 var(--font-ui);
+}
+
+.composer-vivo-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.composer-vivo-record {
+  color: var(--fg-dim);
+  font: 13px/1.4 var(--font-ui);
+  text-decoration: none;
+}
+
+.composer-vivo-record:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
 .ingest-status {
   display: none;
   position: relative;

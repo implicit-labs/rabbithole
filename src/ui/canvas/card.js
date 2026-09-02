@@ -22,6 +22,8 @@ export function createNodeEl(node, enter) {
   if (node.id === currentNodeId) el.className += " current";
   if (enter && !document.hidden && !shouldReduceMotion()) el.className += " card-enter";
   el.dataset.id = node.id;
+  const vivoType = node.extensions?.vivo?.type;
+  if (vivoType) el.dataset.vivo = String(vivoType);
   raiseCard(el);
   const head = document.createElement("div");
   head.className = "card-head";
