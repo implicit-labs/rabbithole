@@ -54,6 +54,24 @@ export async function extractVivoUnits(baseUrl, ticket, text, fetchImpl = global
 }
 
 /**
+ * Toggle a produced unit's reviewed state on the server. Returns the updated
+ * unit row (archive shape), whose `status` reflects inbox vs. archived.
+ * @param {string} baseUrl @param {string} ticket @param {string} captureId @param {string} unitId @param {boolean} reviewed
+ */
+export async function reviewVivoUnit(baseUrl, ticket, captureId, unitId, reviewed, fetchImpl = globalThis.fetch.bind(globalThis)) {
+  const response = await fetchImpl(`${baseUrl}/api/debug/transcripts`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${ticket}`, "content-type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ capture_id: captureId, unit_id: unitId, reviewed }),
+  });
+  const body = await response.json().catch(() => null);
+  if (response.status === 401) throw new Error("Your Vivo session expired. Sign in again.");
+  if (!response.ok || !body?.unit) throw new Error(body?.error || "The review status could not be updated.");
+  return body.unit;
+}
+
+/**
  * Mint atomic units from a highlighted transcript passage. The server verifies
  * the passage against the stored transcript and persists the resulting units
  * on the capture; the response uses the archive's atomic-unit shape.

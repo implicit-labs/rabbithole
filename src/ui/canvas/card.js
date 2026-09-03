@@ -4,6 +4,7 @@ import { iconButtonMarkup } from "../../core/html/markup.js";
 import { currentNodeId, nodes, postBrowserEvent, rootId, shouldReduceMotion, world } from "../core.js";
 import { closestEl } from "../dom.js";
 import { openNode } from "../reader.js";
+import { vivoHooks } from "../vivo-hooks.js";
 import { cancelViewAnimation } from "./camera.js";
 import { buildCardComposer, cardButton, closeCardDrawer, updateCardComposer } from "./card-composer.js";
 import { fillBody } from "./document.js";
@@ -42,7 +43,10 @@ export function createNodeEl(node, enter) {
   if (enter && !document.hidden && !shouldReduceMotion()) el.className += " card-enter";
   el.dataset.id = node.id;
   const vivoType = node.extensions?.vivo?.type;
-  if (vivoType) el.dataset.vivo = String(vivoType);
+  if (vivoType) {
+    el.dataset.vivo = String(vivoType);
+    if (node.extensions.vivo.status && node.extensions.vivo.status !== "inbox") el.dataset.reviewed = "true";
+  }
   raiseCard(el);
   const head = document.createElement("div");
   head.className = "card-head";
@@ -91,7 +95,22 @@ export function createNodeEl(node, enter) {
   // simpler header: a one-click discard and the ⋮ menu, without the
   // fold/expand window controls.
   let discardBtn = null;
+  let reviewBtn = null;
   if (vivoType) {
+    if (vivoHooks.reviewUnit && node.extensions.vivo.status !== "triaged") {
+      const reviewed = node.extensions.vivo.status !== "inbox";
+      reviewBtn = cardButton(
+        iconButtonMarkup({
+          bare: true,
+          className: "card-btn card-review",
+          icon: "✓",
+          ariaLabel: reviewed ? "Mark unreviewed" : "Mark reviewed",
+          title: reviewed ? "Mark unreviewed" : "Mark reviewed",
+        }),
+      );
+      reviewBtn.setAttribute("aria-pressed", reviewed ? "true" : "false");
+      acts.appendChild(reviewBtn);
+    }
     discardBtn = cardButton(
       iconButtonMarkup({
         bare: true,
@@ -162,6 +181,12 @@ export function createNodeEl(node, enter) {
     discardBtn.addEventListener("click", function (e) {
       e.stopPropagation();
       discardVivoUnit(node);
+    });
+  }
+  if (reviewBtn) {
+    reviewBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      vivoHooks.reviewUnit?.(node);
     });
   }
   collapseBtn.addEventListener("click", function (e) {

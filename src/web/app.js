@@ -28,7 +28,8 @@ import { currentCanvasRuntime, loadCanvasRuntime, warmCanvasRuntime } from "./ca
 import { mountWebShell } from "./shell/shell.js";
 import { requireVivoSession, vivoStoreDbName } from "./vivo/gate.js";
 import { vivoBaseUrl } from "./vivo/config.js";
-import { createVivoUnitsFromPassage, listVivoCaptures, vivoCaptureTitle } from "./vivo/api.js";
+import { createVivoUnitsFromPassage, listVivoCaptures, reviewVivoUnit, vivoCaptureTitle } from "./vivo/api.js";
+import { setVivoHooks } from "../ui/vivo-hooks.js";
 import {
   autoGrowTextarea,
   formatRelativeDate,
@@ -101,6 +102,7 @@ async function boot() {
   document.body.classList.add("web-app");
   vivoSession = await requireVivoSession();
   store = vivoSession ? new IdbStore({ dbName: vivoStoreDbName(vivoSession.email) }) : new IdbStore();
+  if (vivoSession) setVivoHooks({ reviewUnit: (node) => { void vivoReviewUnit(node); } });
   renderShell();
   initAppChrome();
   initComposer();
@@ -765,6 +767,32 @@ function vivoAnchorForQuote(rootId, quote) {
   const start = text.indexOf(quote);
   if (start < 0) return null;
   return { offset_start: start, offset_end: start + quote.length };
+}
+
+/** Toggle a produced unit's reviewed state, then reflect it on the node. */
+async function vivoReviewUnit(node) {
+  const host = currentHost;
+  if (!host || !vivoSession) return;
+  const vivo = node.extensions?.vivo;
+  if (!vivo?.unit_id || !vivo.capture_id || vivo.status === "triaged") return;
+  const reviewed = vivo.status === "inbox";
+  try {
+    const updated = await reviewVivoUnit(vivoBaseUrl(), vivoSession.ticket, vivo.capture_id, vivo.unit_id, reviewed);
+    if (currentHost !== host) return;
+    host.engine.patchExtension(node.id, "vivo", { ...vivo, status: updated.status });
+    await host.flushSave();
+    const nowReviewed = updated.status !== "inbox";
+    if (node.el) node.el.dataset.reviewed = nowReviewed ? "true" : "false";
+    const button = node.el?.querySelector(".card-review");
+    if (button) {
+      const label = nowReviewed ? "Mark unreviewed" : "Mark reviewed";
+      button.setAttribute("aria-pressed", nowReviewed ? "true" : "false");
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    }
+  } catch (err) {
+    if (currentHost === host) showToast({ message: err?.message || "Could not update review status." });
+  }
 }
 
 /** Selection popover hook: mint persisted unit(s) from a highlighted passage. */
