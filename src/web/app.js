@@ -72,6 +72,8 @@ let githubStarsPromise = null;
 let composerPath = "";
 let lastHoleCount = 0;
 let railSummaries = null;
+/** All Vivo transcripts for the signed-in account; the rail lists these. */
+let vivoCaptures = [];
 let toastNotice = null;
 let initialBridgePairing = false;
 consumeInitialBridgePairing();
@@ -124,6 +126,12 @@ async function boot() {
     showBlankCanvas();
     warmCanvasRuntime();
     warmWorkspaceRuntime();
+  }
+  if (vivoSession) {
+    // The rail is the transcript list; surface it up front, and on an empty
+    // canvas open it so the sessions are the first thing seen.
+    await loadVivoCaptures();
+    if (!currentHoleId) setRailOpen(true);
   }
   if (initialBridgePairing) beginBridgePairingSetup();
   warmSettingsRuntime();
@@ -230,6 +238,14 @@ function initAppChrome() {
   rail?.addEventListener("click", async (event) => {
     const row = closestEl(event.target, ".rail-row");
     if (!row) return;
+    if (row.dataset.capture) {
+      if (closestEl(event.target, ".rail-open")) {
+        event.preventDefault();
+        const capture = vivoCaptures.find((candidate) => candidate.id === row.dataset.capture);
+        if (capture) await openVivoTranscript(capture);
+      }
+      return;
+    }
     const id = row.dataset.hole;
     if (closestEl(event.target, ".rail-delete")) {
       event.preventDefault();
@@ -717,7 +733,7 @@ async function showVivoPicker() {
       const day = String(capture.created_at || "").slice(0, 10);
       const units = capture.atomic_units?.length ?? 0;
       button.innerHTML = `<span class="composer-vivo-item-meta">${escapeHtml(day)} · ${units} unit${units === 1 ? "" : "s"}</span><strong>${escapeHtml(vivoCaptureTitle(capture))}</strong>`;
-      button.addEventListener("click", () => { void createFromVivoCapture(capture); });
+      button.addEventListener("click", () => { void openVivoTranscript(capture); });
       item.appendChild(button);
       list.appendChild(item);
     }
@@ -726,16 +742,64 @@ async function showVivoPicker() {
   }
 }
 
-/** @param {any} capture */
-async function createFromVivoCapture(capture) {
+/* One hole per transcript, per browser: remember which capture opened which
+   hole so the rail can switch to an existing canvas instead of duplicating it. */
+function vivoHoleMapKey() {
+  return `vivo-capture-holes:${(vivoSession?.email || "").trim().toLocaleLowerCase()}`;
+}
+function readVivoHoleMap() {
+  try {
+    return JSON.parse(localStorage.getItem(vivoHoleMapKey()) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+function writeVivoHoleMap(map) {
+  try {
+    localStorage.setItem(vivoHoleMapKey(), JSON.stringify(map));
+  } catch {
+    // Per-browser convenience; a blocked store just means no dedupe.
+  }
+}
+
+/** Open a transcript as its own canvas: switch to its hole if one exists,
+    otherwise mint one and remember the mapping. */
+async function openVivoTranscript(capture) {
+  const map = readVivoHoleMap();
+  const existingId = map[capture.id];
+  if (existingId) {
+    if (existingId === currentHoleId) return;
+    const existing = await store.loadHole(existingId);
+    if (existing) {
+      setIngestStatus("");
+      await currentHost?.flushSave();
+      await startHole(existing);
+      return;
+    }
+  }
   try {
     setIngestStatus("Opening transcript...", "busy");
     const { hole } = await (await loadWorkspaceRuntime()).vivoCaptureToStoredHole({ capture, store });
+    map[capture.id] = hole.hole_id;
+    writeVivoHoleMap(map);
     setIngestStatus("");
+    await currentHost?.flushSave();
     await startHole(await store.loadHole(hole.hole_id) || hole);
   } catch (err) {
     setIngestStatus(err?.message || String(err), "error");
   }
+}
+
+/** Fetch every transcript for the account and refresh the rail list. */
+async function loadVivoCaptures() {
+  if (!vivoSession) return;
+  try {
+    vivoCaptures = (await listVivoCaptures(vivoBaseUrl(), vivoSession.ticket))
+      .filter((capture) => String(capture.transcript || "").trim());
+  } catch {
+    // A transient list failure leaves the rail as it was.
+  }
+  if (vivoSession) await renderRail({ refresh: false });
 }
 
 /** @param {any} workspaceRuntime */
@@ -1100,9 +1164,65 @@ async function exportCurrentRabbithole() {
   return { filename: runtime.rabbitholeFilename(payload.hole?.title), payload };
 }
 
+/** The Vivo rail is a transcript list: one row per session, each opening its
+    own canvas. Marks the transcript whose hole is currently on screen. */
+function renderVivoRail() {
+  const rail = document.getElementById("web-rail");
+  if (!rail) return;
+  let inner = rail.querySelector(":scope > .rail-inner");
+  let list = inner?.querySelector(":scope > .rail-list");
+  if (!inner || !list) {
+    inner = document.createElement("div"); inner.className = "rail-inner";
+    list = document.createElement("div"); list.className = "rail-list"; list.id = "rail-list";
+    inner.appendChild(list); rail.replaceChildren(inner);
+  }
+  let heading = inner.querySelector(".rail-heading");
+  if (!heading) {
+    heading = document.createElement("div"); heading.className = "rail-heading"; heading.textContent = "Transcripts";
+    inner.insertBefore(heading, list);
+  }
+  const currentCapture = currentHost?.state?.nodes?.get(currentHost.state.root_id)?.extensions?.vivo?.capture_id ?? null;
+  const rows = new Map(Array.from(/** @type {NodeListOf<HTMLElement>} */ (list.querySelectorAll(".rail-row")), (row) => [row.dataset.capture, row]));
+  const next = vivoCaptures.map((capture) => {
+    const row = rows.get(capture.id) || createVivoRailRow(capture.id);
+    patchVivoRailRow(row, capture, capture.id === currentCapture);
+    return row;
+  });
+  if (!next.length) {
+    const empty = /** @type {HTMLElement} */ (list.querySelector(".rail-empty") || document.createElement("div"));
+    empty.className = "rail-empty"; empty.textContent = "No transcripts yet. Record one on the iPhone."; next.push(empty);
+  }
+  reconcileChildren(list, next);
+  applyRailState();
+}
+
+function createVivoRailRow(captureId) {
+  const row = document.createElement("article"); row.className = "rail-row"; row.dataset.capture = captureId;
+  const open = document.createElement("button"); open.className = "rail-open"; open.type = "button";
+  const copy = document.createElement("span"); copy.className = "rail-row-copy";
+  const meta = document.createElement("span"); meta.className = "rail-vivo-meta";
+  const title = document.createElement("span"); title.className = "rail-title";
+  copy.append(meta, title); open.appendChild(copy); row.appendChild(open);
+  return row;
+}
+
+function patchVivoRailRow(row, capture, isCurrent) {
+  row.classList.toggle("current", isCurrent);
+  const title = vivoCaptureTitle(capture);
+  const titleNode = row.querySelector(".rail-title");
+  if (titleNode.textContent !== title) titleNode.textContent = title;
+  const units = capture.atomic_units?.length ?? 0;
+  const meta = `${String(capture.created_at || "").slice(0, 10)} · ${units} unit${units === 1 ? "" : "s"}`;
+  const metaNode = row.querySelector(".rail-vivo-meta");
+  if (metaNode.textContent !== meta) metaNode.textContent = meta;
+  const open = row.querySelector(".rail-open");
+  if (open.getAttribute("aria-label") !== title) open.setAttribute("aria-label", title);
+}
+
 async function renderRail({ refresh = true, firstHoleId = null } = {}) {
   const rail = document.getElementById("web-rail");
   if (!rail) return;
+  if (vivoSession) { renderVivoRail(); return; }
   if (refresh || !railSummaries) railSummaries = await store.listHoles();
   const summaries = firstHoleId
     ? [...railSummaries].sort((a, b) => Number(b.hole_id === firstHoleId) - Number(a.hole_id === firstHoleId))

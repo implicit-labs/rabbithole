@@ -316,6 +316,26 @@ body.blank-dragging #viewport::after {
   flex-direction: column;
 }
 
+.rail-heading {
+  padding: var(--panel-padding-block) var(--panel-padding-inline) 4px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.rail-vivo-meta {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--fg-faint);
+}
+
+.rail-row[data-capture] .rail-title {
+  display: block;
+  margin-top: 2px;
+}
+
 .rail-open,
 .rail-actions,
 .web-toast {
