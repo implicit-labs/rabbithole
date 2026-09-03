@@ -326,6 +326,10 @@ body.mode-flight #viewport { display: block; }
    the head carries its own top radius instead. */
 .card { --card-head-bg: var(--card-head); position: absolute; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
 .card.card-note { --card-head-bg: var(--note-card-head); background: var(--note-card-bg); border-color: var(--note-card-border); }
+/* Kind reads from the header tint (fact vs task vs question). */
+.card[data-vivo="fact"] { --card-head-bg: color-mix(in srgb, var(--vivo-fact-hue) 15%, var(--card-head)); }
+.card[data-vivo="task"] { --card-head-bg: color-mix(in srgb, var(--vivo-task-hue) 15%, var(--card-head)); }
+.card[data-vivo="question"] { --card-head-bg: color-mix(in srgb, var(--vivo-question-hue) 15%, var(--card-head)); }
 /* A reviewed Vivo unit recedes; its ✓ toggle reads active. */
 .card[data-vivo][data-reviewed="true"] { opacity: 0.62; }
 .card-review[aria-pressed="true"] { color: var(--accent); }

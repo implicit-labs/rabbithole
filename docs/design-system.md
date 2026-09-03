@@ -26,6 +26,11 @@ This section is generated from `src/design/tokens.css`. Edit the stylesheet, the
 
 ```css
 :root {
+  /* Vivo node-kind hues, mixed lightly into the card header so a fact vs a
+     task reads at a glance in either theme. */
+  --vivo-fact-hue: #c07a4f;
+  --vivo-task-hue: #5d8a5d;
+  --vivo-question-hue: #4f7ec0;
   /* Type */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-doc: Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;

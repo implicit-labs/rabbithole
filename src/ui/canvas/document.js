@@ -18,7 +18,16 @@ export function fillBody(node) {
   body.classList.remove("pdf-body");
   body.innerHTML = "";
   const originQuestion = displayQuestionForOrigin(node.origin);
-  if (node.origin && node.origin.kind !== "note" && (originQuestion || originAttachmentNames(node).length)) {
+  // Produced Vivo units carry a synthetic "Fact/Task from this transcript"
+  // question for provenance, but the kind is shown by the header colour, so
+  // the label would only be noise on the card.
+  const suppressOriginQuote = !!node.extensions?.vivo?.type;
+  if (
+    !suppressOriginQuote &&
+    node.origin &&
+    node.origin.kind !== "note" &&
+    (originQuestion || originAttachmentNames(node).length)
+  ) {
     const q = document.createElement("div");
     q.className = "origin-quote";
     q.textContent = originQuestion ? "“" + originQuestion + "”" : "Pasted image";
