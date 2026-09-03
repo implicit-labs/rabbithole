@@ -68,9 +68,13 @@ export function createNodeEl(node, enter) {
   // Window controls first, then the divider, then the ⋮ menu at the outer
   // edge — the rightmost thing in the header, where every card menu lives.
   // Real DOM order, so tab order and reading order are the same order.
-  acts.appendChild(collapseBtn);
-  acts.appendChild(openBtn);
-  acts.appendChild(divider);
+  // Produced Vivo units are leaf content, not documents, so they get a
+  // simpler header: just the ⋮ menu, without the fold/expand window controls.
+  if (!vivoType) {
+    acts.appendChild(collapseBtn);
+    acts.appendChild(openBtn);
+    acts.appendChild(divider);
+  }
   if (!node._ephemeral) acts.appendChild(nodeMenuButton(node));
   head.appendChild(titleEl);
   head.appendChild(acts);
