@@ -1,7 +1,7 @@
 import { isNoteNode } from "../../core/hole/ask.js";
-import { BUNNY_MARK_SVG } from "../../core/html/icons.js";
+import { BUNNY_MARK_SVG, iconSvg } from "../../core/html/icons.js";
 import { iconButtonMarkup } from "../../core/html/markup.js";
-import { currentNodeId, rootId, shouldReduceMotion, world } from "../core.js";
+import { currentNodeId, nodes, postBrowserEvent, rootId, shouldReduceMotion, world } from "../core.js";
 import { closestEl } from "../dom.js";
 import { openNode } from "../reader.js";
 import { cancelViewAnimation } from "./camera.js";
@@ -15,6 +15,25 @@ import { nodeMenuButton, syncCollapseButton } from "./menu.js";
 import { startTitleEditing } from "./note-convert.js";
 import { r } from "./runtime.js";
 import { closeCardMenu, raiseCard } from "./shared.js";
+
+/* Discard a produced Vivo unit: prune it from the transcript root's vivo
+   namespace (so re-producing won't resurrect it), then remove the node with
+   the standard undoable branch removal. The prune rides the same
+   node_extensions_patch browser event the app uses for every extension write. */
+function discardVivoUnit(node) {
+  const unitId = node.extensions?.vivo?.unit_id;
+  const root = nodes[rootId];
+  const vivo = root?.extensions?.vivo;
+  if (unitId && vivo && Array.isArray(vivo.units)) {
+    postBrowserEvent({
+      type: "node_extensions_patch",
+      node_id: rootId,
+      namespace: "vivo",
+      value: { ...vivo, units: vivo.units.filter((unit) => unit.unit_id !== unitId) },
+    });
+  }
+  r.lifecycle.hooks.removeBranch(node);
+}
 
 export function createNodeEl(node, enter) {
   const el = document.createElement("div");
@@ -69,8 +88,21 @@ export function createNodeEl(node, enter) {
   // edge — the rightmost thing in the header, where every card menu lives.
   // Real DOM order, so tab order and reading order are the same order.
   // Produced Vivo units are leaf content, not documents, so they get a
-  // simpler header: just the ⋮ menu, without the fold/expand window controls.
-  if (!vivoType) {
+  // simpler header: a one-click discard and the ⋮ menu, without the
+  // fold/expand window controls.
+  let discardBtn = null;
+  if (vivoType) {
+    discardBtn = cardButton(
+      iconButtonMarkup({
+        bare: true,
+        className: "card-btn card-discard",
+        svgIconHtml: iconSvg("delete"),
+        ariaLabel: "Discard this unit",
+        title: "Discard this unit",
+      }),
+    );
+    acts.appendChild(discardBtn);
+  } else {
     acts.appendChild(collapseBtn);
     acts.appendChild(openBtn);
     acts.appendChild(divider);
@@ -126,6 +158,12 @@ export function createNodeEl(node, enter) {
     e.stopPropagation();
     openNode(node.id);
   });
+  if (discardBtn) {
+    discardBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      discardVivoUnit(node);
+    });
+  }
   collapseBtn.addEventListener("click", function (e) {
     e.stopPropagation();
     toggleCollapse(node);
