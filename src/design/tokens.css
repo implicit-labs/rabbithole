@@ -6,9 +6,6 @@
   --text-xxs: 9px; --text-xxs-plus: 9.5px; --text-xs: 10px; --text-xs-plus: 10.5px;
   --text-sm: 11px; --text-sm-plus: 11.5px; --text-ui: 12px; --text-ui-plus: 12.5px;
   --text-body: 13px; --text-base: 14px; --text-lg: 16px; --text-title: 17px;
-
-  /* Vivo node-kind accents */
-  --vivo-fact: #c07a4f; --vivo-task: #5d8a5d; --vivo-question: #4f7ec0;
   --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600; --weight-strong: 650; --weight-bold: 700;
   --leading-ui: 1.4; --leading-body: 1.55; --leading-doc: 1.72;
 

@@ -80,22 +80,23 @@ export function initAskFollowups(options) {
   renderAskPresetActions(document.getElementById("ask-actions"), "selection");
   renderAskPresetActions(composerActions, "followup");
   const askActionsEl = document.getElementById("ask-actions");
-  askActionsEl.querySelector(".vivo-unit-commit")?.remove();
+  askActionsEl.querySelector(".vivo-unit-action")?.remove();
   if (vivoUnitHook) {
-    // Vivo-only: turn the selected passage into a persisted atomic unit. The
-    // button shares .ask-commit state handling but no data-commit routing.
+    // Vivo-only: turn the selected passage into a persisted atomic unit. This
+    // is a selection-first action (no typed draft), so it lives beside the
+    // presets rather than in the draft-gated commit row.
     askActionsEl.querySelector(".commit-actions")?.insertAdjacentHTML(
-      "afterbegin",
+      "beforebegin",
       buttonMarkup({
         bare: true,
-        className: "ask-commit vivo-unit-commit",
+        className: "vivo-unit-action",
         title: "Create a Vivo atomic unit from this selection",
-        label: "Unit ",
-        labelClass: "ask-commit-label",
+        label: "Unit",
+        kbdHint: "U",
         hidden: true,
       }),
     );
-    const vivoCommit = askActionsEl.querySelector(".vivo-unit-commit");
+    const vivoCommit = askActionsEl.querySelector(".vivo-unit-action");
     if (vivoCommit) {
       askScope.listen(vivoCommit, "click", function () {
         commitVivoUnit();
@@ -493,7 +494,7 @@ export function updateSelectionComposerState() {
       noteCommit.title = "Visual selections can be asked about";
     }
   }
-  const vivoCommit = /** @type {HTMLButtonElement | null} */ (actions.querySelector(".vivo-unit-commit"));
+  const vivoCommit = /** @type {HTMLButtonElement | null} */ (actions.querySelector(".vivo-unit-action"));
   if (vivoCommit) {
     const vivoDoc =
       !!vivoUnitHook &&

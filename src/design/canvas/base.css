@@ -325,12 +325,6 @@ body.mode-flight #viewport { display: block; }
 /* overflow stays visible so the follow-up drawer can slide out below the card;
    the head carries its own top radius instead. */
 .card { --card-head-bg: var(--card-head); position: absolute; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
-
-/* Vivo-typed nodes: a quiet kind accent on the leading edge. */
-.card[data-vivo] { border-left-width: 3px; }
-.card[data-vivo="fact"] { border-left-color: color-mix(in srgb, var(--vivo-fact) 70%, var(--border)); }
-.card[data-vivo="task"] { border-left-color: color-mix(in srgb, var(--vivo-task) 70%, var(--border)); }
-.card[data-vivo="question"] { border-left-color: color-mix(in srgb, var(--vivo-question) 70%, var(--border)); }
 .card.card-note { --card-head-bg: var(--note-card-head); background: var(--note-card-bg); border-color: var(--note-card-border); }
 .card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--accent) 16%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1); }
 .card.card-enter { opacity: 0; transform: translateY(8px); transition: opacity var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1), transform var(--duration-legacy-180) cubic-bezier(0.23, 1, 0.32, 1); }
@@ -592,7 +586,7 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 .asking-surface[data-set="selection"] .ask-actions.has-four-presets .commit-actions { grid-column: 1 / -1; }
 .commit-actions { position: relative; display: flex; flex: 1 1 auto; min-width: 0; gap: 2px; }
 .commit-actions::before { content: ""; position: absolute; z-index: var(--layer-local-base); top: 6px; bottom: 6px; left: 50%; width: 1px; transform: translateX(-0.5px); background: var(--border); pointer-events: none; }
-.lens, .ask-commit, .note-pop-btn { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-medium);
+.lens, .ask-commit, .note-pop-btn, .vivo-unit-action { flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-medium);
   color: var(--fg-dim); background: none; border: none; border-radius: 8px; padding: 5.5px 9px; cursor: pointer; white-space: nowrap;
   transition: color var(--duration-fast), background var(--duration-fast); }
 .lens:hover, .ask-commit:hover, .note-pop-btn:hover { color: var(--fg-bold); background: var(--hl); }
@@ -617,11 +611,11 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
 /* Every chip — 1 2 3 4 ↵ ⌘↵ — is the same fixed block, flex-centered so the
    glyph sits optically dead-center regardless of its own metrics (↵ carries
    its ink low-left; a text box with line-height centering never looks right). */
-.lens kbd, .ask-commit kbd, .note-pop-btn kbd, .thumb kbd { font-family: var(--font-ui); font-size: var(--text-xxs); font-weight: var(--weight-medium); color: var(--fg-faint);
+.lens kbd, .ask-commit kbd, .note-pop-btn kbd, .thumb kbd, .vivo-unit-action kbd { font-family: var(--font-ui); font-size: var(--text-xxs); font-weight: var(--weight-medium); color: var(--fg-faint);
   display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
   min-width: 16px; height: 16px; padding: 0 4px; line-height: 1; border-radius: var(--radius-inline); flex-shrink: 0;
   background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.lens:hover kbd, .ask-commit:hover kbd, .note-pop-btn:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
+.lens:hover kbd, .ask-commit:hover kbd, .note-pop-btn:hover kbd, .vivo-unit-action:hover kbd { color: var(--fg-dim); background: color-mix(in srgb, var(--fg) 13%, transparent); }
 .ask-commit { flex: 1 1 50%; min-width: 0; }
 .ask-commit-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The row swap: lenses at rest, the commit pair once the surface (#ask or a
@@ -629,6 +623,12 @@ body:not(.mode-canvas) .tb-group[data-mode="canvas"] { display: none; }
    their container so each button's own computed display tells the truth. */
 .ask-actions .commit-actions, .ask-actions .ask-commit { display: none; }
 .has-draft .lens, .has-draft .thumb-pair { display: none; }
+/* The Vivo unit action is selection-first, so it rides with the presets:
+   visible whenever it applies, hidden once a draft turns the row into the
+   commit pair. The hidden attribute (set when it does not apply) always wins. */
+.has-draft .vivo-unit-action { display: none; }
+.ask-actions .vivo-unit-action[hidden] { display: none; }
+.vivo-unit-action { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
 .has-draft .commit-actions { display: flex; }
 .has-draft .ask-commit { display: inline-flex; }
 .ask-actions.note-only .commit-actions::before { display: none; }
