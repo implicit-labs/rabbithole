@@ -9,7 +9,7 @@ import { IdbStore } from "./store/idb-store.js";
 import { openDialog } from "../ui/primitives/dialog.js";
 import { openPopover } from "../ui/primitives/popover.js";
 import { escapeHtml } from "../core/utils.js";
-import { BUTTON_TAG, iconButtonMarkup } from "../core/html/markup.js";
+import { BUTTON_TAG } from "../core/html/markup.js";
 import { iconSvg } from "../core/html/icons.js";
 import { closestEl } from "../ui/dom.js";
 import { isSubmitEnter } from "../ui/input-intent.js";
@@ -685,12 +685,9 @@ function initVivoComposerPath() {
         <${BUTTON_TAG} id="composer-vivo-refresh" type="button">Refresh</button>
       </div>
     </section>`);
-  document.getElementById("t-new")?.insertAdjacentHTML("afterend",
-    iconButtonMarkup({ id: "t-vivo-produce", title: "Produce Vivo nodes", ariaLabel: "Produce Vivo nodes", hidden: true, svgIconHtml: iconSvg("area-select") }));
   document.getElementById("composer-path-vivo")?.addEventListener("click", () => { void showVivoPicker(); });
   document.getElementById("composer-vivo-back")?.addEventListener("click", showComposerStart);
   document.getElementById("composer-vivo-refresh")?.addEventListener("click", () => { void showVivoPicker(); });
-  document.getElementById("t-vivo-produce")?.addEventListener("click", () => { void runVivoProduce(); });
 }
 
 async function showVivoPicker() {
@@ -742,20 +739,37 @@ async function createFromVivoCapture(capture) {
 }
 
 /** @param {any} workspaceRuntime */
-function syncVivoProduceButton(workspaceRuntime) {
-  const button = /** @type {HTMLButtonElement | null} */ (document.getElementById("t-vivo-produce"));
-  if (!button) return;
-  if (!vivoSession || !currentHost) {
-    button.hidden = true;
-    return;
+/** Wait until the root transcript's rendered text is on screen, so produced
+    units can anchor to their evidence offsets. */
+async function waitForRootDocContent(rootHoleId, tries = 24) {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const dc = document.querySelector(`.card[data-id="${CSS.escape(rootHoleId)}"] .doc-content`);
+    if (dc && (dc.textContent || "").trim()) return dc;
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
   }
-  const { units, pending } = workspaceRuntime.pendingVivoUnits(currentHost.state);
-  const produceButton = /** @type {HTMLButtonElement} */ (button);
-  produceButton.hidden = units.length === 0;
-  produceButton.disabled = pending.length === 0;
-  produceButton.title = pending.length === 0
-    ? "All Vivo units are on the canvas"
-    : `Produce ${pending.length} Vivo unit${pending.length === 1 ? "" : "s"} as nodes`;
+  return null;
+}
+
+/** Fan a transcript's pending atomic units onto the canvas automatically —
+    the same "open a session, see its facts and tasks" flow as the original
+    canvas. Idempotent: already-produced and discarded units are skipped. */
+async function autoProduceVivoUnits() {
+  const host = currentHost;
+  if (!host || !vivoSession) return;
+  const workspaceRuntime = await loadWorkspaceRuntime();
+  const { pending } = workspaceRuntime.pendingVivoUnits(host.state);
+  if (!pending.length) return;
+  const rootHoleId = host.state.root_id;
+  await waitForRootDocContent(rootHoleId);
+  if (currentHost !== host) return;
+  try {
+    await workspaceRuntime.produceVivoNodes({
+      host,
+      anchorForQuote: (quote) => vivoAnchorForQuote(rootHoleId, quote),
+    });
+  } catch (err) {
+    if (currentHost === host) showToast({ message: err?.message || "Could not lay out this transcript's units." });
+  }
 }
 
 /** Rendered-text offsets for a verbatim quote inside the root document. */
@@ -817,39 +831,14 @@ async function vivoUnitFromSelection({ selectedText }) {
       return;
     }
     workspaceRuntime.appendVivoUnits({ host, units });
-    const rootId = host.state.root_id;
+    const rootHoleId = host.state.root_id;
     const { created } = await workspaceRuntime.produceVivoNodes({
       host,
-      anchorForQuote: (quote) => vivoAnchorForQuote(rootId, quote),
+      anchorForQuote: (quote) => vivoAnchorForQuote(rootHoleId, quote),
     });
-    syncVivoProduceButton(workspaceRuntime);
     showToast({ message: `Added ${created} unit${created === 1 ? "" : "s"} from your selection.` });
   } catch (err) {
     if (currentHost === host) showToast({ message: err?.message || "Creating the unit failed." });
-  }
-}
-
-async function runVivoProduce() {
-  if (!currentHost) return;
-  const host = currentHost;
-  const button = /** @type {HTMLButtonElement | null} */ (document.getElementById("t-vivo-produce"));
-  if (button) button.disabled = true;
-  try {
-    const workspaceRuntime = await loadWorkspaceRuntime();
-    const rootId = host.state.root_id;
-    const { created, skipped } = await workspaceRuntime.produceVivoNodes({
-      host,
-      anchorForQuote: (quote) => vivoAnchorForQuote(rootId, quote),
-    });
-    if (currentHost === host) {
-      showToast({ message: created
-        ? `Produced ${created} node${created === 1 ? "" : "s"} from this transcript.`
-        : `All ${skipped} units are already on the canvas.` });
-      syncVivoProduceButton(workspaceRuntime);
-    }
-  } catch (err) {
-    if (currentHost === host) showToast({ message: err?.message || "Producing nodes failed." });
-    if (button) button.disabled = false;
   }
 }
 
@@ -1038,7 +1027,7 @@ async function mountHole(hole, { replace = false } = {}) {
     const isNewRailItem = !railSummaries?.some((summary) => summary.hole_id === hole.hole_id);
     await renderRail({ refresh: isNewRailItem, firstHoleId: isNewRailItem ? hole.hole_id : null });
     host.startRootAnswer();
-    syncVivoProduceButton(workspaceRuntime);
+    if (vivoSession) void autoProduceVivoUnits();
   } catch (error) {
     await disposeCurrentHole();
     throw error;
@@ -1055,8 +1044,6 @@ async function disposeCurrentHole() {
   currentHost = null;
   currentAssetLease = null;
   currentHoleId = null;
-  const produceButton = document.getElementById("t-vivo-produce");
-  if (produceButton) produceButton.hidden = true;
   const errors = [];
   if (ui) {
     try { await ui.flush(); } catch (error) { errors.push(error); }
