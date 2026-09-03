@@ -47,7 +47,7 @@ const CONFIG = [
       return jsonResponse(200, { ticket: "tick-1" });
     }],
   ]);
-  const auth = new VivoAuth("https://vivo.test/", impl, storage, () => 1_000);
+  const auth = new VivoAuth("https://vivo.test/", { fetchImpl: impl, storage, now: () => 1_000 });
   const activation = await auth.signIn("t@example.com", "pw");
   assert.deepEqual(activation, { ticket: "tick-1", email: "t@example.com" });
   const stored = JSON.parse(storage.map.get("rh-vivo-session"));
@@ -65,7 +65,7 @@ const CONFIG = [
   const { impl, calls } = fakeFetch([
     ["/api/auth/supabase", () => jsonResponse(200, { ticket: "tick-2" })],
   ]);
-  const auth = new VivoAuth("https://vivo.test", impl, storage, () => 1_000);
+  const auth = new VivoAuth("https://vivo.test", { fetchImpl: impl, storage, now: () => 1_000 });
   const activation = await auth.restore();
   assert.equal(activation.ticket, "tick-2");
   assert.ok(!calls.some((call) => call.url.includes("grant_type")), "fresh session must not refresh");
@@ -87,7 +87,7 @@ const CONFIG = [
       return jsonResponse(200, { ticket: "tick-3" });
     }],
   ]);
-  const auth = new VivoAuth("https://vivo.test", impl, storage, () => 1_000);
+  const auth = new VivoAuth("https://vivo.test", { fetchImpl: impl, storage, now: () => 1_000 });
   const activation = await auth.restore();
   assert.equal(activation.ticket, "tick-3");
   assert.equal(JSON.parse(storage.map.get("rh-vivo-session")).accessToken, "new");
@@ -99,14 +99,14 @@ const CONFIG = [
   storage.setItem("rh-vivo-session", JSON.stringify({
     accessToken: "at", refreshToken: "rt", expiresAt: 10_000_000, email: "t@example.com",
   }));
-  const rejected = new VivoAuth("https://vivo.test", async () => jsonResponse(401, { error: "nope" }), storage, () => 1_000);
+  const rejected = new VivoAuth("https://vivo.test", { fetchImpl: async () => jsonResponse(401, { error: "nope" }), storage, now: () => 1_000 });
   assert.equal(await rejected.restore(), null);
   assert.equal(storage.map.has("rh-vivo-session"), false, "rejection clears the session");
 
   storage.setItem("rh-vivo-session", JSON.stringify({
     accessToken: "at", refreshToken: "rt", expiresAt: 10_000_000, email: "t@example.com",
   }));
-  const transient = new VivoAuth("https://vivo.test", async () => { throw new Error("network down"); }, storage, () => 1_000);
+  const transient = new VivoAuth("https://vivo.test", { fetchImpl: async () => { throw new Error("network down"); }, storage, now: () => 1_000 });
   assert.equal(await transient.restore(), null);
   assert.equal(storage.map.has("rh-vivo-session"), true, "transient failure keeps the session");
 }
@@ -117,8 +117,28 @@ const CONFIG = [
     CONFIG,
     ["grant_type=password", () => jsonResponse(400, { message: "Invalid login credentials" })],
   ]);
-  const auth = new VivoAuth("https://vivo.test", impl, memoryStorage(), () => 1_000);
+  const auth = new VivoAuth("https://vivo.test", { fetchImpl: impl, storage: memoryStorage(), now: () => 1_000 });
   await assert.rejects(() => auth.signIn("t@example.com", "bad"), VivoAuthRejectedError);
+}
+
+// Embedded builds reuse the host web app's Supabase session for a ticket.
+{
+  const storage = memoryStorage();
+  storage.setItem("implicit-supabase-session", JSON.stringify({
+    accessToken: "host-at", refreshToken: "host-rt", expiresAt: 10_000_000, email: "t@example.com",
+  }));
+  const { impl } = fakeFetch([
+    ["/api/auth/supabase", (options) => {
+      assert.equal(options.headers.authorization, "Bearer host-at");
+      return jsonResponse(200, { ticket: "shared-tick" });
+    }],
+  ]);
+  const auth = new VivoAuth("", {
+    fetchImpl: impl, storage, now: () => 1_000,
+    sessionKeys: ["rh-vivo-session", "implicit-supabase-session"],
+  });
+  const activation = await auth.restore();
+  assert.equal(activation.ticket, "shared-tick", "reuses the host session with no second sign-in");
 }
 
 // Per-user database names are stable, distinct, and IndexedDB-safe.

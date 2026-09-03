@@ -5,17 +5,27 @@
    failure keeps the stored session so the next restore can retry. */
 
 const SESSION_KEY = "rh-vivo-session";
+/* The Vivo web app's own browser-session key. When embedded same-origin we
+   share sessionStorage with it, so an already-signed-in host means no second
+   sign-in on the canvas. */
+const HOST_SESSION_KEY = "implicit-supabase-session";
 const REFRESH_MARGIN_MS = 90_000;
 
 export class VivoAuthRejectedError extends Error {}
 
 export class VivoAuth {
-  /** @param {string} baseUrl @param {any} [fetchImpl] @param {any} [storage] @param {() => number} [now] */
-  constructor(baseUrl, fetchImpl = globalThis.fetch.bind(globalThis), storage = globalThis.sessionStorage, now = Date.now) {
+  /** @param {string} baseUrl @param {any} [options] */
+  constructor(baseUrl, {
+    fetchImpl = globalThis.fetch.bind(globalThis),
+    storage = globalThis.sessionStorage,
+    now = Date.now,
+    sessionKeys = [SESSION_KEY],
+  } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.fetchImpl = fetchImpl;
     this.storage = storage;
     this.now = now;
+    this.sessionKeys = sessionKeys;
   }
 
   /** @returns {Promise<{ticket: string, email: string} | null>} */
@@ -105,17 +115,22 @@ export class VivoAuth {
   }
 
   readStored() {
-    try {
-      const value = JSON.parse(this.storage.getItem(SESSION_KEY) ?? "null");
-      return value
-        && typeof value.accessToken === "string"
-        && typeof value.refreshToken === "string"
-        && Number.isFinite(value.expiresAt)
-        && typeof value.email === "string"
-        ? value
-        : null;
-    } catch {
-      return null;
+    for (const key of this.sessionKeys) {
+      try {
+        const value = JSON.parse(this.storage.getItem(key) ?? "null");
+        if (value
+          && typeof value.accessToken === "string"
+          && typeof value.refreshToken === "string"
+          && Number.isFinite(value.expiresAt)
+          && typeof value.email === "string") {
+          return value;
+        }
+      } catch {
+        // Try the next key.
+      }
     }
+    return null;
   }
 }
+
+export { HOST_SESSION_KEY, SESSION_KEY };

@@ -1,7 +1,9 @@
 let runtimePromise = null;
 let sourcePromise = null;
 
-const MERMAID_URL = "/mermaid.js";
+/* Resolve against the document base so an embedded build under a path prefix
+   (a <base> tag) loads its own copy; at the root this is still /mermaid.js. */
+const MERMAID_URL = new URL("mermaid.js", document.baseURI).href;
 
 export function loadMermaidRuntime() {
   if (globalThis.mermaid) return Promise.resolve(globalThis.mermaid);

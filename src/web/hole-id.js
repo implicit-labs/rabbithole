@@ -20,6 +20,8 @@ const NOUNS = Object.freeze([
   "waffle", "walnut", "whisker", "willow", "wonder", "wren", "yarrow", "zeppelin",
 ]);
 
+import { vivoBasePath } from "./vivo/config.js";
+
 const SUFFIX_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 export const WHIMSICAL_HOLE_ID_PATTERN = /^[a-z]+-[a-z]+-[a-z0-9]{6}$/;
 
@@ -38,7 +40,13 @@ export function createWhimsicalHoleId({ randomBytes = secureRandomBytes } = {}) 
 }
 
 export function holeIdFromPathname(pathname) {
-  const match = /^\/([^/]+)\/?$/.exec(String(pathname || ""));
+  let path = String(pathname || "");
+  const base = vivoBasePath();
+  if (base) {
+    if (path !== base && !path.startsWith(`${base}/`)) return "";
+    path = path.slice(base.length) || "/";
+  }
+  const match = /^\/([^/]+)\/?$/.exec(path);
   if (!match) return "";
   let candidate;
   try { candidate = decodeURIComponent(match[1]); } catch { return ""; }
@@ -49,7 +57,7 @@ export function pathnameForHole(holeId) {
   if (!WHIMSICAL_HOLE_ID_PATTERN.test(String(holeId || ""))) {
     throw new Error(`Invalid browser Rabbithole id: ${JSON.stringify(holeId)}`);
   }
-  return `/${holeId}`;
+  return `${vivoBasePath()}/${holeId}`;
 }
 
 function secureRandomBytes(length) {

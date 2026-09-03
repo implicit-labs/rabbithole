@@ -172,6 +172,8 @@ async function buildWebApp(assetDir) {
     define: {
       __RABBITHOLE_DEFAULT_PROXY_URL__: JSON.stringify(proxyConfig.defaultUrl),
       __VIVO_BASE_URL__: JSON.stringify(process.env.VIVO_BASE_URL || ""),
+      __VIVO_BASE_PATH__: JSON.stringify(process.env.VIVO_BASE_PATH || ""),
+      __VIVO_EMBEDDED__: JSON.stringify(process.env.VIVO_EMBEDDED || ""),
     },
     legalComments: "none",
     logLevel: "silent"
@@ -237,10 +239,15 @@ function buildWebIndexHtml({ proxyOrigin = "" } = {}, assetVersion = "") {
   if (!/^[a-f0-9]{12}$/.test(assetVersion)) throw new Error("Web asset version must be a 12-character SHA-256 prefix");
   const assetQuery = `?v=${assetVersion}`;
   const csp = webContentSecurityPolicy({ proxyOrigin, canonicalHostScript: CANONICAL_HOST_SCRIPT, initialThemeScript: INITIAL_THEME_SCRIPT });
+  // Embedded builds are served under a path prefix; a <base> makes every
+  // relative asset (app.js, styles, mermaid, pdf worker) resolve there, and
+  // the SPA still owns its subpaths through the host's rewrite.
+  const basePath = String(process.env.VIVO_BASE_PATH || "").trim().replace(/\/+$/, "");
+  const baseTag = basePath ? `<base href="${basePath}/">\n` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
-<script id="canonical-host-script">${CANONICAL_HOST_SCRIPT}</script>
+${baseTag}<script id="canonical-host-script">${CANONICAL_HOST_SCRIPT}</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${csp}">

@@ -4,8 +4,8 @@
    no-op and the app behaves exactly like upstream. */
 
 import { buttonMarkup } from "../../core/html/markup.js";
-import { VivoAuth } from "./auth.js";
-import { vivoBaseUrl, vivoEnabled } from "./config.js";
+import { HOST_SESSION_KEY, SESSION_KEY, VivoAuth } from "./auth.js";
+import { vivoBaseUrl, vivoEmbedded, vivoEnabled } from "./config.js";
 
 const GATE_STYLES = `
 .vivo-gate { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg, #faf7f0); z-index: 999; }
@@ -25,7 +25,10 @@ const GATE_STYLES = `
  */
 export async function requireVivoSession() {
   if (!vivoEnabled()) return null;
-  const auth = new VivoAuth(vivoBaseUrl());
+  // Embedded in the Vivo web app: reuse the host's Supabase session (shared
+  // same-origin sessionStorage) before falling back to our own.
+  const sessionKeys = vivoEmbedded() ? [SESSION_KEY, HOST_SESSION_KEY] : [SESSION_KEY];
+  const auth = new VivoAuth(vivoBaseUrl(), { sessionKeys });
   const restored = await auth.restore();
   if (restored) return { ...restored, auth };
   const activation = await promptSignIn(auth);
